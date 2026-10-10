@@ -4,7 +4,7 @@
 
 **Kobalt is an experimental EPUB reader with a CREngine renderer and a Qt reading interface, with a focus on speed and an excellent user experience.**
 
-The reader app and the UI stands on its own, and as such is planned to be ported to various platforms. On Android, it runs as a standalone app, and on Kobo it runs as a modification inside of Kobo's own OS.
+The reader app is its own thing, and as such is planned to be ported to various platforms. On Android, it runs as a standalone app, and on Kobo it runs somewhat integrated into Kobo's own OS.
 
 ### How does the Kobo version work?
 
@@ -38,12 +38,12 @@ The easiest way is via [the website](https://kobalt.nicoverbruggen.be). Click on
 
 There are two installation packages: one for the firmware 4.x line, and one for the latest beta, which is currently at version 6.x. Choose the right one for your Kobo, so check what software version you have installed first!
 
-| Package | Firmware | Latest at time of testing |
-|---|---|---|
-| `kobalt-qt5.zip` | 4.38.21908 and later 4.x | Stable Kobo release (4.38 or 4.45)
-| `kobalt-qt6.zip` | 5.18 and later 5.x, and 6.x | Beta Kobo release (6.0)*
+| Package | Firmware
+|---|---|
+| `Kobalt-qt5.zip` | 4.38.21908 and later 4.x | Stable Kobo release (4.38 or 4.45)
+| `Kobalt-qt6.zip` | 5.18 and later 5.x, including 6.0
 
-_(*) Due to how software updates work on Kobo OS 6, you may need a future version of [NickelModManager](https://github.com/nicoverbruggen/NickelModManager) to avoid needing to reinstall mods._
+_(*) Due to how software updates work on Kobo OS 6, you may need a future version of [NickelModManager](https://github.com/nicoverbruggen/NickelModManager) to avoid needing to reinstall mods. The first releases may not be available for Qt 6 (Kobo OS 6) yet._
 
 1. Connect your Kobo over USB and extract the ZIP package on your computer. Show hidden files so you can see `.adds` and `.kobo`.
 2. Copy the complete `.adds` folder to the root of the Kobo drive. Merge it with the existing folder and replace matching package files. Keep other apps, settings and reading data.

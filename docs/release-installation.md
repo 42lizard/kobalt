@@ -1,14 +1,16 @@
 ## Installation
 
-Download the complete ZIP package for your Kobo firmware:
+Download the package for your Kobo firmware:
 
 {{package_links}}
 
-1. Connect your Kobo over USB and extract the ZIP package on your computer. Show hidden files so you can see `.adds` and `.kobo`.
-2. Copy the complete `.adds` folder to the root of the Kobo drive. Merge it with the existing folder and replace matching package files. Keep other apps, settings and reading data.
-3. Copy the complete `.kobo` folder from the extracted package to the same drive root. Merge it with the existing folder.
-4. Eject the Kobo safely, disconnect USB and let it install the update.
+### Manual instructions
 
-Copy every file supplied in the ZIP, keeping its folder path. Copy `.adds` before `.kobo` so the assets are present when the update starts. Do not copy only the `.tgz` file or unpack it yourself.
+1. Connect your Kobo over USB and extract the ZIP on your computer. Show hidden files to see `.adds` and `.kobo`.
+2. Copy `.adds` to the root of the Kobo drive. Merge folders and replace matching package files. Keep other apps, settings and reading data.
+3. Then copy `.kobo` to the same drive root, merging folders again.
+4. Eject the Kobo safely, disconnect USB and let the update install.
 
-You can verify the downloads against [SHA256SUMS]({{checksums_url}}). [BUILD-INFO.json]({{build_info_url}}) records the source commit and build details for {{tag}}.
+Copy both folders in that order. Leave the `.tgz` file inside `.kobo` compressed.
+
+[Checksums]({{checksums_url}}) · [Build information]({{build_info_url}})

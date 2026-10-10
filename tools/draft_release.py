@@ -30,7 +30,7 @@ def release_notes(root, tag, repository):
     fields = {'tag': tag, 'repository': repository, 'release_url': release_url, 'download_url': download_url,
               'source_url': download_url + '/' + ARTIFACTS['source'],
               'checksums_url': download_url + '/SHA256SUMS', 'build_info_url': download_url + '/BUILD-INFO.json'}
-    firmware = {'qt5': 'firmware 4.38.21908 and later 4.x', 'qt6': 'firmware 5.18 and later 5.x, and 6.x'}
+    firmware = {'qt5': 'firmware 4.38 and later', 'qt6': 'firmware 5.18 and later 5.x, and 6.x'}
     packages = []
     for key, name in artifacts.items():
         if key in firmware:
@@ -51,9 +51,7 @@ def release_notes(root, tag, repository):
     if '{{' in installation or '}}' in installation:
         raise ValueError('Malformed release installation field')
     return notes + '\n\n' + installation + '\n\n' + (
-        f'[Kobalt-source.tar.gz]({fields["source_url"]}) contains the application source, build recipes, '
-        'dependency source archives, font assets and license notices. Use this source bundle with the binaries; '
-        'the automatic GitHub source download omits downloaded dependencies.\n')
+        f'[Source code and dependencies]({fields["source_url"]})\n')
 
 
 def validate(root, directory, tag, artifacts=ARTIFACTS):
