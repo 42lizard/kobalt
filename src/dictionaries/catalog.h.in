@@ -1,0 +1,2 @@
+#pragma once
+namespace kobalt { inline constexpr char dictionaryCatalog[] = R"catalog(@DICTIONARY_CATALOG@)catalog"; }

@@ -1,0 +1,292 @@
+#include "interfaces/reader/ui/controls/buttons.h"
+#include "interfaces/reader/ui/controls/icons.h"
+#include "interfaces/reader/ui/controls/text.h"
+#include "interfaces/reader/ui/controls/panels.h"
+#include "interfaces/reader/ui/dialogs/modals.h"
+#include "interfaces/reader/ui/style/theme.h"
+#include "support/strings.h"
+#include "opening.h"
+#include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/styles.h"
+#include <QResizeEvent>
+#include <QShowEvent>
+#include <QHideEvent>
+#include <QLocale>
+#include <QTimer>
+#include "interfaces/reader/ui/style/metrics.h"
+#include "platform/api/kobo_refresh.h"
+#include <QApplication>
+#include <QPointer>
+#include <QProgressBar>
+#include <QPainter>
+#include <QScreen>
+
+namespace kobalt {
+namespace {
+class OpeningDialog final : public QDialog {
+public:
+    OpeningDialog(QWidget *background, bool dark, PresentationFactory makePresentation, bool embedded = false)
+        : QDialog(background, embedded ? Qt::Widget : Qt::Dialog | Qt::FramelessWindowHint),
+          presentation(makePresentation(this)), embedded(embedded) {
+        Q_ASSERT(presentation);
+        // QDialog promotes Qt::Widget to a dialog during construction. Embed
+        // it afterward so hiding the Android host also hides this view.
+        if (embedded)
+            setWindowFlags(Qt::Widget);
+        setObjectName("rrOpening");
+        setWindowModality(embedded ? Qt::NonModal : Qt::ApplicationModal);
+        setProperty("reader_dark", dark);
+        setAutoFillBackground(true);
+        QPalette colors = palette();
+        colors.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        colors.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        colors.setColor(QPalette::Midlight, dark ? QColor(44, 44, 44) : QColor(211, 211, 211));
+        setPalette(colors);
+        setFont(ui::interfaceFont());
+        // The card stylesheet otherwise uses the application font on Qt 6.
+        ui::readerStyle(this, ui::styles::reader());
+        brand = new QLabel(strings::get("app.wordmark"), this);
+        brand->setObjectName("rrOpeningBrand");
+        brand->setAlignment(Qt::AlignCenter);
+        label = new QLabel(strings::get("opening.loading"), this);
+        label->setObjectName("rrOpeningLabel");
+        label->setAlignment(Qt::AlignCenter);
+        progress = new QProgressBar(this);
+        progress->setObjectName("rrOpeningProgress");
+        progress->setRange(0, 100);
+        progress->setValue(0);
+        progress->setTextVisible(false);
+        ui::readerStyle(
+            progress,
+            "QProgressBar{border:0;padding:0;margin:0;min-height:0;background:palette(midlight);} QProgressBar::chunk{background:palette(window-text);}");
+        // Font capitalization does not reach this dialog's labels, so set the
+        // caption's capitals in the text itself.
+        hint = new QLabel(QLocale().toUpper(strings::get("opening.may_take_a_while")), this);
+        hint->setObjectName("rrOpeningHint");
+        hint->setAlignment(Qt::AlignCenter);
+        hint->hide();
+        hintTimer.setSingleShot(true);
+        hintTimer.setTimerType(Qt::PreciseTimer);
+        connect(&hintTimer, &QTimer::timeout, this, [this] {
+            if (isVisible())
+                hint->show();
+        });
+        cancel = new ui::BackButton(QString(), this);
+        cancel->setObjectName("rrCancelOpening");
+        cancel->setAccessibleName(strings::get("common.cancel"));
+        cancel->setVisible(!embedded);
+        connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
+        detail = new QLabel(this);
+        detail->setObjectName("rrOpeningDetail");
+        detail->setAlignment(Qt::AlignCenter);
+        detail->setWordWrap(true);
+        detail->hide();
+        failureDialog =
+            new ui::ChoiceModal(this, {strings::get("opening.failed_detail"), strings::get("opening.failed"), {}},
+                                {strings::get("opening.go_back"), "rrOpeningBack"},
+                                {strings::get("opening.try_native"), "rrOpeningNative"});
+        failureDialog->setObjectName("rrOpeningFailure");
+        retry = failureDialog->primaryButton();
+        back = failureDialog->secondaryButton();
+        connect(retry, &QPushButton::clicked, this, &QDialog::accept);
+        connect(back, &QPushButton::clicked, this, &QDialog::reject);
+        for (auto *widget : findChildren<QWidget *>())
+            platform::textRefresh(widget);
+        platform::textRefresh(this);
+    }
+    void showFallback(OpeningFallback state) {
+        fallback = true;
+        automatic = state != OpeningFallback::Failure;
+        const bool protectedBook = state == OpeningFallback::Protected;
+        protectedIcon = protectedBook;
+        hintTimer.stop();
+        progress->hide();
+        cancel->hide();
+        label->setText(automatic ? strings::get("opening.native") : strings::get("opening.failed"));
+        detail->setText(protectedBook ? strings::get("opening.protected")
+                        : automatic   ? strings::get("opening.remembered")
+                                      : strings::get("opening.failed_detail"));
+        detail->show();
+        hint->setText(QLocale().toUpper(strings::get("opening.continuing")));
+        hint->setVisible(automatic);
+        brand->setVisible(automatic);
+        label->setVisible(automatic);
+        detail->setVisible(automatic);
+        failureDialog->setVisible(!automatic);
+        if (!automatic) {
+            failureDialog->fitCard();
+            failureDialog->raise();
+            failureDialog->setFocus();
+        }
+        layoutWidgets();
+        update();
+    }
+    void reject() override {
+        if (embedded)
+            emit rejected();
+        else
+            QDialog::reject();
+    }
+    void accept() override {
+        if (!fallback || !parentWidget()) {
+            QDialog::accept();
+            return;
+        }
+        presentation->acceptHandoff(*this, [this] {
+            QDialog::accept();
+        });
+    }
+    QProgressBar *progress;
+
+protected:
+    void showEvent(QShowEvent *event) override {
+        QDialog::showEvent(event);
+        if (!fallback) {
+            hint->hide();
+            hintTimer.start(ui::metrics::opening::hintDelayMilliseconds);
+        }
+    }
+    void hideEvent(QHideEvent *event) override {
+        hintTimer.stop();
+        hint->hide();
+        QDialog::hideEvent(event);
+    }
+    void paintEvent(QPaintEvent *event) override {
+        QDialog::paintEvent(event);
+        namespace m = ui::metrics::opening;
+        QPainter painter(this);
+        // Nickel's Qt5 stylesheet paints dialogs white even with a dark palette.
+        // Own the whole splash background, including the area behind the logo.
+        painter.fillRect(rect(), palette().color(QPalette::Window));
+        if (fallback && !automatic)
+            return;
+        painter.translate(origin());
+        painter.scale(scale(), scale());
+        const auto ink = palette().color(QPalette::WindowText);
+        ui::paintBrandIcon(painter, fallback && !automatic ? m::failureBrandIcon : m::icon, ink);
+        if (fallback) {
+            const QRectF bounds = automatic ? m::handoffIcon : m::failureIcon;
+            ui::paintOpeningIcon(painter, protectedIcon ? ui::ControlIcon::Lock : ui::ControlIcon::FileWarning, bounds,
+                                 ink);
+        }
+    }
+    void resizeEvent(QResizeEvent *event) override {
+        QDialog::resizeEvent(event);
+        layoutWidgets();
+    }
+    void layoutWidgets() {
+        namespace m = ui::metrics::opening;
+        const auto place = [this](QWidget *widget, const QRectF &rect) {
+            const auto offset = origin();
+            const auto factor = scale();
+            widget->setGeometry(qRound(offset.x() + rect.x() * factor), qRound(offset.y() + rect.y() * factor),
+                                qRound(rect.width() * factor), qRound(rect.height() * factor));
+        };
+        const auto textStyle = [this](QLabel *widget, qreal pixels, bool italic) {
+            const auto font = ui::brandFont(qMax(1, qRound(pixels * scale())), italic);
+            widget->setFont(font);
+            ui::readerStyle(
+                widget,
+                QString(
+                    "background:palette(window);color:palette(window-text);font-family:'%1';font-size:%2px;font-weight:400;font-style:%3;")
+                    .arg(font.family())
+                    .arg(font.pixelSize())
+                    .arg(italic ? "italic" : "normal"));
+        };
+        textStyle(brand, m::brandText, false);
+        textStyle(label,
+                  !fallback   ? m::labelText
+                  : automatic ? m::handoffText
+                              : m::failureText,
+                  !fallback || automatic);
+        // A caption in capitals, like the reader's other captions.
+        ui::captionLabel(hint, qMax(1, qRound(m::hintText * scale())));
+        place(hint, m::hint);
+        progress->setFixedHeight(qMax(1, qRound(m::progress.height() * scale())));
+        place(brand, fallback && !automatic ? m::failureBrand : m::brand);
+        place(label, !fallback ? m::label : automatic ? m::handoffLabel : m::failureLabel);
+        place(progress, m::progress);
+        if (fallback) {
+            const int pixels = qMax(1, qRound(m::detailText * scale()));
+            detail->setFont(ui::interfaceFont(pixels));
+            ui::readerStyle(
+                detail,
+                QString("background:palette(window);color:palette(window-text);font-size:%1px;font-family:'%2';")
+                    .arg(pixels)
+                    .arg(ui::interfaceFontFamily()));
+            place(detail, automatic ? m::handoffDetail : m::failureDetail);
+            if (automatic)
+                place(hint, m::handoffHint);
+        }
+        namespace n = ui::metrics::navigation;
+        cancel->setGeometry(n::backLeft, n::headingTop, n::height, n::height);
+        ui::readerStyle(
+            cancel,
+            "QPushButton{min-height:0;border:none;padding:0;background:palette(window);color:palette(window-text);} QPushButton:pressed{background:palette(midlight);}");
+    }
+
+private:
+    qreal scale() const {
+        return qMin(width() / ui::metrics::opening::referenceWidth, height() / ui::metrics::opening::referenceHeight);
+    }
+    QPointF origin() const {
+        return {(width() - ui::metrics::opening::referenceWidth * scale()) / 2,
+                (height() - ui::metrics::opening::referenceHeight * scale()) / 2};
+    }
+    QLabel *brand, *label, *hint, *detail;
+    QPushButton *retry, *back;
+    ui::ChoiceModal *failureDialog;
+    bool fallback = false, automatic = false, protectedIcon = false;
+    std::unique_ptr<WindowPresentation> presentation;
+    const bool embedded;
+    QTimer hintTimer;
+    ui::Button *cancel;
+};
+
+class OpeningView final : public ReaderOpeningView {
+public:
+    OpeningView(QWidget *background, const QJsonObject &preferences, PresentationFactory presentation,
+                bool embedded = false)
+        : dialog(new OpeningDialog(background, preferences.value("dark_mode").toBool(false), std::move(presentation),
+                                   embedded)) {
+        if (embedded)
+            return;
+        auto *screen = QGuiApplication::primaryScreen();
+        dialog->setGeometry(screen->geometry());
+        QObject::connect(screen, &QScreen::geometryChanged, dialog, [window = dialog](const QRect &geometry) {
+            if (window)
+                window->setGeometry(geometry);
+        });
+    }
+    ~OpeningView() override {
+        if (dialog) {
+            dialog->hide();
+            dialog->deleteLater();
+        }
+    }
+    QDialog *window() const override {
+        return dialog;
+    }
+    void showFallback(OpeningFallback state) override {
+        if (dialog)
+            dialog->showFallback(state);
+    }
+    void setProgress(int percent) override {
+        if (dialog)
+            dialog->progress->setValue(qMax(dialog->progress->value(), percent));
+    }
+
+private:
+    QPointer<OpeningDialog> dialog;
+};
+}
+std::unique_ptr<ReaderOpeningView> createOpening(QWidget *background, const QJsonObject &preferences,
+                                                 PresentationFactory presentation) {
+    return std::make_unique<OpeningView>(background, preferences, std::move(presentation));
+}
+std::unique_ptr<ReaderOpeningView> createEmbeddedOpening(QWidget *parent, PresentationFactory presentation) {
+    QJsonObject preferences;
+    preferences["dark_mode"] = ui::darkTheme(parent);
+    return std::make_unique<OpeningView>(parent, preferences, std::move(presentation), true);
+}
+}

@@ -1,0 +1,132 @@
+#include "reading/appearance_settings.h"
+#include "support/qt_compat.h"
+#include "check.h"
+#include <QJsonArray>
+#include <cstdio>
+
+using namespace kobalt;
+
+int main() {
+    // Appearance settings decide the layout. The list must stay complete, because a
+    // missing key would let a retained layout survive a changed setting.
+    require(appearance::keys.size() == 15, "The appearance keys changed without this check");
+
+    const auto from = qt::object({{"font_pixels", 40},
+                                  {"line_spacing", QJsonValue(QJsonValue::Null)},
+                                  {"font_face", "Libron"},
+                                  {"dark_mode", true},
+                                  {"show_header", false}});
+    auto to =
+        qt::object({{"font_pixels", 30}, {"margin_pixels", 12}, {"hyphenation", "on"}, {"page_animations", true}});
+    appearance::copy(to, from);
+    require(to.value("font_pixels").toInt() == 40 && to.value("font_face").toString() == "Libron" &&
+                to.value("dark_mode").toBool(),
+            "Copy lost an appearance value");
+    // A null value stays null, and a key the source lacks is removed, so the
+    // engine applies its own default instead of an old value.
+    require(to.contains("line_spacing") && to.value("line_spacing").isNull(), "Copy changed a null value");
+    require(!to.contains("margin_pixels") && !to.contains("hyphenation"), "Copy kept a value the source does not have");
+    // Settings outside the appearance keys belong to other owners.
+    require(to.value("page_animations").toBool() && !to.contains("show_header"),
+            "Copy touched a setting it does not own");
+
+    require(appearance::same(to, from), "Copied settings do not compare equal");
+    for (const auto *key : {"top_margin_pixels", "bottom_margin_pixels"}) {
+        auto vertical = from;
+        vertical[key] = 36;
+        require(!appearance::same(vertical, from), "Vertical margin changes reused an old layout");
+        auto copied = from;
+        appearance::copy(copied, vertical);
+        require(copied.value(key).toInt() == 36, "Appearance copy lost a vertical margin");
+    }
+    auto bionic = from;
+    bionic["bionic_reading"] = QStringLiteral("bold");
+    require(!appearance::same(bionic, from), "Bionic mode changes reused an old layout");
+    auto bionicCopy = from;
+    appearance::copy(bionicCopy, bionic);
+    require(bionicCopy.value("bionic_reading").toString() == "bold", "Appearance copy lost Bionic mode");
+    auto optical = from;
+    optical["font_optical_size"] = 12;
+    require(!appearance::same(optical, from), "Optical size reused an old layout");
+    auto axis = from;
+    axis["font_weight"] = 450;
+    require(!appearance::same(axis, from), "Variable weight reused an old layout");
+    auto changed = to;
+    changed["weight_steps"] = 1;
+    require(!appearance::same(changed, from), "A changed key compared equal");
+    auto missing = from;
+    missing.remove("line_spacing");
+    require(!appearance::same(missing, from), "A missing key compared equal to a null one");
+    auto other = from;
+    other["show_header"] = true;
+    require(appearance::same(other, from), "A setting outside the keys changed the comparison");
+
+    QJsonObject fresh;
+    appearance::applyFontDefault(fresh, qt::object({{"default_font_face", "NV Ancizar Serif"}}));
+    require(fresh["font_face"].toString() == "NV Ancizar Serif" &&
+                fresh["default_font_face"].toString() == "NV Ancizar Serif",
+            "New books did not use the custom default");
+    fresh["font_face"] = QStringLiteral("");
+    appearance::applyFontDefault(fresh, {});
+    require(fresh["font_face"].toString().isEmpty() && fresh["default_font_face"].toString() == defaultFontFace,
+            "Default changes replaced Publisher Fonts");
+    fresh["font_face"] = QStringLiteral("NV Literata");
+    appearance::applyFontDefault(fresh, qt::object({{"default_font_face", "NV Ancizar Serif"}}));
+    require(fresh["font_face"].toString() == "NV Literata", "Default changes replaced an explicit book font");
+    auto newDefault = from;
+    newDefault["default_font_face"] = QStringLiteral("NV Ancizar Serif");
+    require(!appearance::same(newDefault, from), "Default changes did not invalidate the layout");
+
+    const auto global = qt::object(
+        {{"show_clock", true}, {"header_text_size", "small"}, {"bionic_reading", "bold"}, {"page_animations", true}});
+    const auto book = qt::object({{"show_clock", false}, {"header_text_size", "large"}, {"bionic_reading", "off"}});
+    const auto preferences = appearance::readerPreferences(global, book);
+    require(!preferences["show_clock"].toBool() && preferences["header_text_size"].toString() == "large",
+            "Book layout did not override legacy global settings");
+    require(preferences["bionic_reading"].toString() == "bold", "Book state overrode global Bionic reading");
+    const auto persistedGlobal = appearance::globalPreferences(preferences);
+    require(!persistedGlobal.contains("show_clock") && !persistedGlobal.contains("header_text_size") &&
+                persistedGlobal["page_animations"].toBool(),
+            "Global save mixed book layout with overflow settings");
+    for (const auto density : {212, 227, 265, 300}) {
+        readingPpi.store(density);
+        require(defaultFontPixels() == halfPointPixels(22), "Default text size is not 11 points");
+        require(minimumFontPixels() == halfPointPixels(14) && maximumFontPixels() == halfPointPixels(40),
+                "Engine size limits do not match the 7 to 20 point controls");
+    }
+    readingPpi.store(300);
+    const auto defaults = appearance::typographyDefaults();
+    require(defaults.value("font_face").toString() == defaultFontFace &&
+                defaults.value("font_pixels").toInt() == defaultFontPixels() &&
+                defaults.value("line_spacing").toInt() == defaultLineSpacing &&
+                defaults.value("margin_pixels").toInt() == defaultMarginPixels() &&
+                defaults.value("top_margin_pixels").toInt() == 24 &&
+                defaults.value("bottom_margin_pixels").toInt() == 24 &&
+                defaults.value("text_alignment").toString() == "left" && defaults.value("weight_steps").toInt() == 0 &&
+                defaults.value("font_weight").toInt() == 450 && defaults.value("hyphenation").toString() == "off",
+            "Typography defaults changed");
+    require(!defaults.contains("dark_mode") && !defaults.contains("smooth_images") &&
+                !defaults.contains("bionic_reading") && defaults.size() == 11,
+            "Restoring typography must not change display choices");
+    readingPpi.store(212);
+    require(appearance::typographyDefaults().value("font_pixels").toInt() == defaultFontPixels(),
+            "Default text size did not follow the screen density");
+    readingPpi.store(300);
+    const auto benchmark = appearance::benchmarkTypography("file:///mnt/onboard/kobalt-benchmark.kepub.epub");
+    require(benchmark.size() == 15 && benchmark.value("font_face").toString().isEmpty() &&
+                benchmark.value("font_pixels").toInt() == defaultFontPixels() &&
+                benchmark.value("margin_pixels").toInt() == 60 && benchmark.value("top_margin_pixels").toInt() == 60 &&
+                benchmark.value("line_spacing").toInt() == 120 && !benchmark.value("dark_mode").toBool() &&
+                benchmark.value("hyphenation").toString() == "off",
+            "Benchmark typography changed");
+    require(appearance::benchmarkTypography("file:///mnt/onboard/other.epub").isEmpty() &&
+                appearance::benchmarkTypography("file:///mnt/onboard/KOBALT-benchmark.kepub.epub").isEmpty(),
+            "Benchmark profile matched another book");
+    readingPpi.store(212);
+    require(appearance::benchmarkTypography("file:///mnt/onboard/kobalt-benchmark.kepub.epub")
+                    .value("font_pixels")
+                    .toInt() == defaultFontPixels(),
+            "Benchmark profile did not follow screen density");
+    std::puts("PASS: appearance keys, copy, comparison and typography defaults");
+    return 0;
+}

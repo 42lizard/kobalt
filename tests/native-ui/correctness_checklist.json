@@ -1,0 +1,664 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "opening-readiness",
+      "platform": "native",
+      "expected": "Normal, long, linked and multilingual EPUBs open, turn pages, close and restore their saved passage.",
+      "assertions": [
+        "desktop-window:canvasBookLifecycle"
+      ],
+      "captures": [
+        "reading",
+        "stats-dense",
+        "links",
+        "international-arabic"
+      ]
+    },
+    {
+      "id": "opening-recovery",
+      "platform": "native",
+      "expected": "Failed and canceled opens leave the reader able to reopen a valid book.",
+      "assertions": [
+        "reader-window:failureThenReopen",
+        "reader-window:cancelAndReopen",
+        "desktop-window:failedBookAndCloseReturnToStart"
+      ],
+      "captures": [
+        "dialogs"
+      ]
+    },
+    {
+      "id": "toolbar-panels",
+      "platform": "native",
+      "expected": "Panels compose correctly, switch without stale menus, and overflow closes the active panel.",
+      "assertions": [
+        "reader-window:navigationCompositionAndRelease",
+        "reader-window:overflowClosesCurrentPanel"
+      ],
+      "captures": [
+        "reading",
+        "settings",
+        "layout",
+        "typography",
+        "search",
+        "stats",
+        "light"
+      ]
+    },
+    {
+      "id": "modal-input",
+      "platform": "native",
+      "expected": "Visible enabled input reaches its control; hidden, disabled and covered controls do not activate. Modal dismissal and bounds survive both themes and resize.",
+      "assertions": [
+        "reader-window:canvasInputRespectsModalBarrier",
+        "reader-window:settingsDefaultsDraft"
+      ],
+      "captures": []
+    },
+    {
+      "id": "control-lifecycle",
+      "platform": "native",
+      "expected": "Silent setters, pressed-state cancellation, focus, drag-out and callback deletion preserve the control contracts.",
+      "assertions": [
+        "reader-ui-components"
+      ],
+      "captures": []
+    },
+    {
+      "id": "chapters-links",
+      "platform": "native",
+      "expected": "Chapter rows open the selected passage, close reading controls and restore the passage after reopening. Chapter paging, link reveal and return preserve their existing behavior.",
+      "assertions": [
+        "reader-window:chapterRowNavigatesAndPersists",
+        "reader-window:revealLinksWithoutReflow",
+        "reader-window:followLinkAndReturn"
+      ],
+      "captures": [
+        "chapters",
+        "links"
+      ]
+    },
+    {
+      "id": "footnotes",
+      "platform": "native",
+      "expected": "A real footnote opens preview and passage with a return action.",
+      "assertions": [
+        "reader-window:followLinkAndReturn"
+      ],
+      "captures": [
+        "footnotes"
+      ]
+    },
+    {
+      "id": "external-confirmation",
+      "platform": "native",
+      "expected": "An external website needs confirmation; cancel does not launch it and accept calls the controlled browser service.",
+      "assertions": [
+        "reader-window:websiteRequiresConfirmation"
+      ],
+      "captures": [
+        "links"
+      ]
+    },
+    {
+      "id": "search",
+      "platform": "native",
+      "expected": "Empty, paged, missing and stale results behave correctly; choosing a result can return to the initial passage.",
+      "assertions": [
+        "reader-window:searchAndBookmark",
+        "reader-window:staleSearchReplyIgnored",
+        "reader-window:searchResultThenReturnToStart"
+      ],
+      "captures": [
+        "search"
+      ]
+    },
+    {
+      "id": "dictionary-lookup",
+      "platform": "native",
+      "expected": "Book-text selection, definition paging, dictionary switching and saved choices work with a controlled service; unavailable dictionaries show an error.",
+      "assertions": [
+        "reader-window:dictionaryLookupDismisses",
+        "reader-window:dictionarySuccessChoicePersists"
+      ],
+      "captures": [
+        "dictionary"
+      ]
+    },
+    {
+      "id": "dictionary-management",
+      "platform": "native",
+      "expected": "Controlled install, transfer, removal and failure states retain correct actions through resize and navigation.",
+      "assertions": [
+        "reader-window:dictionaryManagementView",
+        "reader-window:dictionaryTransferSurvivesNavigationAndResize",
+        "reader-window:dictionaryFailedDownloadReturnsToGet"
+      ],
+      "captures": [
+        "settings"
+      ]
+    },
+    {
+      "id": "bookmarks",
+      "platform": "native",
+      "expected": "Adding, inspecting, canceling and confirming removal update the isolated saved store; reopened lists and readers retain the result.",
+      "assertions": [
+        "reader-window:searchAndBookmark",
+        "reader-window:bookmarkToggleAndFailedSave",
+        "reader-window:bookmarksMergeAfterLayoutChange",
+        "reader-window:exitThroughReaderAndReopen"
+      ],
+      "captures": [
+        "bookmarks"
+      ]
+    },
+    {
+      "id": "font-defaults",
+      "platform": "native",
+      "expected": "Font source pages and custom defaults remain selectable and persistent.",
+      "assertions": [
+        "reader-window:fontDefaultPersistence"
+      ],
+      "captures": [
+        "typography",
+        "embedded-fonts"
+      ]
+    },
+    {
+      "id": "appearance-position",
+      "platform": "native",
+      "expected": "Font, size, weight, Bionic and layout changes finish, preserve position and retain drafts on failed writes.",
+      "assertions": [
+        "reader-window:appearanceApplyOnNavigation",
+        "reader-window:bionicModesAndThickness",
+        "reader-window:appearanceWriteFailureRetainsDraft",
+        "reader-window:appearanceRelayoutPreservesPassage"
+      ],
+      "captures": [
+        "typography",
+        "bionic",
+        "layout"
+      ]
+    },
+    {
+      "id": "appearance-lifecycle",
+      "platform": "native",
+      "expected": "Sleep, close and failed previews cancel safely without losing the draft or blocking exit.",
+      "assertions": [
+        "reader-window:appearanceSleepRetainsDraft",
+        "reader-window:appearanceCloseDuringPreview",
+        "reader-window:appearanceFailedPreviewDismisses",
+        "reader-window:appearanceApplyFailureCanExit"
+      ],
+      "captures": []
+    },
+    {
+      "id": "settings",
+      "platform": "native",
+      "expected": "All settings tabs, defaults, absent capabilities and compact measurement retain their presentation and behavior. Refresh choices update their caption, dismiss correctly and persist when settings closes, including after reopening the book.",
+      "assertions": [
+        "reader-window:settingsPageComposition",
+        "reader-window:settingsContentMeasurement",
+        "reader-window:settingsWithoutDictionaryDownloads",
+        "reader-window:settingsDefaultsDraft",
+        "desktop-window:hiddenDeviceOptionsKeepCompactRows",
+        "desktop-window:settingsRowsDrawBottomBorders",
+        "reader-window:screenRefreshChoicePersistsAndDismisses"
+      ],
+      "captures": [
+        "settings"
+      ]
+    },
+    {
+      "id": "stats-long-content",
+      "platform": "native",
+      "expected": "Ordinary and hundred-chapter statistics, long acknowledgments, licenses and reachable dialogs remain readable.",
+      "assertions": [
+        "reader-window:statusDividerFollowsPanelPlacement"
+      ],
+      "captures": [
+        "stats",
+        "stats-dense",
+        "about",
+        "dialogs"
+      ]
+    },
+    {
+      "id": "theme-size-stacking",
+      "platform": "native",
+      "expected": "Theme replay, narrow/wide relayout, dropdown borders and popup placement preserve clipping and stacking.",
+      "assertions": [
+        "reader-window:chromeSizePopoverCoversPanelBorder",
+        "reader-window:searchClearConstructionAndReplay",
+        "desktop-window:resizeAndNavigate",
+        "desktop-window:fontHoverKeepsHeaderBorder",
+        "desktop-window:nativeUiPreferencesPersist"
+      ],
+      "captures": [
+        "settings",
+        "layout",
+        "search"
+      ]
+    },
+    {
+      "id": "brightness-simulation",
+      "platform": "native",
+      "expected": "Edge swipes change brightness and warmth with feedback. Suspension and reading controls reject starts; cancellation restores the original light and automatic warmth. Failed warmth saves leave persisted warmth unchanged and later gestures remain usable.",
+      "assertions": [
+        "reader-window-device:deviceCapabilities",
+        "reader-window:lightGesturesRestoreAndRejectBlockedStarts"
+      ],
+      "captures": [
+        "light"
+      ]
+    },
+    {
+      "id": "sync-simulation",
+      "platform": "native",
+      "expected": "Controlled incoming positions offer keep/go and retain an unavailable-position error state.",
+      "assertions": [
+        "reader-window:progressChoiceKeepAndGo",
+        "reader-window:progressChoiceUnavailablePosition"
+      ],
+      "captures": [
+        "sync"
+      ]
+    },
+    {
+      "id": "android-reader",
+      "platform": "android",
+      "expected": "Disposable emulator checks actual document picker, granted content URIs, reader input, failure recovery, saved settings and process-death restoration.",
+      "gate": "android-reader"
+    },
+    {
+      "id": "android-sizes",
+      "platform": "android",
+      "expected": "Seven phone, reader and tablet profiles cover portrait, landscape, cutouts, safe areas and distinct device pixel ratios.",
+      "gate": "android-sizes"
+    },
+    {
+      "id": "virtual-firmware4",
+      "platform": "virtual",
+      "expected": "Firmware 4 control, menu-layout, theme, popup-layering and panel-transition scenarios pass on isolated devices.",
+      "gate": "virtual-firmware4"
+    },
+    {
+      "id": "virtual-firmware6",
+      "platform": "virtual",
+      "expected": "Firmware 6 control, menu-layout, theme, popup-layering and panel-transition scenarios pass on isolated devices.",
+      "gate": "virtual-firmware6"
+    },
+    {
+      "id": "qt5-arm",
+      "platform": "qt5",
+      "expected": "Hardware-target Qt5 build and all ARM checks pass.",
+      "gate": "qt5-arm"
+    },
+    {
+      "id": "qt6-arm",
+      "platform": "qt6",
+      "expected": "Hardware-target Qt6 build and all ARM checks pass.",
+      "gate": "qt6-arm"
+    },
+    {
+      "id": "portable",
+      "platform": "portable",
+      "expected": "The complete public portable suite passes.",
+      "gate": "portable"
+    },
+    {
+      "id": "private-host-unit",
+      "platform": "private",
+      "expected": "The complete private host and Linux unit suites pass.",
+      "gate": "private-host-unit"
+    },
+    {
+      "id": "native-wrapper",
+      "platform": "native",
+      "expected": "The selected-source native wrapper test suite passes.",
+      "gate": "native-wrapper"
+    },
+    {
+      "id": "visual-parity",
+      "platform": "visual",
+      "expected": "Complete 300/212 ppi native capture pairs and focused 167 ppi rounding pairs match or have individually explained differences.",
+      "gate": "visual-parity",
+      "captures": [
+        "about",
+        "bionic",
+        "bookmarks",
+        "chapters",
+        "dialogs",
+        "dictionary",
+        "embedded-fonts",
+        "footnotes",
+        "international-arabic",
+        "international-armenian",
+        "international-bengali",
+        "international-chinese-simplified",
+        "international-chinese-simplified-vertical",
+        "international-chinese-traditional",
+        "international-chinese-traditional-vertical",
+        "international-cyrillic",
+        "international-georgian",
+        "international-german",
+        "international-greek",
+        "international-hebrew",
+        "international-hindi",
+        "international-japanese",
+        "international-korean",
+        "international-korean-vertical",
+        "international-latin",
+        "international-tamil",
+        "international-thai",
+        "international-writing-modes",
+        "layout",
+        "light",
+        "links",
+        "maths",
+        "reading",
+        "search",
+        "settings",
+        "stats",
+        "stats-dense",
+        "sync",
+        "typography"
+      ]
+    }
+  ],
+  "required_captures": {
+    "about": {
+      "scenes": [
+        "acknowledgments",
+        "license"
+      ]
+    },
+    "bionic": {
+      "scenes": [
+        "bold",
+        "bold-fonts",
+        "bold-setting",
+        "bold-weight",
+        "off",
+        "weighted-fonts"
+      ]
+    },
+    "bookmarks": {
+      "scenes": [
+        "empty",
+        "list",
+        "remove-confirmation",
+        "ribbon"
+      ]
+    },
+    "chapters": {
+      "scenes": [
+        "chapters-01"
+      ],
+      "density_scenes": {
+        "300": [
+          "chapters-02"
+        ]
+      }
+    },
+    "dialogs": {
+      "scenes": [
+        "book-cannot-open",
+        "finish-book"
+      ]
+    },
+    "dictionary": {
+      "scenes": [
+        "definition",
+        "definition-page-2",
+        "long-definition",
+        "lookup-choices",
+        "no-definition",
+        "selection-page",
+        "unavailable"
+      ]
+    },
+    "embedded-fonts": {
+      "scenes": [
+        "detected",
+        "publisher-selected"
+      ]
+    },
+    "footnotes": {
+      "scenes": [
+        "actions",
+        "passage",
+        "preview",
+        "reference",
+        "return-row"
+      ]
+    },
+    "international-arabic": {
+      "scenes": [
+        "chapters",
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-armenian": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-bengali": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-chinese-simplified": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-chinese-simplified-vertical": {
+      "scenes": [
+        "supplemental-fonts",
+        "vertical-chapter"
+      ]
+    },
+    "international-chinese-traditional": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-chinese-traditional-vertical": {
+      "scenes": [
+        "supplemental-fonts",
+        "vertical-chapter"
+      ]
+    },
+    "international-cyrillic": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-georgian": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-german": {
+      "scenes": [
+        "reading"
+      ]
+    },
+    "international-greek": {
+      "scenes": [
+        "chapters",
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-hebrew": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-hindi": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-japanese": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-korean": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-korean-vertical": {
+      "scenes": [
+        "supplemental-fonts",
+        "vertical-chapter"
+      ]
+    },
+    "international-latin": {
+      "scenes": [
+        "reading"
+      ]
+    },
+    "international-tamil": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-thai": {
+      "scenes": [
+        "reading",
+        "supplemental-fonts"
+      ]
+    },
+    "international-writing-modes": {
+      "scenes": [
+        "chapters",
+        "supplemental-fonts",
+        "vertical-chapter"
+      ]
+    },
+    "layout": {
+      "scenes": [
+        "footer-sizes",
+        "header-sizes",
+        "layout",
+        "margin-preview"
+      ]
+    },
+    "light": {
+      "scenes": [
+        "brightness-swipe",
+        "frontlight",
+        "warmth-swipe",
+        "warmth-swipe-cool"
+      ]
+    },
+    "links": {
+      "scenes": [
+        "actions",
+        "contents",
+        "destination",
+        "link-indicator",
+        "links-controls",
+        "links-revealed",
+        "links-with-return",
+        "return-row",
+        "returned",
+        "website-link"
+      ]
+    },
+    "maths": {
+      "scenes": [
+        "equations-1",
+        "equations-2",
+        "equations-3",
+        "equations-4"
+      ]
+    },
+    "reading": {
+      "scenes": [
+        "menu",
+        "reading"
+      ]
+    },
+    "search": {
+      "scenes": [
+        "clear-construction",
+        "clear-replayed",
+        "empty",
+        "no-results",
+        "query",
+        "results",
+        "results-page-2",
+        "return-and-edit"
+      ]
+    },
+    "settings": {
+      "scenes": [
+        "about",
+        "advanced",
+        "dictionaries-book",
+        "dictionaries-other",
+        "dictionary-remove-confirmation",
+        "display",
+        "restore-confirmation",
+        "screen-refresh",
+        "stats"
+      ]
+    },
+    "stats": {
+      "scenes": [
+        "chapter-graph"
+      ]
+    },
+    "stats-dense": {
+      "scenes": [
+        "dense-chapter-graph"
+      ]
+    },
+    "sync": {
+      "scenes": [
+        "new-position",
+        "position-error",
+        "unavailable-position"
+      ]
+    },
+    "typography": {
+      "scenes": [
+        "applying-before-delay",
+        "applying-progress",
+        "custom-default",
+        "custom-default-instructions",
+        "default-confirmation",
+        "default-instructions",
+        "disabling-bionic",
+        "enabling-bionic",
+        "fonts-1",
+        "fonts-2",
+        "fonts-3",
+        "size-preview",
+        "spacing-preview",
+        "text",
+        "weight-preview"
+      ]
+    }
+  }
+}

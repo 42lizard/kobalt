@@ -1,0 +1,299 @@
+[
+  {
+    "group": "kobalt",
+    "name": "Kobalt",
+    "version": "",
+    "description": "This reader. Its own source code is released under the MIT license. Kobalt packages include GNU GPL and AGPL code, so each package is distributed under the GNU AGPL v3. Kobalt comes with no warranty.",
+    "license": "GNU AGPL v3 package, MIT source",
+    "url": "https://github.com/nicoverbruggen/kobalt",
+    "notices": [
+      "Kobalt-MIT",
+      "AGPL-3"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "CREngine",
+    "version": "KOReader fork, b05cf00791d2",
+    "description": "Book layout and rendering. Based on Cool Reader by Vadim Lopatin and contributions from the KOReader community. Includes vertical writing from m-tky/crengine at 6a56ffa0f1afc95e9e5463c5ca6584f57022d047 and local rendering changes.",
+    "license": "GNU GPL v2 or later",
+    "url": "https://github.com/koreader/crengine",
+    "notices": [
+      "CREngine-GPL-2"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "KOReader-base",
+    "version": "9a8729713ab7",
+    "description": "SVG text and image extensions used by the renderer. Thanks to the KOReader contributors.",
+    "license": "GNU AGPL v3 project license",
+    "url": "https://github.com/koreader/koreader-base",
+    "notices": [
+      "AGPL-3"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "Hyphenation patterns",
+    "version": "CREngine b05cf00791d2",
+    "description": "Dictionaries for English, German, Dutch, French, Spanish, Italian and Portuguese, from TeX hyphenation projects and LibreOffice, converted by the KOReader contributors.",
+    "license": "MIT, BSD 3-Clause, GNU LGPL and permissive notices",
+    "url": "https://github.com/hyphenation/tex-hyphen",
+    "notices": [
+      "Hyphenation-patterns",
+      "Qt-LGPL-3",
+      "Qt-GPL-3"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "HarfBuzz",
+    "version": "14.6.0",
+    "description": "Text shaping, by the HarfBuzz contributors. Includes Microsoft Universal Shaping Engine data.",
+    "license": "Old MIT and MIT",
+    "url": "https://github.com/harfbuzz/harfbuzz",
+    "notices": [
+      "HarfBuzz",
+      "HarfBuzz-Microsoft"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "FreeType",
+    "version": "2.14.3",
+    "description": "Font rasterization and outline emboldening. Portions of this software are copyright © 2026 The FreeType Project (https://freetype.org). All rights reserved.",
+    "license": "FreeType License",
+    "url": "https://freetype.org",
+    "notices": [
+      "FreeType"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "LunaSVG and PlutoVG",
+    "version": "LunaSVG 2.3.9",
+    "description": "SVG rendering, by Nwutobo Samuel Ugochukwu and contributors. PlutoVG includes FreeType rasterization code by David Turner, Robert Wilhelm and Werner Lemberg.",
+    "license": "MIT and FreeType License",
+    "url": "https://github.com/sammycage/lunasvg",
+    "notices": [
+      "LunaSVG",
+      "PlutoVG-FreeType"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "libjpeg-turbo",
+    "version": "3.1.4.1",
+    "description": "JPEG decoding. This software is based in part on the work of the Independent JPEG Group.",
+    "license": "IJG, BSD and zlib notices",
+    "url": "https://libjpeg-turbo.org",
+    "notices": [
+      "libjpeg-turbo",
+      "Independent-JPEG-Group"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "libpng",
+    "version": "Device-supplied library",
+    "description": "PNG decoding, by the PNG Reference Library authors.",
+    "license": "PNG Reference Library License",
+    "url": "http://www.libpng.org/pub/png/libpng.html",
+    "notices": [
+      "libpng"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "zlib",
+    "version": "Device-supplied library",
+    "description": "Compression support, by Jean-loup Gailly and Mark Adler.",
+    "license": "zlib License",
+    "url": "https://zlib.net",
+    "notices": [
+      "zlib"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "FriBidi",
+    "version": "1.0.16",
+    "description": "Unicode bidirectional text support, by the FriBidi contributors.",
+    "license": "GNU LGPL v2.1 or later",
+    "url": "https://github.com/fribidi/fribidi",
+    "notices": [
+      "FriBidi-LGPL-2.1"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "libunibreak",
+    "version": "7.0",
+    "description": "Unicode line and word breaking, by Wu Yongwei and contributors.",
+    "license": "zlib-style license",
+    "url": "https://github.com/adah1972/libunibreak",
+    "notices": [
+      "libunibreak"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "utf8proc",
+    "version": "2.11.3",
+    "description": "Unicode normalization for book search. By the utf8proc contributors. Includes Unicode data.",
+    "license": "MIT and Unicode data license",
+    "url": "https://github.com/JuliaStrings/utf8proc",
+    "notices": [
+      "utf8proc"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "xxHash",
+    "version": "0.8.3",
+    "description": "Fast hashing, by Yann Collet and contributors.",
+    "license": "BSD 2-Clause",
+    "url": "https://github.com/Cyan4973/xxHash",
+    "notices": [
+      "xxHash"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "Qt image scaling",
+    "version": "CREngine adaptation",
+    "description": "Image interpolation derived from Qt and Imlib2, including work by Daniel M. Duley and Carsten Haitzler.",
+    "license": "Qt licenses, BSD-style and Imlib2 notices",
+    "url": "https://github.com/koreader/crengine",
+    "notices": [
+      "Qt-image-scaling",
+      "Qt-LGPL-3",
+      "Qt-GPL-3"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "OpenSSL",
+    "version": "3.5.9",
+    "description": "TLS for HTTPS dictionary downloads in Android builds.",
+    "license": "Apache License 2.0",
+    "url": "https://openssl-library.org/",
+    "notices": [
+      "OpenSSL"
+    ]
+  },
+  {
+    "group": "nickel",
+    "name": "NickelHook",
+    "version": "Qt 6 port",
+    "description": "Mod loading, hooks and crash recovery, by Patrick Gaskin and contributors.",
+    "license": "MIT",
+    "url": "https://github.com/pgaskin/NickelHook",
+    "notices": [
+      "NickelHook"
+    ]
+  },
+  {
+    "group": "nickel",
+    "name": "Qt",
+    "version": "Device-supplied libraries",
+    "description": "Application controls, graphics, networking and sensors. Copyright The Qt Company Ltd. and other contributors. Open-source license texts are included below; Qt also offers commercial licenses.",
+    "license": "LGPL v3 / GPL v3",
+    "url": "https://www.qt.io",
+    "notices": [
+      "Qt-LGPL-3",
+      "Qt-GPL-3"
+    ]
+  },
+  {
+    "group": "fonts",
+    "name": "IBM Plex Sans and Mono",
+    "version": "78cd4223d8de",
+    "description": "Interface and reading-bar fonts, by IBM and the Plex contributors.",
+    "license": "SIL Open Font License 1.1",
+    "url": "https://github.com/IBM/plex",
+    "notices": [
+      "IBM-Plex-OFL"
+    ]
+  },
+  {
+    "group": "fonts",
+    "name": "Noto Serif and Noto Sans Math",
+    "version": "e0ad9f160a29",
+    "description": "Fallback glyphs for Greek, Cyrillic, phonetic symbols and mathematics, by the Noto Project Authors.",
+    "license": "SIL Open Font License 1.1",
+    "url": "https://github.com/notofonts",
+    "notices": [
+      "Noto-OFL"
+    ]
+  },
+  {
+    "group": "fonts",
+    "name": "Noto script fallback fonts",
+    "version": "3ec599d8ea84",
+    "description": "Arabic, Hebrew, Armenian, Georgian, Devanagari, Bengali, Tamil and Thai fallback glyphs. Copyright 2022–2025 The Noto Project Authors.",
+    "license": "SIL Open Font License 1.1",
+    "url": "https://github.com/notofonts/notofonts.github.io/tree/3ec599d8ea849413786a184f20e473c3fcbc4082",
+    "notices": [
+      "Noto-OFL"
+    ]
+  },
+  {
+    "group": "fonts",
+    "name": "Noto Serif CJK",
+    "version": "f8d157532fbfa",
+    "description": "Chinese, Japanese and Korean fallback glyphs. Copyright Adobe and the Noto Project Authors.",
+    "license": "SIL Open Font License 1.1",
+    "url": "https://github.com/notofonts/noto-cjk",
+    "notices": [
+      "Noto-Serif-CJK-OFL"
+    ]
+  },
+  {
+    "group": "fonts",
+    "name": "Instrument Serif",
+    "version": "0b58fb370093",
+    "description": "Loading-screen wordmark and caption, by the Instrument Serif Project Authors.",
+    "license": "SIL Open Font License 1.1",
+    "url": "https://github.com/Instrument/instrument-serif",
+    "notices": [
+      "Instrument-Serif-OFL"
+    ]
+  },
+  {
+    "group": "icons",
+    "name": "Lucide",
+    "version": "951813ce76a8",
+    "description": "Reader interface icons, by the Lucide and Feather contributors.",
+    "license": "ISC and MIT",
+    "url": "https://lucide.dev",
+    "notices": [
+      "Lucide"
+    ]
+  },
+  {
+    "group": "author",
+    "name": "NickelDissolve",
+    "version": "Qt 6 port",
+    "description": "Directional page-turn bands. Kobalt adapts its MTK submission and fallback behavior.",
+    "license": "MIT",
+    "url": "https://github.com/nicoverbruggen/NickelDissolve",
+    "notices": [
+      "NickelDissolve-MIT"
+    ]
+  },
+  {
+    "group": "author",
+    "name": "eBook Fonts",
+    "version": "13834303660d; Libron 0.31",
+    "description": "Reading fonts: Libron 0.31, Sourcerer, NV Ancizar Serif, NV Charis, NV Garamond, NV Jost, NV Bitter, NV Legible Next, NV Literata and NV Palatium. The original authors and licenses are listed below.",
+    "license": "SIL OFL and AGPLv3 with font exception",
+    "url": "https://github.com/nicoverbruggen/ebook-fonts",
+    "notices": [
+      "eBook-Fonts",
+      "Atkinson-Hyperlegible-Next-OFL",
+      "Domitian"
+    ]
+  }
+]

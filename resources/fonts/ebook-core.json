@@ -1,0 +1,186 @@
+{
+  "repository": "https://github.com/nicoverbruggen/ebook-fonts",
+  "revision": "13834303660d071657b1aa885da02c2d075b5368",
+  "collection": "core",
+  "files": [
+    {
+      "file": "Libron-Bold.ttf",
+      "sha256": "e5d2872bc8c40bd751b1deb354314c5151360fccdd953882d12bd0b8294ae2f4",
+      "release": "Libron"
+    },
+    {
+      "file": "Libron-BoldItalic.ttf",
+      "sha256": "6d78fc5d5c97358bee673c86598a482befc0c1e1184cbe44a455ec111ca715e6",
+      "release": "Libron"
+    },
+    {
+      "file": "Libron-Italic.ttf",
+      "sha256": "5e578e9e0d720bbbbd8f5ddcdb491ac196267668633790c5cc9973e3617b1733",
+      "release": "Libron"
+    },
+    {
+      "file": "Libron-Regular.ttf",
+      "sha256": "09890855b9875aa535a57a4733af2e548a362d853196858db901ec97ce2408f0",
+      "release": "Libron"
+    },
+    {
+      "file": "NV_Ancizar_Serif-Bold.ttf",
+      "collection": "extra",
+      "sha256": "979fdbc84c23e0e44dd9727769147c71fcd212fa7bec2bb0ce74e2a05472306e"
+    },
+    {
+      "file": "NV_Ancizar_Serif-BoldItalic.ttf",
+      "collection": "extra",
+      "sha256": "f18f4ecd28e461aeb50e718df2aabb068255fb0f31e1fd8264afa4e1ee729199"
+    },
+    {
+      "file": "NV_Ancizar_Serif-Italic.ttf",
+      "collection": "extra",
+      "sha256": "06a42743682d1249ee5a1e0b7cc46e4ace4b6a7c38b8ac7e5639c9953d3e61e6"
+    },
+    {
+      "file": "NV_Ancizar_Serif-Regular.ttf",
+      "collection": "extra",
+      "sha256": "64131a74593045dc36297bc6b4801bae1bed4f87f78a4726de0cef05acbf39e4"
+    },
+    {
+      "file": "NV_Bitter-Bold.ttf",
+      "sha256": "e61d0125eaf803af53aae899528d83adbc7961a0c4c7665ca9bb01322b9c435d"
+    },
+    {
+      "file": "NV_Bitter-BoldItalic.ttf",
+      "sha256": "5930edd24a276d8de2bcb72b9e092402ccef65222b5a9a227aef35e2b430397b"
+    },
+    {
+      "file": "NV_Bitter-Italic.ttf",
+      "sha256": "cd0d2d56145047443348ccf931fb292e583a9f6ad3a1048b89319c5bc3f33ac6"
+    },
+    {
+      "file": "NV_Bitter-Regular.ttf",
+      "sha256": "baa77fd4b7216d1f244478f96d4e0fa46753acf8cb52123c8b5f7c5936666283"
+    },
+    {
+      "file": "NV_Charis-Bold.ttf",
+      "sha256": "e7f778bd50af828bb5fb04e4b1afb7c5542a7c9a52fc2bda86cda7eb7fb01b43"
+    },
+    {
+      "file": "NV_Charis-BoldItalic.ttf",
+      "sha256": "7616c5d41d6978389417aa9baed6dac10bf2e7aa1d7a7d9f9c05eb952b7f758a"
+    },
+    {
+      "file": "NV_Charis-Italic.ttf",
+      "sha256": "c2d9b1ee33b7f4bdc6249378c57a5e7b1055de69daef796d0ed5f3b21cf5a644"
+    },
+    {
+      "file": "NV_Charis-Regular.ttf",
+      "sha256": "0213f5da0747315e2708595b8eaa3378acd9436d6dbc7ff349552a08215eef39"
+    },
+    {
+      "file": "NV_Garamond-Bold.ttf",
+      "sha256": "8d07562938138f4a1f0a7733d9b1281a390ccf890224f0b0ffbc35eb1665fd42"
+    },
+    {
+      "file": "NV_Garamond-BoldItalic.ttf",
+      "sha256": "dee44aeb73073a0bb4f632b3760f2f669b7ff24c841c613eb45ab049aa874e2e"
+    },
+    {
+      "file": "NV_Garamond-Italic.ttf",
+      "sha256": "7c33b5187e3b38651e098c24f431906eef09ce86cf1651b92a5c2a0f9624b7e8"
+    },
+    {
+      "file": "NV_Garamond-Regular.ttf",
+      "sha256": "b4c8b9175a5e1100fd4f030ef0c32e6d85cbb60a05c7e7d8714d81404ea275a6"
+    },
+    {
+      "file": "NV_Jost-Bold.ttf",
+      "sha256": "7b8702a26284943268b6793a2123927de659a61f9f87968752a5ac03627ba655"
+    },
+    {
+      "file": "NV_Jost-BoldItalic.ttf",
+      "sha256": "617a171245cf77312d360de26f3238411d6e58696c0302d5df83bda364653fa7"
+    },
+    {
+      "file": "NV_Jost-Italic.ttf",
+      "sha256": "7472bd587a47e18bc7917d7b44095807467fda9bf6e99c7652f2843381cf7885"
+    },
+    {
+      "file": "NV_Jost-Regular.ttf",
+      "sha256": "8fbacf4728b4d71575091628f113cd40646e513ba86fde8e0a05ff05d16c807b"
+    },
+    {
+      "file": "NV_Legible_Next-Bold.ttf",
+      "sha256": "32ef0a4ab388d3b8d5acd35ec237c0a85282694ade41f06c434a6c08d347a6c3"
+    },
+    {
+      "file": "NV_Legible_Next-BoldItalic.ttf",
+      "sha256": "b05dc580f4ffbc6c26d7db0a65f1f54c314ec3d75887eb8fee8b7fe3c9c32be0"
+    },
+    {
+      "file": "NV_Legible_Next-Italic.ttf",
+      "sha256": "640c97d0ef57ec2d0e2353f744f6abb35923704d778c231eeefa7e02825b1d22"
+    },
+    {
+      "file": "NV_Legible_Next-Regular.ttf",
+      "sha256": "eca414faed6f3d893e5761fae9e0258818da130bf5b98d384eed3c970908600d"
+    },
+    {
+      "file": "NV_Literata-Bold.ttf",
+      "collection": "extra",
+      "sha256": "d2603ffe6225c4b146e99a459c81b9b47a41964c8dfaf1a848c06a23a9804247"
+    },
+    {
+      "file": "NV_Literata-BoldItalic.ttf",
+      "collection": "extra",
+      "sha256": "2e80f6445a0091cd9a18868786774571b17a9fa4a53d560d1dd864802ebc3930"
+    },
+    {
+      "file": "NV_Literata-Italic.ttf",
+      "collection": "extra",
+      "sha256": "ec7904899291e67fdd460f387d428818579d4e0ea29bd9f824dbe5e8b34c02e3"
+    },
+    {
+      "file": "NV_Literata-Regular.ttf",
+      "collection": "extra",
+      "sha256": "da53d3ab935685576670cb31d2dc882f79ce09d481b9553ff0935489a5cd047b"
+    },
+    {
+      "file": "NV_Palatium-Bold.ttf",
+      "sha256": "f0cc7efd740ffcaf4191a350b2c80e1b77617d8b747dab026f1acdee2a1a7cbc"
+    },
+    {
+      "file": "NV_Palatium-BoldItalic.ttf",
+      "sha256": "b6187348eee1fc57c88bafedb9c564e045e60a4af653e8060820c9d23e514092"
+    },
+    {
+      "file": "NV_Palatium-Italic.ttf",
+      "sha256": "c21e6f96f950afabdad5e890158d3413fd1afce0bb2bbb20cb556e3e6b328bf4"
+    },
+    {
+      "file": "NV_Palatium-Regular.ttf",
+      "sha256": "2c90dc57e4dbc282300cc10dab6b5e597a2c30e68743298a7e5a8af9941e1783"
+    },
+    {
+      "file": "Sourcerer-Bold.ttf",
+      "sha256": "18dad943c32f1d25782fd432bafc92ee46b7ec3aa0bbca006f6da489ce8d1755"
+    },
+    {
+      "file": "Sourcerer-BoldItalic.ttf",
+      "sha256": "c6e5483d16dbd9bac0478b0c7cd2abffca395a2eed57be54fb06b8e702b9a36a"
+    },
+    {
+      "file": "Sourcerer-Italic.ttf",
+      "sha256": "fdfae4a83cb3b6669d8f1a8cd59bd34862928293d0e392a02ecd3196100de1f8"
+    },
+    {
+      "file": "Sourcerer-Regular.ttf",
+      "sha256": "772f8e8db69bc820f205ba3d48961f514362540765aec886d854f9b03e96461e"
+    }
+  ],
+  "releases": {
+    "Libron": {
+      "version": "0.31",
+      "url": "https://github.com/nicoverbruggen/libron/releases/download/v0.31/Libron.zip",
+      "sha256": "ce9a355b46b11c2cbe158e9149ee13a3fa813ca28661d878723d72f477324033"
+    }
+  }
+}

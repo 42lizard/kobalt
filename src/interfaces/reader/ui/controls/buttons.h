@@ -1,0 +1,183 @@
+#pragma once
+#include "icons.h"
+#include "text.h"
+#include "../style/theme.h"
+#include "../style/metrics.h"
+#include <QBoxLayout>
+#include <QPushButton>
+#include <functional>
+
+namespace kobalt::ui {
+class Button : public QPushButton {
+public:
+    using QPushButton::QPushButton;
+    void setPaintMode(ButtonPaintMode mode);
+    ButtonPaintMode paintMode() const {
+        return mode;
+    }
+    void setIconConfiguration(ButtonIcon configuration);
+    const ButtonIcon *iconConfiguration() const {
+        return hasConfiguredIcon ? &configuredIcon : nullptr;
+    }
+    void refreshIcon();
+
+protected:
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
+
+private:
+    ButtonPaintMode mode = ButtonPaintMode::Native;
+    ButtonIcon configuredIcon;
+    bool hasConfiguredIcon = false, hasIconTheme = false, iconDark = false;
+};
+
+class BackButton : public Button {
+public:
+    using Button::Button;
+    void setLabelOffset(int pixels) {
+        labelOffset = pixels;
+        update();
+    }
+    QSize sizeHint() const override;
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+
+private:
+    int labelOffset = 0;
+};
+
+class ElidingButton : public Button {
+public:
+    using Button::Button;
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+};
+class StepButton : public Button {
+public:
+    StepButton(ControlIcon icon, QWidget *parent);
+
+protected:
+    bool hitButton(const QPoint &point) const override;
+    void paintEvent(QPaintEvent *) override;
+
+private:
+    QIcon normal, pressed;
+};
+class DropdownButton : public Button {
+public:
+    explicit DropdownButton(QWidget *parent);
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+    virtual QFont labelFont() const {
+        return font();
+    }
+    virtual bool opticalLabel() const {
+        return false;
+    }
+    virtual SampleAppearance sampleAppearance() const {
+        return {};
+    }
+};
+class FontButton : public DropdownButton {
+public:
+    explicit FontButton(QWidget *parent);
+    void setFace(const QString &face);
+    QString resolvedFace() const;
+    void setAppearance(const SampleAppearance &value) {
+        if (appearance == value)
+            return;
+        appearance = value;
+        update();
+    }
+
+protected:
+    QFont labelFont() const override {
+        return sample;
+    }
+    bool opticalLabel() const override {
+        return true;
+    }
+    SampleAppearance sampleAppearance() const override {
+        return appearance;
+    }
+
+private:
+    QFont sample;
+    SampleAppearance appearance;
+};
+// Caption rows and list actions retain their different text and icon placement.
+class CaptionButton : public Button {
+public:
+    enum class Presentation { Caption, ListAction };
+    CaptionButton(ControlIcon icon, QWidget *parent);
+    CaptionButton(Presentation presentation, QWidget *parent);
+    Presentation presentation() const {
+        return mode;
+    }
+    void setCaption(const QString &caption) {
+        if (note == caption)
+            return;
+        note = caption;
+        update();
+    }
+    QString caption() const {
+        return note;
+    }
+    void setRule(Edges edges) {
+        if (rule == edges)
+            return;
+        rule = edges;
+        update();
+    }
+    void setChevron(bool shown) {
+        if (chevron == shown)
+            return;
+        chevron = shown;
+        update();
+    }
+    // List actions have an optional icon; caption rows retain their required glyph.
+    void setIconVisible(bool shown) {
+        if (mode != Presentation::ListAction || iconVisible == shown)
+            return;
+        iconVisible = shown;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+
+private:
+    Presentation mode;
+    ControlIcon glyph = ControlIcon::Link;
+    QString note;
+    Edges rule;
+    bool chevron = false, iconVisible = true;
+};
+CaptionButton *makeCaptionButton(QWidget *parent, QBoxLayout *layout, const char *name, const QString &text,
+                                 std::function<void()> action);
+// A header or pager cell: an icon, or an uppercase label with a chevron. It has
+// a rule on its inner side and fills with ink while pressed, like a tab.
+class CellButton : public Button {
+public:
+    CellButton(ControlIcon icon, QWidget *parent, int iconPixels = metrics::chrome::cellIcon);
+    void setRule(Edges edges) {
+        rule = edges;
+        update();
+    }
+    QSize sizeHint() const override;
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+
+private:
+    ControlIcon glyph;
+    int iconPixels;
+    Edges rule;
+};
+QPushButton *makeButton(QWidget *parent, QBoxLayout *layout, const char *name, const QString &text,
+                        std::function<void()> action);
+
+}

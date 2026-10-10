@@ -1,0 +1,24 @@
+set(KOBALT_READER_INTERFACE_SOURCES
+    ${CMAKE_CURRENT_LIST_DIR}/window/reader.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/window/reader_build.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/window/reader_dialogs.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/window/reader_refresh.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/window/reader_settings.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/settings/settings_panel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/settings/dictionaries_page.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/settings/appearance_panel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/window/appearance_edit_session.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/interface.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/views/opening.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/views/reading_page.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/panels/choice_screen.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/panels/chapter_contents.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/panels/bookmark_list.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/panels/chapter_graph.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/panels/dictionary_panel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/panels/link_panel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/panels/light_panel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/panels/search_panel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/settings/acknowledgments.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/views/navigation.cpp
+)

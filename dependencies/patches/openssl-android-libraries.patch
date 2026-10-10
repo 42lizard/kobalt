@@ -1,0 +1,29 @@
+--- a/Configurations/15-android.conf
++++ b/Configurations/15-android.conf
+@@ -193,6 +193,7 @@
+         bin_lflags       => "-pie",
+         enable           => [ ],
+         shared_extension => ".so",
++        shlib_variant => "_3",
+     },
+     "android-arm" => {
+         ################################################################
+--- a/util/mkdef.pl
++++ b/util/mkdef.pl
+@@ -259,14 +259,14 @@
+             print <<"_____";
+ }${prevversion_s};
+ _____
+-            $prevversion_s = " OPENSSL${SO_VARIANT}_$thisversion";
++            $prevversion_s = " OPENSSL_$thisversion";
+             $thisversion = '';  # Trigger start of next section
+         }
+         unless ($thisversion) {
+             $indent = 0;
+             $thisversion = $_->version();
+             $currversion_s = '';
+-            $currversion_s = "OPENSSL${SO_VARIANT}_$thisversion "
++            $currversion_s = "OPENSSL_$thisversion "
+                 if $thisversion ne '*';
+             print <<"_____";
+ ${currversion_s}{

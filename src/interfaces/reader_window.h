@@ -1,0 +1,34 @@
+#pragma once
+#include <QWidget>
+#include <functional>
+#include <memory>
+
+namespace kobalt {
+class ReaderSession;
+class ReaderOrientation;
+class ReadingBook;
+struct ReaderHostServices;
+
+// The firmware controller owns opening, authorization and publication lifetime.
+// The window returns a retained engine session only after a normal close.
+class ReaderWindow : public QWidget {
+public:
+    using QWidget::QWidget;
+    std::function<void(std::unique_ptr<ReaderSession>)> finished;
+    virtual bool readyForPresentation() const = 0;
+    virtual void checkpoint() = 0;
+    virtual void prepareShutdown(std::function<void()> finished) = 0;
+    virtual void sleepReader() = 0;
+    virtual void prepareWake() = 0;
+    virtual void cancelWake() = 0;
+    virtual void sleepViewReady() = 0;
+    virtual void wakeReader() = 0;
+    virtual void progressTick() = 0;
+    virtual void refreshHostPresentation() = 0;
+    // Logical forward/backward input, independent of touch swipe direction.
+    virtual void pageButton(int direction) = 0;
+};
+
+ReaderWindow *createReaderWindow(std::unique_ptr<ReadingBook> book, ReaderOrientation *orientation,
+                                 ReaderHostServices services);
+}

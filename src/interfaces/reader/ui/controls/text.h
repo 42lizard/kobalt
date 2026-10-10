@@ -1,0 +1,56 @@
+#pragma once
+#include "../style/metrics.h"
+#include <QFont>
+#include <QLabel>
+#include <QVector>
+
+class QPainter;
+
+namespace kobalt::ui {
+// Search excerpts end between complete lines, even when their context wraps.
+class WholeLineLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+};
+
+struct SampleAppearance {
+    int weight = 0;
+    QString bionic = QStringLiteral("off");
+    bool operator==(const SampleAppearance &other) const {
+        return weight == other.weight && bionic == other.bionic;
+    }
+    bool operator!=(const SampleAppearance &other) const {
+        return !(*this == other);
+    }
+};
+// UTF-16 ranges of the first half of each supported word's letters.
+QVector<QPair<int, int>> samplePrefixes(const QString &text);
+// Font samples align their visible letters, independent of each font's ascent.
+class SampleLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+    bool optical = false;
+    void setAppearance(const SampleAppearance &value) {
+        if (appearance == value)
+            return;
+        appearance = value;
+        update();
+    }
+    SampleAppearance sampleAppearance() const {
+        return appearance;
+    }
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
+private:
+    SampleAppearance appearance;
+};
+void drawOpticalText(QPainter &painter, const QRectF &area, const QString &text, bool centered = false,
+                     SampleAppearance appearance = {});
+QFont fontSample(const QString &face);
+void captionLabel(QLabel *label, int pixels = metrics::chrome::captionText);
+}

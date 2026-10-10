@@ -1,0 +1,35 @@
+Kobalt, an alternative reader for Kobo firmware 4, 5 and 6.
+
+The default build opens DRM-free EPUBs, including DRM-free Kobo purchases.
+Nickel checks access; Kobalt reads the unencrypted EPUB resources directly.
+Protected books show a short handoff screen, then open in Nickel's reader.
+Previews, PDFs and unsupported formats open directly in Nickel's reader.
+A loading failure offers Try built-in reader or Go back.
+
+Reading Settings has a Kobalt section at the top. Open books in Kobalt
+is on after installation. Turn it off to use Nickel's reader for later
+books. The choice is saved in config.json in this folder. Long-press a
+book to open it once with the other reader.
+
+Tap the left or right third of the page to turn pages, or swipe. Tap the
+middle or the title for the menus. The bottom tabs open Chapters, Text,
+Layout, Light, Stats and Search. Settings is at the top.
+
+Fonts and their manifest are in assets/. Settings and saved positions are
+the other .json files in this folder. Kobalt also saves your position to
+Nickel when you leave a book.
+
+To remove Kobalt, delete the file uninstall, or this whole folder, and
+restart the device. Saved positions and settings stay unless you delete
+the folder. A temporary test build creates uninstall-now and removes
+itself on the next restart. To install a new build over a temporary one,
+delete uninstall-now before you eject.
+
+If Kobalt stops during startup or while a book is open, it leaves
+startup-session or active-session.json here. While either file exists,
+Kobalt stays off and Nickel's reader is used. Look at the logs first,
+then delete the file and restart to try Kobalt again.
+
+events.jsonl and events.jsonl.previous record what Kobalt did, at most
+128 KiB each. They contain no book text or account data. state.json and
+session.json can contain book identifiers; keep them private.

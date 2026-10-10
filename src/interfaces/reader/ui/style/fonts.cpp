@@ -1,0 +1,238 @@
+#include "fonts.h"
+#include "font_data.h"
+#include "assets/assets.h"
+#include "assets/bundled_fonts.h"
+#include <QCoreApplication>
+#include <QEvent>
+#include <QFontDatabase>
+#include <QLabel>
+#include <QStringList>
+#include <QVector>
+#include <QWidget>
+#include <QMap>
+
+namespace kobalt::ui {
+namespace {
+struct Face {
+    const char *file, *style;
+};
+struct Family {
+    const char *name;
+    QVector<Face> faces;
+};
+// The interface registers its own renamed copies of the bundled faces. Their
+// names never match a reading font that the font picker registers, so
+// replacing them to change the weight cannot pick up the picker's faces.
+// IBM Plex reserves the name "Plex" for the original fonts.
+enum FamilyIndex { Sans, Mono, Serif };
+const QVector<Family> &families() {
+    static const QVector<Family> value{
+        {"Kobalt UI Sans",
+         {{"IBMPlexSans-Regular.ttf", "Regular"},
+          {"IBMPlexSans-Bold.ttf", "Bold"},
+          {"IBMPlexSans-Italic.ttf", "Italic"}}},
+        {"Kobalt UI Mono", {{"IBMPlexMono-Regular.ttf", "Regular"}, {"IBMPlexMono-Bold.ttf", "Bold"}}},
+        {"Kobalt UI Serif", {{"InstrumentSerif-Regular.ttf", "Regular"}, {"InstrumentSerif-Italic.ttf", "Italic"}}},
+    };
+    return value;
+}
+struct Registration {
+    int steps = -1;
+    QVector<QVector<int>> ids;
+    QVector<int> scriptFallbackIds;
+    QMap<QString, QByteArray> sources;
+    FontCopies copies;
+};
+Registration &registration() {
+    static Registration value;
+    return value;
+}
+int requestedSteps = 0;
+int faceCount(const QVector<QVector<int>> &ids) {
+    int count = 0;
+    for (const auto &family : ids)
+        count += family.size();
+    return count;
+}
+
+// Each weight has its own file name. Qt keeps FreeType faces by file name, so
+// a face that a live layout still holds can never stand in for another weight.
+QVector<QVector<int>> addFaces(int steps) {
+    QVector<QVector<int>> ids;
+    for (const auto &family : families()) {
+        ids.append(QVector<int>());
+        // Qt 5.2 files a face under the first face registered for its weight
+        // and slant, so the regular face comes first.
+        for (const auto &face : family.faces) {
+            const auto data = interfaceFace(registration().sources.value(face.file), family.name, face.style, steps);
+            const auto path = data.isEmpty()
+                                  ? QString()
+                                  : registration().copies.file(QString("weight-%1/%2").arg(steps).arg(face.file), data);
+            const int id = path.isEmpty() ? -1 : QFontDatabase::addApplicationFont(path);
+            if (id >= 0)
+                ids.last().append(id);
+        }
+    }
+    return ids;
+}
+QVector<int> addScriptFallbacks(const QMap<QString, QByteArray> &sources) {
+    QVector<int> ids;
+    for (const auto *file : scriptFallbackFontFiles) {
+        const auto bytes = sources.value(file);
+        const int id = bytes.isEmpty() ? -1 : QFontDatabase::addApplicationFontFromData(bytes);
+        if (id < 0) {
+            for (const int added : ids)
+                QFontDatabase::removeApplicationFont(added);
+            return {};
+        }
+        ids.append(id);
+    }
+    return ids;
+}
+void registerFaces() {
+    auto &current = registration();
+    if (current.steps == requestedSteps)
+        return;
+    auto added = addFaces(requestedSteps);
+    int expected = 0;
+    for (const auto &family : families())
+        expected += family.faces.size();
+    // Keep the faces in use when the new weight cannot be read in full.
+    if (current.steps >= 0 && faceCount(added) < expected) {
+        for (const auto &ids : added)
+            for (const int id : ids)
+                QFontDatabase::removeApplicationFont(id);
+        requestedSteps = current.steps;
+        return;
+    }
+    for (const auto &ids : current.ids)
+        for (const int id : ids)
+            QFontDatabase::removeApplicationFont(id);
+    current.steps = requestedSteps;
+    current.ids = std::move(added);
+}
+QString family(FamilyIndex index, const QString &missing = {}) {
+    registerFaces();
+    return registration().ids.value(index).isEmpty() ? missing : QString::fromLatin1(families()[index].name);
+}
+QFont sizedFont(const QString &family, int pixels) {
+    QFont font(family);
+    font.setWeight(QFont::Normal);
+    if (pixels > 0)
+        font.setPixelSize(pixels);
+    return font;
+}
+}
+bool initializeInterfaceFonts(const AssetBundle &assets) {
+    QMap<QString, QByteArray> sources;
+    for (const auto &family : families())
+        for (const auto &face : family.faces) {
+            const auto bytes = assets.fontData(face.file);
+            if (bytes.isEmpty())
+                return false;
+            sources.insert(face.file, bytes);
+        }
+    for (const auto *file : scriptFallbackFontFiles) {
+        const auto bytes = assets.fontData(file);
+        if (bytes.isEmpty())
+            return false;
+        sources.insert(file, bytes);
+    }
+    auto &current = registration();
+    if (current.sources == sources)
+        return true;
+    if (current.steps < 0) {
+        auto scriptFallbackIds = addScriptFallbacks(sources);
+        if (scriptFallbackIds.size() != int(scriptFallbackFontFiles.size()))
+            return false;
+        for (const int id : current.scriptFallbackIds)
+            QFontDatabase::removeApplicationFont(id);
+        current.sources = std::move(sources);
+        current.scriptFallbackIds = std::move(scriptFallbackIds);
+        return true;
+    }
+    const auto old = std::move(current.sources);
+    current.sources = std::move(sources);
+    auto added = addFaces(requestedSteps);
+    auto scriptFallbackIds = addScriptFallbacks(current.sources);
+    if (faceCount(added) != current.sources.size() - int(scriptFallbackFontFiles.size()) ||
+        scriptFallbackIds.size() != int(scriptFallbackFontFiles.size())) {
+        for (const auto &family : added)
+            for (int id : family)
+                QFontDatabase::removeApplicationFont(id);
+        for (const int id : scriptFallbackIds)
+            QFontDatabase::removeApplicationFont(id);
+        current.sources = old;
+        return false;
+    }
+    for (const auto &family : current.ids)
+        for (int id : family)
+            QFontDatabase::removeApplicationFont(id);
+    for (const int id : current.scriptFallbackIds)
+        QFontDatabase::removeApplicationFont(id);
+    current.steps = requestedSteps;
+    current.ids = std::move(added);
+    current.scriptFallbackIds = std::move(scriptFallbackIds);
+    return true;
+}
+bool setInterfaceWeight(int steps) {
+    steps = qMax(0, steps);
+    const int previous = registration().steps;
+    requestedSteps = steps;
+    // Before the first use, only remember the weight.
+    if (previous < 0)
+        return false;
+    registerFaces();
+    return registration().steps != previous;
+}
+int interfaceWeight() {
+    return registration().steps < 0 ? requestedSteps : registration().steps;
+}
+QFont renewedFont(const QFont &font) {
+    // A copy shares the loaded faces. Build a new font from the description.
+    QFont renewed(font.family());
+    renewed.fromString(font.toString());
+    // Qt 5.2 does not restore a pixel size from the description.
+    if (font.pixelSize() > 0)
+        renewed.setPixelSize(font.pixelSize());
+    return renewed;
+}
+void refreshInterfaceText(QWidget *root) {
+    // Qt keeps the faces that a font object has loaded. After a font database
+    // change it drops them only for fonts in its cache, and only once, so
+    // widgets need new font objects. Setting a style sheet again parses new
+    // rule fonts and resolves the fonts of the widget and its children anew.
+    auto widgets = root->findChildren<QWidget *>();
+    widgets.prepend(root);
+    QEvent change(QEvent::FontChange);
+    for (auto *widget : widgets) {
+        if (const auto sheet = widget->styleSheet(); !sheet.isEmpty()) {
+            widget->setStyleSheet(QString());
+            widget->setStyleSheet(sheet);
+        }
+        // Labels lay out rich text again, and paged text renews its document font.
+        QCoreApplication::sendEvent(widget, &change);
+        widget->update();
+    }
+}
+QFont interfaceFont(int pixels) {
+    return sizedFont(family(Sans), pixels);
+}
+QFont chromeFont(int pixels) {
+    return sizedFont(family(Mono), pixels);
+}
+QFont captionFont(int pixels) {
+    QFont font = chromeFont(pixels);
+    font.setLetterSpacing(QFont::AbsoluteSpacing, metrics::chrome::captionSpacing);
+    font.setCapitalization(QFont::AllUppercase);
+    return font;
+}
+QFont brandFont(int pixels, bool italic) {
+    QFont font(family(Serif, "serif"));
+    font.setPixelSize(pixels);
+    font.setWeight(QFont::Normal);
+    font.setItalic(italic);
+    return font;
+}
+
+}

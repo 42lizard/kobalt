@@ -1,0 +1,233 @@
+package org.kobalt.android;
+
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.ActivityInfo;
+import android.os.BatteryManager;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Build;
+import android.view.View;
+import android.view.KeyEvent;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowInsetsAnimation;
+import android.widget.Toast;
+import org.qtproject.qt.android.bindings.QtActivity;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.util.HashSet;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
+
+public class KobaltActivity extends QtActivity {
+    private static final int PICK_BOOK = 41;
+    private static final long MAX_BOOK_BYTES = 128L * 1024 * 1024;
+    private final ExecutorService importer = Executors.newSingleThreadExecutor();
+    private final AtomicLong request = new AtomicLong();
+    private boolean ready = false;
+    private boolean reading = false;
+    private volatile boolean readingGeometryReady = false;
+    private String pendingPath;
+    private native void openBook(String path);
+    private native boolean turnPage(int direction);
+    private final HashSet<Integer> pageKeys = new HashSet<>();
+
+    @Override public void setRequestedOrientation(int orientation) {
+        // Framework orientation requests must not override the user's system policy.
+        super.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        final int key = event.getKeyCode();
+        final boolean next = key == KeyEvent.KEYCODE_VOLUME_DOWN || key == KeyEvent.KEYCODE_PAGE_DOWN;
+        final boolean previous = key == KeyEvent.KEYCODE_VOLUME_UP || key == KeyEvent.KEYCODE_PAGE_UP;
+        if (next || previous) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                if (ready && turnPage(next ? 1 : -1)) {
+                    pageKeys.add(key);
+                    return true;
+                }
+            } else if (pageKeys.contains(key)) {
+                if (event.getAction() == KeyEvent.ACTION_UP) pageKeys.remove(key);
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override public void onCreate(Bundle state) {
+        super.onCreate(state);
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
+        View decor = getWindow().getDecorView();
+        HashSet<WindowInsetsAnimation> barAnimations = new HashSet<>();
+        if (Build.VERSION.SDK_INT >= 30) {
+            decor.setWindowInsetsAnimationCallback(new WindowInsetsAnimation.Callback(
+                    WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                @Override public void onPrepare(WindowInsetsAnimation animation) {
+                    if ((animation.getTypeMask() & WindowInsets.Type.systemBars()) != 0) {
+                        barAnimations.add(animation);
+                        readingGeometryReady = false;
+                    }
+                }
+                @Override public WindowInsets onProgress(WindowInsets insets, List<WindowInsetsAnimation> running) {
+                    return insets;
+                }
+                @Override public void onEnd(WindowInsetsAnimation animation) {
+                    barAnimations.remove(animation);
+                }
+            });
+        }
+        // Publish readiness only after Android has laid out the final insets.
+        // Qt reads this snapshot from its own GUI thread.
+        decor.getViewTreeObserver().addOnPreDrawListener(() -> {
+            WindowInsets insets = decor.getRootWindowInsets();
+            boolean hidden = false;
+            if (insets != null) {
+                if (Build.VERSION.SDK_INT >= 30) hidden = !insets.isVisible(WindowInsets.Type.systemBars());
+                else {
+                    android.view.DisplayCutout cutout = insets.getDisplayCutout();
+                    hidden = insets.getSystemWindowInsetTop() <= (cutout == null ? 0 : cutout.getSafeInsetTop())
+                        && insets.getSystemWindowInsetBottom() <= (cutout == null ? 0 : cutout.getSafeInsetBottom());
+                }
+            }
+            readingGeometryReady = reading && hidden && barAnimations.isEmpty();
+            return true;
+        });
+        immersive();
+        receive(getIntent());
+    }
+    @Override public void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        receive(intent);
+    }
+    @Override public void onWindowFocusChanged(boolean focus) {
+        super.onWindowFocusChanged(focus);
+        if (!focus) pageKeys.clear();
+        if (focus) {
+            immersive();
+            // Keep a focus target in touch mode. Otherwise Android can consume
+            // the first Page Up/Down press just to establish keyboard focus.
+            View content = findViewById(android.R.id.content);
+            if (content != null) {
+                content.setFocusableInTouchMode(true);
+                if (!content.hasFocus()) content.requestFocus();
+            }
+        }
+    }
+    private void immersive() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                if (reading) controller.hide(WindowInsets.Type.systemBars());
+                else {
+                    controller.show(WindowInsets.Type.systemBars());
+                    controller.setSystemBarsAppearance(WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+                }
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(reading ? View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE : View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        }
+    }
+    public void showStartup() { runOnUiThread(() -> { readingGeometryReady = false; reading = false; immersive(); }); }
+    public void showReading() { runOnUiThread(() -> { readingGeometryReady = false; reading = true; immersive(); }); }
+    public boolean readerGeometryReady() { return readingGeometryReady; }
+    // Called only after Qt has loaded the native library and connected its UI.
+    public int readerBattery() {
+        Intent battery = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (battery == null) return -1;
+        int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+        int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+        if (level < 0 || scale <= 0) return -1;
+        int percent = Math.min(100, level * 100 / scale);
+        return percent + (battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0 ? 256 : 0);
+    }
+    public int readerDensity() { return getResources().getDisplayMetrics().densityDpi; }
+    public void readerReady() {
+        ready = true;
+        showStartup();
+        if (pendingPath != null) { openBook(pendingPath); pendingPath = null; }
+    }
+    public void chooseBook() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/epub+zip");
+        try { startActivityForResult(intent, PICK_BOOK); }
+        catch (android.content.ActivityNotFoundException error) { toast("No document picker is installed."); }
+    }
+    @Override protected void onActivityResult(int code, int result, Intent data) {
+        super.onActivityResult(code, result, data);
+        if (code == PICK_BOOK && result == RESULT_OK && data != null) importBook(data.getData());
+    }
+    private void receive(Intent intent) {
+        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) importBook(intent.getData());
+    }
+    private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
+    private void importBook(Uri uri) {
+        if (uri == null || !"content".equals(uri.getScheme())) {
+            toast("Open an EPUB through Android's document picker.");
+            return;
+        }
+        final long generation = request.incrementAndGet();
+        importer.execute(() -> {
+            File temporary = null;
+            try {
+                File books = new File(getFilesDir(), "books");
+                if (!books.isDirectory() && !books.mkdirs()) throw new java.io.IOException("Cannot create book storage");
+                temporary = File.createTempFile("import-", ".part", books);
+                MessageDigest hash = MessageDigest.getInstance("SHA-256");
+                try (InputStream input = getContentResolver().openInputStream(uri);
+                     FileOutputStream output = new FileOutputStream(temporary)) {
+                    if (input == null) throw new java.io.IOException("Cannot read this document");
+                    byte[] buffer = new byte[65536];
+                    long total = 0;
+                    int count;
+                    while ((count = input.read(buffer)) != -1) {
+                        if (request.get() != generation) return;
+                        total += count;
+                        if (total > MAX_BOOK_BYTES) throw new java.io.IOException("EPUB exceeds the 128 MiB import limit");
+                        output.write(buffer, 0, count);
+                        hash.update(buffer, 0, count);
+                    }
+                    if (total == 0) throw new java.io.IOException("This document is empty");
+                    output.getFD().sync();
+                }
+                StringBuilder key = new StringBuilder();
+                for (byte value : hash.digest()) key.append(String.format(java.util.Locale.ROOT, "%02x", value & 255));
+                File destination = new File(books, key + ".epub");
+                if (!destination.exists() && !temporary.renameTo(destination)) throw new java.io.IOException("Cannot save this document");
+                final String path = destination.getAbsolutePath();
+                runOnUiThread(() -> {
+                    if (request.get() != generation || isFinishing() || isDestroyed()) return;
+                    if (ready) openBook(path); else pendingPath = path;
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (request.get() == generation && !isDestroyed()) toast("Could not open EPUB: " + error.getMessage());
+                });
+            } finally {
+                if (temporary != null) temporary.delete();
+            }
+        });
+    }
+    public void exitReader() { finishAndRemoveTask(); }
+    @Override protected void onDestroy() {
+        ready = false;
+        request.incrementAndGet();
+        importer.shutdownNow();
+        super.onDestroy();
+    }
+}

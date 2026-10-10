@@ -1,0 +1,57 @@
+{
+  "crengine": {
+    "url": "https://codeload.github.com/koreader/crengine/tar.gz/b05cf00791d2ba17c1f077fc69e7bd68cf780b6a",
+    "sha256": "b8b7fb322bea9b0180308b800b3e9bb59d413a9180b08a8cfa9ddb144869067d",
+    "directory": "crengine-b05cf00791d2ba17c1f077fc69e7bd68cf780b6a"
+  },
+  "harfbuzz": {
+    "url": "https://codeload.github.com/harfbuzz/harfbuzz/tar.gz/14.6.0",
+    "sha256": "eca8581e5ad8e21dbda31556c0363f764b1a754c9c1bb33ca7cd56ca1c07ddc9",
+    "directory": "harfbuzz-14.6.0"
+  },
+  "libjpeg-turbo": {
+    "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.4.1/libjpeg-turbo-3.1.4.1.tar.gz",
+    "sha256": "ecae8008e2cc9ade2f2c1bb9d5e6d4fb73e7c433866a056bd82980741571a022",
+    "directory": "libjpeg-turbo-3.1.4.1"
+  },
+  "xxhash": {
+    "url": "https://codeload.github.com/Cyan4973/xxHash/tar.gz/v0.8.3",
+    "sha256": "aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80",
+    "directory": "xxHash-0.8.3"
+  },
+  "lunasvg": {
+    "url": "https://codeload.github.com/sammycage/lunasvg/tar.gz/v2.3.9",
+    "sha256": "088bc9fd1191a004552c65bdcc260989b83da441b0bdaa965e79d984feba88fa",
+    "directory": "lunasvg-2.3.9"
+  },
+  "koreader-base": {
+    "url": "https://codeload.github.com/koreader/koreader-base/tar.gz/9a8729713ab73f539b607af23ede6aa89d04cfed",
+    "sha256": "fbb439cf3036043340fda8cf6afa557beba1cce5f18d61307cf150bdd4b6efaf",
+    "directory": "koreader-base-9a8729713ab73f539b607af23ede6aa89d04cfed"
+  },
+  "qtsensors": {
+    "url": "https://download.qt.io/archive/qt/6.5/6.5.2/submodules/qtsensors-everywhere-src-6.5.2.tar.xz",
+    "sha256": "4006bd7cfbb4302a887bda82b7fe3c31633626363a5e6ba9730bdb4fa8ab2aa6",
+    "directory": "qtsensors-everywhere-src-6.5.2"
+  },
+  "utf8proc": {
+    "url": "https://codeload.github.com/JuliaStrings/utf8proc/tar.gz/refs/tags/v2.11.3",
+    "sha256": "abfed50b6d4da51345713661370290f4f4747263ee73dc90356299dfc7990c78",
+    "directory": "utf8proc-2.11.3"
+  },
+  "fribidi": {
+    "url": "https://github.com/fribidi/fribidi/releases/download/v1.0.16/fribidi-1.0.16.tar.xz",
+    "sha256": "1b1cde5b235d40479e91be2f0e88a309e3214c8ab470ec8a2744d82a5a9ea05c",
+    "directory": "fribidi-1.0.16"
+  },
+  "libunibreak": {
+    "url": "https://github.com/adah1972/libunibreak/releases/download/libunibreak_7_0/libunibreak-7.0.tar.gz",
+    "sha256": "8c9a6e121736cd0d5c890ae3ae96f3f4010a19aa040f1dbded833a62a87717d3",
+    "directory": "libunibreak-7.0"
+  },
+  "freetype": {
+    "url": "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-14-3",
+    "sha256": "dc49de6b01a266eef4876a4dd34d9842c475d3e28ff2eff63bd2fb760ab56261",
+    "directory": "freetype-VER-2-14-3"
+  }
+}

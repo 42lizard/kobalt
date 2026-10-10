@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/notofonts/noto-cjk",
+  "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+  "license": "SIL OFL 1.1",
+  "files": [
+    {
+      "file": "NotoSerifCJK-Regular.ttc",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Serif/OTC/NotoSerifCJK-Regular.ttc",
+      "sha256": "5d9c31a059600193c9d7968a998bde886ccdc77e934006ad243b41794c496a7d"
+    }
+  ]
+}

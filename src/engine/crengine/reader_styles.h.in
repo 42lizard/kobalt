@@ -1,0 +1,22 @@
+#pragma once
+
+// The pinned engine's HTML defaults include its EPUB fragment boundaries.
+// Keep publisher styles above these defaults in the cascade.
+constexpr auto readerHtmlCss = R"rrcss(@READER_HTML_CSS@)rrcss";
+
+// TENG's user-agent overrides, expressed without browser viewport or layer
+// syntax. Pagination owns the viewport and the adjustable outer margins.
+constexpr auto readerOverridesCss = R"rrcss(
+html, DocFragment { hyphens: none; }
+body { margin: 0; padding: 0; background-color: transparent; text-align: start; }
+blockquote { margin-left: 40px; margin-right: 40px; }
+ol, ul { padding-left: 40px; }
+pre { max-width: 100%; }
+table { max-width: 100%; font-size: 100%; word-break: normal; }
+a[href] { color: black; text-decoration: underline; }
+/* Kobo editions use this wrapper for their dotted link decoration. Do not
+   inherit the anchor underline as a second line. Publisher CSS still wins. */
+a[data-kobalt-kobo-link="1"] { text-decoration: none; }
+se-span.kobo-link { border-bottom: 1px dotted currentColor; }
+hr { border: 1px inset black; }
+)rrcss";

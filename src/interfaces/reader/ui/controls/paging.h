@@ -1,0 +1,46 @@
+#pragma once
+#include "buttons.h"
+#include <QLabel>
+
+namespace kobalt::ui {
+// A full-width bar with a cell at each end and the count between them.
+// It hides itself when there is only one page.
+class PagerBar : public QWidget {
+public:
+    PagerBar(QWidget *parent, const QString &prefix);
+    void setPage(int page, int count, const QString &label = {});
+    QLabel *counter;
+    CellButton *previous, *next;
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+    void resizeEvent(QResizeEvent *) override;
+};
+class PageControls : public QWidget {
+public:
+    PageControls(QWidget *parent, const QString &prefix, bool compact = false);
+    void setPage(int page, int count);
+    void setCompact(bool value);
+    QLabel *counter;
+    QPushButton *previous, *next;
+
+protected:
+    void resizeEvent(QResizeEvent *) override;
+
+private:
+    bool compact;
+    void arrange();
+};
+class PageNavigation {
+public:
+    PageNavigation(QWidget *parent, const QString &prefix);
+    void layout(const QSize &size, bool compact = false);
+    void setPagingVisible(bool visible);
+    void setPage(int page, int count);
+    QLabel *title, *counter;
+    QPushButton *back, *previous, *next;
+
+private:
+    PageControls *paging;
+};
+}

@@ -1,0 +1,38 @@
+#pragma once
+#include <QByteArray>
+#include <QString>
+#include <memory>
+namespace kobalt {
+class AssetBundle {
+public:
+    AssetBundle(QString root, QString expectedVersion);
+    ~AssetBundle();
+    AssetBundle(const AssetBundle &) = delete;
+    AssetBundle &operator=(const AssetBundle &) = delete;
+    bool available() const;
+    bool hasFilesystemRecoveryFiles() const;
+    void invalidate();
+    QString file(const QString &name) const;
+    QByteArray fontData(const QString &name) const;
+    const QString &root() const;
+
+private:
+    struct Data;
+    std::unique_ptr<Data> data;
+};
+// Keep this owner alive as long as Qt can retain registered font faces. Asset
+// invalidation releases verification state, not these independent copies.
+// Creation and writes belong on the GUI thread.
+class FontCopies {
+public:
+    FontCopies();
+    ~FontCopies();
+    FontCopies(const FontCopies &) = delete;
+    FontCopies &operator=(const FontCopies &) = delete;
+    QString file(const QString &name, const QByteArray &bytes);
+
+private:
+    struct Data;
+    std::unique_ptr<Data> data;
+};
+}

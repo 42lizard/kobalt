@@ -1,0 +1,47 @@
+{
+  "repository": "https://github.com/notofonts/notofonts.github.io",
+  "revision": "3ec599d8ea849413786a184f20e473c3fcbc4082",
+  "license": "SIL OFL 1.1",
+  "files": [
+    {
+      "file": "NotoNaskhArabic-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/3ec599d8ea849413786a184f20e473c3fcbc4082/fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Regular.ttf",
+      "sha256": "6f0a92031367b2f5a2078fe9d24f3433122b61a0bad57c423aad8f3c39aa2e6e"
+    },
+    {
+      "file": "NotoSerifHebrew-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/3ec599d8ea849413786a184f20e473c3fcbc4082/fonts/NotoSerifHebrew/hinted/ttf/NotoSerifHebrew-Regular.ttf",
+      "sha256": "dfd5a6aefe97a99f68fe43388342913d50bb9fbf6d3afc4d2c7725661bc4a2b1"
+    },
+    {
+      "file": "NotoSerifArmenian-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/3ec599d8ea849413786a184f20e473c3fcbc4082/fonts/NotoSerifArmenian/hinted/ttf/NotoSerifArmenian-Regular.ttf",
+      "sha256": "6dc71b17c55d398c7cc88edeec527292ba1e0573b033ac2136c636ab36c27d76"
+    },
+    {
+      "file": "NotoSerifGeorgian-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/3ec599d8ea849413786a184f20e473c3fcbc4082/fonts/NotoSerifGeorgian/hinted/ttf/NotoSerifGeorgian-Regular.ttf",
+      "sha256": "e222862f34ad05bdf950de1049abf6149d250b9e27c1cc482dd645412afb64ff"
+    },
+    {
+      "file": "NotoSerifDevanagari-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/3ec599d8ea849413786a184f20e473c3fcbc4082/fonts/NotoSerifDevanagari/hinted/ttf/NotoSerifDevanagari-Regular.ttf",
+      "sha256": "e272d11d271c61a8d5d0f65764fd368ae53b9f9dabcce244a8941aa8f32ccc70"
+    },
+    {
+      "file": "NotoSerifBengali-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/3ec599d8ea849413786a184f20e473c3fcbc4082/fonts/NotoSerifBengali/hinted/ttf/NotoSerifBengali-Regular.ttf",
+      "sha256": "c1743dce480147e4563e479ddc31d5ff6544372437428622a54c7c867c50f55b"
+    },
+    {
+      "file": "NotoSerifTamil-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/3ec599d8ea849413786a184f20e473c3fcbc4082/fonts/NotoSerifTamil/hinted/ttf/NotoSerifTamil-Regular.ttf",
+      "sha256": "8a8cb015a3afec2998e01aabcb42fb365994132d95dbc2150208b4fefd8dc2e4"
+    },
+    {
+      "file": "NotoSerifThai-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/3ec599d8ea849413786a184f20e473c3fcbc4082/fonts/NotoSerifThai/hinted/ttf/NotoSerifThai-Regular.ttf",
+      "sha256": "747b5bb1fdd329850ddd3218d872a3d2a96ab0dd544f51e5300c6d1b12071b62"
+    }
+  ]
+}

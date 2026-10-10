@@ -1,0 +1,122 @@
+#pragma once
+#include "interfaces/reader/ui/controls/buttons.h"
+#include "interfaces/reader/ui/controls/icons.h"
+#include "interfaces/reader/ui/controls/options.h"
+#include "interfaces/reader/ui/controls/panels.h"
+#include "interfaces/reader/ui/style/metrics.h"
+#include <QWidget>
+#include <functional>
+#include <QVector>
+
+class QBoxLayout;
+class QLayout;
+class QSpacerItem;
+class QStackedWidget;
+class QPushButton;
+class QLabel;
+class QFrame;
+namespace kobalt {
+namespace ui {
+class Panel;
+class DescribedOption;
+class CaptionButton;
+}
+struct ToolbarComposition {
+    ui::Panel *panel = nullptr;
+    QLayout *rows = nullptr;
+    QPushButton *exitAction = nullptr, *settings = nullptr, *bookmarks = nullptr;
+    QLabel *clock = nullptr, *session = nullptr, *battery = nullptr;
+    ui::BluetoothIndicator *bluetooth = nullptr;
+};
+enum class NavigationDestination { Chapters, Text, Layout, Light, Stats, Search };
+struct NavigationState {
+    QWidget *footer, *appearance, *stats, *chapters;
+    bool chaptersOpen, visible, enabled, lightAvailable;
+    int active;
+    QString returnLabel;
+    QString pageCount;
+    QVector<QWidget *> topActions;
+    QWidget *settings, *light;
+    // Stats stays open above the tabs whenever the controls are, and has no tab.
+    bool statsPinned = false;
+    QString returnNote;
+};
+}
+
+namespace kobalt::reader {
+// Navigation owns its tabs; reader panels retain their existing controls and actions.
+class BottomNavigation : public ui::Panel {
+public:
+    explicit BottomNavigation(QWidget *parent);
+    std::function<void(NavigationDestination)> activated;
+    void select(int destination, bool enabled, bool lightAvailable);
+    static constexpr ui::Px barHeight = ui::metrics::chrome::actionHeight;
+    void setPanelOpen(bool open);
+    void setTextFace(const QString &face);
+    void setReturnLabel(const QString &label, const QString &note);
+    void setStatsTab(bool shown);
+    void setLightTab(bool shown);
+    std::function<void()> returnRequested;
+    std::function<void()> stayRequested;
+    int navigationHeight() const;
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
+private:
+    bool panelOpen = false;
+    QVector<QPushButton *> tabs;
+    ui::CaptionButton *returnButton;
+    QWidget *returnRow;
+};
+// Navigation arranges existing panels and reports actions. It does not own book state.
+class Navigation final {
+public:
+    Navigation(QWidget *parent, const ToolbarComposition &toolbar);
+    ~Navigation();
+    Navigation(const Navigation &) = delete;
+    Navigation &operator=(const Navigation &) = delete;
+    std::function<void(NavigationDestination)> activated;
+    std::function<void()> returnRequested;
+    std::function<void()> stayRequested;
+    int statsTopPadding() const {
+        return ui::metrics::chrome::statsTopPadding;
+    }
+    void setStatusVisible(bool visible) {
+        statusVisible = visible;
+    }
+    void setTextFace(const QString &face) {
+        bar->setTextFace(face);
+    }
+    int statusHeight() const {
+        return statusVisible ? int(ui::metrics::chrome::statusHeight) : 0;
+    }
+    int toolbarHeight() const {
+        return statusHeight() + ui::metrics::chrome::actionHeight;
+    }
+    Qt::Edge panelEdge() const {
+        return Qt::TopEdge;
+    }
+    QRect panelBounds(QSize size, int height) const;
+    void update(QSize size, const NavigationState &state);
+    int navigationTop() const {
+        return bar->y();
+    }
+    int contentBottom(QSize size) const {
+        return size.height() - BottomNavigation::barHeight;
+    }
+    bool contains(QPoint global) const;
+
+private:
+    bool statusVisible = true;
+    BottomNavigation *bar;
+    QLabel *pageCount;
+    ui::Panel *toolbar;
+    QLayout *toolbarRows;
+    QWidget *exitAction, *rules, *settings, *bookmarks, *upperEdge, *lowerEdge;
+    QLabel *clock, *session, *battery;
+    ui::BluetoothIndicator *bluetooth;
+    QString sessionStyle, settingsStyle, bookmarksStyle;
+    ui::ButtonPaintMode settingsPaint = ui::ButtonPaintMode::Native, bookmarksPaint = ui::ButtonPaintMode::Native;
+};
+}

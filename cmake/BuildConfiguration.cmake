@@ -1,0 +1,14 @@
+# A configured object directory belongs to one target and installation mode.
+# Build helpers already use separate paths; direct CMake callers must do so too.
+if(KOBALT_READER_TEMPORARY)
+    set(KOBALT_PURPOSE temporary)
+elseif(KOBALT_READER_HARDWARE)
+    set(KOBALT_PURPOSE hardware)
+else()
+    set(KOBALT_PURPOSE development)
+endif()
+set(configuration "${KOBALT_TARGET}/${KOBALT_PURPOSE}")
+if(DEFINED KOBALT_CONFIGURED_BUILD AND NOT KOBALT_CONFIGURED_BUILD STREQUAL configuration)
+    message(FATAL_ERROR "Use a separate build directory for each target and installation mode. This directory belongs to ${KOBALT_CONFIGURED_BUILD}.")
+endif()
+set(KOBALT_CONFIGURED_BUILD "${configuration}" CACHE INTERNAL "Configuration owning this build directory")

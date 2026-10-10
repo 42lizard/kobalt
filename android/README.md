@@ -1,0 +1,195 @@
+# Android reader
+
+This target builds the standalone Android app from the same reader, UI, EPUB inspection and storage code as the Kobo targets. Android supplies document import, keyboard, orientation and battery services. It does not link Nickel.
+
+The opening screen offers Choose book and Exit. Choose book launches the Android document picker. It can also receive an EPUB from another app through Android's Open with menu. It copies the selected document into app-private storage, with a 128 MiB limit. While reading, Volume Down and Page Down turn forward; Volume Up and Page Up turn back. On the startup and loading screens, volume buttons keep their Android behaviour. A turn starts on the initial press, with no extra turn on hold or release. Device button settings can change which events Android sends to the app. The opening screen and reader keep their controls inside Android's safe area for camera cutouts and system bars. Insets can change with rotation or when system bars appear; the reader resizes to the available canvas. Settings, bookmarks and reading position are local. Restarting shows the startup screen with a Reopen last book card. Tap it to restore the last successfully opened book and its reading position. Very long title and author labels are shortened for the card without changing the book. There is no recent-books list.
+
+The Android version name follows the source version; the numeric version code defaults to 1 for development and can be set with `--version-code`. Dictionary lookup, frontlight control and device-specific e-ink waveforms are not implemented. This is a development build, not a finished Android release. The reader uses a private loopback socket for its resource transport, which requires Android's INTERNET permission. It does not connect to Kobo accounts or sync services.
+
+## Toolchain
+
+The build uses these versions:
+
+| Input | Version |
+|---|---|
+| Qt host tools and Android kit | 6.11.3 |
+| Qt modules | Core, Gui, Widgets, Network and Sensors |
+| Android SDK / build tools | API 36 / 36.0.0 |
+| Android NDK | 27.2.12479018 |
+| Minimum device API | 28, Android 9 |
+| Default device ABI | arm64-v8a |
+
+Install Python 3.10 or later, CMake, Ninja, pkg-config, patch and a JDK compatible with Qt's Gradle build. Android Studio includes a compatible JDK. Install the matching Qt desktop host tools and Android kit; do not use the Kobo-patched Qt SDK. The dependency URLs and SHA-256 pins are in `dependencies/manifest.json` and `android/dependencies.json`.
+
+With Android command-line tools installed, obtain the SDK packages using `sdkmanager`. Review its license prompts:
+
+```sh
+sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.2.12479018' 'platform-tools'
+```
+
+Run the following exports in the same terminal as the build command, each time you open a new terminal. You can save these non-secret paths in a local shell setup file and source it before building. For an Apple Silicon macOS installation with Qt under `~/Qt`:
+
+```sh
+export JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home'
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/27.2.12479018"
+export QT_HOST_PATH="$HOME/Qt/6.11.3/macos"
+export QT_ANDROID_ARM64_PATH="$HOME/Qt/6.11.3/android_arm64_v8a"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
+```
+
+If using the standalone Temurin JDK installed inside the Android SDK instead of Android Studio, replace `JAVA_HOME` and update `PATH`:
+
+```sh
+export JAVA_HOME="$ANDROID_HOME/jdk/jdk-21.0.12.1+1/Contents/Home"
+export PATH="$JAVA_HOME/bin:$PATH"
+```
+
+Use the directory name of your installed JDK if its version differs. Keep the debug signing key from previous builds. If you previously set `ANDROID_USER_HOME`, retain that value; changing it can select a different `debug.keystore` and prevent an in-place update.
+
+On Linux, use the installed Linux Qt host kit and local SDK/JDK paths. For an x86_64 emulator, install the Qt Android x86_64 kit and set `QT_ANDROID_PATH` to it. Host platform support beyond the existing macOS setup needs validation.
+
+Check that the selected tools exist before building:
+
+```sh
+test -f "$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
+test -x "$QT_HOST_PATH/bin/qt-cmake"
+test -x "$QT_ANDROID_ARM64_PATH/bin/qt-cmake"
+test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+"$JAVA_HOME/bin/java" -version
+cmake --version
+ninja --version
+pkg-config --version
+```
+
+Each `test` command succeeds silently. A nonzero exit status means the selected file is missing. A `missing ANDROID_NDK_ROOT` error from the build script means the variable is unset in that terminal; run the export block above. Installing the SDK alone does not set these variables.
+
+## Build
+
+The application ID is `com.nicoverbruggen.kobalt`.
+
+Change to the root of your public Kobalt checkout before running any command below. For a debug build:
+
+```sh
+python3 android/build.py --jobs 2
+```
+
+The debug APK is `build/android/arm64-v8a/app/android-build/kobalt_android.apk`. It is signed with the local Android debug key and is suitable for sideloaded testing. Android and Kobo apply the same CREngine patches from `dependencies/crengine-patches.txt`. Changes to those patches or the publication policy invalidate cached books and inspection results. The helper uses independent Android build directories, verifies dependency archives before extraction, and rejects unsupported resource-service symbols before packaging. `--offline` requires cached native dependency archives and font assets; it does not put Gradle into offline mode. `--native-only` compiles without packaging an APK. `--abi x86_64` selects the emulator ABI.
+
+Install onto an explicitly selected test device:
+
+```sh
+adb -s DEVICE_SERIAL install -r build/android/arm64-v8a/app/android-build/kobalt_android.apk
+```
+
+## Release signing
+
+The APK is signed, not the source checkout or Git commit. Release signing uses your Android private key. Git commit signing is separate.
+
+### Restore an existing key
+
+Restore your `.p12` key from secure storage to a folder outside the repository, for example `$HOME/kobalt-signing/kobalt-release.p12`. Keep its passphrase in a password manager, such as 1Password. The commands below use that example path; change it if you store the key elsewhere.
+
+```sh
+chmod 600 "$HOME/kobalt-signing/kobalt-release.p12"
+"$JAVA_HOME/bin/keytool" -list -v \
+  -keystore "$HOME/kobalt-signing/kobalt-release.p12" \
+  -storetype PKCS12 -alias kobalt-release
+```
+
+Enter the passphrase at the prompt. Check the alias and certificate SHA-256 fingerprint against your saved record. If the key has a different alias, use that alias in both this command and `--key-alias` below. Do not paste the passphrase into a shell command, source file or chat. Keep a separate secure backup of the key and test that the backup opens. Future updates need the same signing identity.
+
+### Generate a key only if none exists
+
+Skip this step if you already have a signing key. Do not generate a replacement key for each build or machine. The following creates a PKCS#12 key outside the repository and prompts for its passphrase:
+
+```sh
+(
+  umask 077
+  mkdir -p "$HOME/kobalt-signing" &&
+  "$JAVA_HOME/bin/keytool" -genkeypair \
+    -keystore "$HOME/kobalt-signing/kobalt-release.p12" \
+    -storetype PKCS12 -alias kobalt-release \
+    -keyalg RSA -keysize 3072 -sigalg SHA256withRSA \
+    -validity 10000 -dname "CN=Kobalt"
+)
+```
+
+Save the file, passphrase, alias and certificate SHA-256 fingerprint in your password manager. Verify a copy downloaded from the password manager with the `keytool -list` command before relying on it.
+
+### Build and sign
+
+To prepare an unsigned release build:
+
+```sh
+python3 android/build.py --release --jobs 2
+```
+
+Release outputs use `build/android/arm64-v8a-release/`.
+
+To build and sign with a PKCS#12 key exported from your password manager, run this in your terminal:
+
+```sh
+python3 android/build.py --release --jobs 2 \
+  --keystore "$HOME/kobalt-signing/kobalt-release.p12" --key-alias kobalt-release
+```
+
+The script asks for the passphrase without echoing it. It passes the passphrase to Android's signing tool through standard input, not a command argument or file. This expects the same password for the PKCS#12 store and private key. Keep the file outside the checkout. The alias defaults to `kobalt-release`.
+
+To sign an existing release APK without rebuilding:
+
+```sh
+python3 android/sign.py \
+  build/android/arm64-v8a-release/app/android-build/kobalt_android.apk \
+  --keystore "$HOME/kobalt-signing/kobalt-release.p12"
+```
+
+Both commands align native libraries to 16 KiB boundaries before signing, then verify the signature and alignment. The verified output is `build/android/arm64-v8a-release/app/android-build/kobalt_android-signed.apk`. A signing or verification failure preserves any previous signed output. The certificate fingerprint is printed for comparison with your saved fingerprint. No key or passphrase is copied into the build directory. The scripts do not retrieve secrets from a password manager.
+
+### Verify and install
+
+The signing script already verifies the APK. To repeat the checks manually:
+
+```sh
+"$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs \
+  build/android/arm64-v8a-release/app/android-build/kobalt_android-signed.apk
+"$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 \
+  build/android/arm64-v8a-release/app/android-build/kobalt_android-signed.apk
+"$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging \
+  build/android/arm64-v8a-release/app/android-build/kobalt_android-signed.apk
+```
+
+Check that the package is `com.nicoverbruggen.kobalt`, that the version is the one you intend to distribute, and that the signer certificate SHA-256 fingerprint matches your key. Do not modify the APK after signing. A failed signing command leaves any previous signed APK intact; do not mistake that older file for a new build.
+
+Enable USB debugging on the test device and authorize this computer on the device. Select the device explicitly:
+
+```sh
+adb devices -l
+adb -s DEVICE_SERIAL install -r \
+  build/android/arm64-v8a-release/app/android-build/kobalt_android-signed.apk
+```
+
+Replace `DEVICE_SERIAL` with the serial reported by `adb devices`. A signature mismatch means the installed app uses another key, such as a debug key. A release-signed APK cannot update that installation. Uninstalling the old app removes its app-private books, settings and reading progress, so preserve needed data before choosing that route. Do not change the release key just to match a temporary debug build.
+
+### Prepare subsequent releases
+
+The application ID stays `com.nicoverbruggen.kobalt`. The displayed version comes from `KOBALT_RELEASE_VERSION`, an extracted source bundle, an exact Git version tag, or the `KOBALT_VERSION` development fallback in the root `CMakeLists.txt`, in that order. Android's numeric version code defaults to 1; changing the displayed version does not increment it. Pass `--version-code NUMBER` to `android/build.py` for each release. Use a number greater than every previously distributed release, between 1 and 2100000000. The helper sets the `QT_ANDROID_VERSION_CODE` target property through `KOBALT_ANDROID_VERSION_CODE` and does not increment it automatically. Confirm the packaged value with `aapt2 dump badging`.
+
+Never commit the keystore or passphrase. Use the same signing key for future updates and increase the version code for each release. Never publish an APK signed with a development debug key. Before distribution, validate the signed APK on target hardware and provide the corresponding source and dependency sources described in the root README.
+
+See Android's [app signing guide](https://developer.android.com/studio/publish/app-signing), [apksigner reference](https://developer.android.com/tools/apksigner) and [versioning guide](https://developer.android.com/studio/publish/versioning) for the platform requirements.
+
+## Validation
+
+Hardware refresh quality and physical page-button mapping need device tests; an Android emulator does not reproduce an e-reader's display driver.
+
+Qt accessibility currently has limited support for the embedded reader. After a reader session closes, the opening screen can remain visible without its buttons appearing in the Android accessibility tree. Touch input still works.
+
+## Icon
+
+The adaptive launcher icon uses an outlined open book with a small bookmark and an Instrument Serif K. Android chooses the outer mask. Android 13 and later can use its monochrome layer for themed icons.
+
+[Promotional SVG](../docs/assets/kobalt-android.svg) contains the rounded-square version. All lettering is converted to paths, so it renders without an installed font. The matching Android vector is `app/res/drawable/kobalt_mark.xml`. Both use the same book, bookmark and K paths; keep those paths together when editing the artwork.
+
+Android builds compile and package pinned OpenSSL 3.5.9 libraries for HTTPS dictionary downloads. Qt’s TLS plugin uses `libssl_3.so` and `libcrypto_3.so` from the APK. Certificate verification remains enabled. The libraries support 16 KiB Android memory pages.

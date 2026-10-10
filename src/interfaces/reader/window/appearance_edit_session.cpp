@@ -1,0 +1,82 @@
+#include "appearance_edit_session.h"
+#include <QPointer>
+
+namespace kobalt::reader {
+AppearanceEditSession::~AppearanceEditSession() {
+    resetPreview();
+}
+void AppearanceEditSession::open(ReaderSession &main, QSize viewport, std::function<void()> changed,
+                                 std::function<void()> opened) {
+    Q_ASSERT(!preview_);
+    previewState_ = PreviewState::Opening;
+    error_.clear();
+    preview_ = std::make_unique<ReaderSession>(main.fontInputs(), main.placeholderFamily());
+    preview_->updated = std::move(changed);
+    const quint64 generation = ++generation_;
+    QPointer<AppearanceEditSession> guard(this);
+    preview_->openPreview(main, viewport, [guard, generation, opened = std::move(opened)](QString error) {
+        if (!guard || guard->generation_ != generation)
+            return;
+        guard->previewState_ = error.isEmpty() ? PreviewState::Ready : PreviewState::Failed;
+        guard->error_ = std::move(error);
+        if (opened)
+            opened();
+    });
+}
+void AppearanceEditSession::resetPreview() {
+    ++generation_;
+    if (preview_)
+        preview_->updated = {};
+    preview_.reset();
+    previewState_ = PreviewState::Absent;
+}
+void AppearanceEditSession::discard() {
+    resetPreview();
+    clearDestination();
+    applyState_ = ApplyState::Idle;
+    retention_ = Retention::Release;
+    error_.clear();
+}
+bool AppearanceEditSession::appearanceDestination() const {
+    return destination_ == Destination::Text || destination_ == Destination::Layout;
+}
+bool AppearanceEditSession::externalDestination() const {
+    return destination_ == Destination::Light || destination_ == Destination::Stats ||
+           destination_ == Destination::Chapters || destination_ == Destination::Search ||
+           destination_ == Destination::Bookmarks;
+}
+AppearanceEditSession::Destination AppearanceEditSession::takeDestination() {
+    const auto destination = destination_;
+    clearDestination();
+    return destination;
+}
+void AppearanceEditSession::cancelDeferredApply() {
+    if (applyState_ == ApplyState::Deferred)
+        applyState_ = ApplyState::Idle;
+}
+void AppearanceEditSession::cancelNavigation() {
+    if (destination_ != Destination::Reading)
+        clearDestination();
+}
+void AppearanceEditSession::clearContinuation() {
+    cancelNavigation();
+    cancelDeferredApply();
+}
+void AppearanceEditSession::beginApply(Retention retention) {
+    retention_ = retention;
+    applyState_ = ApplyState::Running;
+}
+void AppearanceEditSession::completeApply(bool successful, bool exiting) {
+    Q_ASSERT(applying());
+    applyState_ = ApplyState::Idle;
+    if (successful) {
+        if (!appearanceDestination() || retention_ != Retention::Reuse)
+            resetPreview();
+    } else {
+        cancelNavigation();
+        if (exiting)
+            resetPreview();
+    }
+    retention_ = Retention::Release;
+}
+}

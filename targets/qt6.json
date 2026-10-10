@@ -1,0 +1,17 @@
+{
+  "qt_major": 6,
+  "toolchain_image": "localhost/kobalt-toolchain-qt6:dev",
+  "toolchain_file": "/tc/arm-kobo-linux-gnueabihf/toolchain.cmake",
+  "build_root": "build/kobalt",
+  "hook_root": "toolchains/nickelhook-qt6",
+  "package_name": "Kobo.tgz",
+  "package_member": "imageformats/libkobalt.so",
+  "system_font_directory": "/usr/share/fonts",
+  "firmware": "5.18.270971",
+  "firmware_support": [
+    {
+      "minimum": "5.18",
+      "maximum_exclusive": "7"
+    }
+  ]
+}

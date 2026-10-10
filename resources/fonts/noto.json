@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/notofonts/notofonts.github.io",
+  "revision": "e0ad9f160a2942bcdd249bb1958e8336742edef3",
+  "license": "SIL OFL 1.1",
+  "files": [
+    {
+      "file": "NotoSerif-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/e0ad9f160a2942bcdd249bb1958e8336742edef3/fonts/NotoSerif/hinted/ttf/NotoSerif-Regular.ttf",
+      "sha256": "19e72cd8d595fae5bd74a5206f5d938512e1183d4fed7abb1ec1be1d7efa5f88"
+    },
+    {
+      "file": "NotoSansMath-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/e0ad9f160a2942bcdd249bb1958e8336742edef3/fonts/NotoSansMath/hinted/ttf/NotoSansMath-Regular.ttf",
+      "sha256": "d51afd5739c7ba6c44fcab35a88160e25dfb69a2d4ad0bd99533f8d894af1f96"
+    }
+  ]
+}

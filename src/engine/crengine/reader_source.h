@@ -1,0 +1,16 @@
+#pragma once
+#include "publication/resource_cache.h"
+#include <lvstream.h>
+
+namespace kobalt {
+// Private backing storage shared only by engine models and their previews.
+struct ReaderSource {
+    // A preview retains the publication storage even if its source model closes.
+    // Containers must die before the buffers backing their streams.
+    std::shared_ptr<ReaderSource> parent;
+    QByteArray bytes;
+    std::shared_ptr<ResourceCache> resources;
+    QMap<QString, qint64> sizes;
+    LVContainerRef container;
+};
+}

@@ -1,0 +1,3 @@
+The original literary works are in the public domain. The chapter transcriptions are from Wikisource and are available under Creative Commons Attribution-ShareAlike 4.0: https://creativecommons.org/licenses/by-sa/4.0/
+
+Each JSON file credits the original author and links to the exact Wikisource chapter revision. The linked revision history credits the Wikisource contributors. Extraction removes website navigation, page numbers and editorial reference markers. Paragraph text and inline literary formatting are retained. Simplified Chinese is a mechanical OpenCC t2s conversion of the Traditional Chinese source. The generated EPUBs contain the same credits in their metadata and sources.json.

@@ -1,0 +1,44 @@
+#pragma once
+#include <QJsonObject>
+#include <QString>
+
+namespace kobalt {
+struct ReadingProgress {
+    QString book, location;
+    qint64 modified = 0;
+    int status = 0;
+    bool valid = false;
+    bool samePosition(const ReadingProgress &other) const;
+    bool operator==(const ReadingProgress &other) const;
+    QJsonObject json() const;
+    static ReadingProgress fromJson(const QJsonObject &value);
+};
+
+// One reconciler belongs to one book opening. Only an explicit choice accepts
+// a different position. A choice about an older alert cannot accept a later one.
+class ProgressReconciler {
+public:
+    explicit ProgressReconciler(ReadingProgress initial) : latest(initial), acknowledged(initial) {}
+    void observe(const ReadingProgress &incoming);
+    void acknowledge(const ReadingProgress &shown);
+    bool pending() const {
+        return latest.valid && !(latest == acknowledged);
+    }
+    bool mayWrite(const ReadingProgress &current) const {
+        return !pending() && current == acknowledged;
+    }
+    const ReadingProgress &candidate() const {
+        return latest;
+    }
+    const ReadingProgress &baseline() const {
+        return acknowledged;
+    }
+
+private:
+    ReadingProgress latest, acknowledged;
+};
+
+// A local checkpoint is authoritative until Nickel has a different, newer
+// position than the native baseline stored alongside that checkpoint.
+bool preferNativeProgress(const ReadingProgress &current, const ReadingProgress &saved);
+}

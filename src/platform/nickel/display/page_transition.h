@@ -1,0 +1,45 @@
+#pragma once
+#include "page_animation.h"
+#include <QBackingStore>
+#include <QImage>
+#include <QRegion>
+#include <QVariant>
+#include <QWidget>
+
+namespace kobalt {
+// Image-quality turns replace the sweep with one whole-screen cleanup.
+// Both pages contribute regions, so leaving an illustration clears it too.
+template <class Submit>
+bool submitPageTransition(QBackingStore *store, QWidget *reader, int direction, bool dark, quint64 ordinary,
+                          quint64 repair, Submit submit) {
+    if (!direction || !pageAnimationsAvailable())
+        return false;
+    const QRect screen = reader->rect();
+    const bool colour = pageAnimationPanel() == AnimationPanel::Colour;
+    const QRegion regions =
+        reader->property(colour ? "reader_image_repairs" : "reader_mono_repairs").value<QRegion>() & screen;
+    if (!regions.isEmpty() || (colour && reader->property("reader_colour_regions").toBool())) {
+        submit(QRegion(screen), repair);
+        return true;
+    }
+    auto *device = store->paintDevice();
+    if (!device || device->devType() != QInternal::Image) {
+        return false;
+    }
+    auto *pixels = static_cast<QImage *>(device);
+    if (pixels->size() != screen.size() ||
+        (pixels->format() != QImage::Format_RGB32 && pixels->format() != QImage::Format_ARGB32 &&
+         pixels->format() != QImage::Format_ARGB32_Premultiplied && pixels->format() != QImage::Format_RGBX8888 &&
+         pixels->format() != QImage::Format_RGBA8888 && pixels->format() != QImage::Format_RGBA8888_Premultiplied)) {
+        return false;
+    }
+    armPageAnimation(direction, screen, dark);
+    submit(QRegion(screen), ordinary);
+    const bool swept = pageAnimationSucceeded();
+    const bool failed = pageAnimationResult() == PageAnimationResult::Fallback;
+    cancelPageAnimation();
+    if (!swept && failed)
+        submit(QRegion(screen), repair);
+    return true;
+}
+}
