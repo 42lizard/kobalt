@@ -124,6 +124,10 @@ int main(int argc, char **argv) {
     flush(split, {{first, darkOrdinary}, {second, darkOrdinary}});
     expectPolicy(darkOrdinary, "Split ordinary dark turn lost its full policy");
     require(submittedRegion == QRegion(split.boundingRect()), "Ordinary dark damage was not merged");
+    reader.setProperty("reader_page_turn", true);
+    flush(split, {{first, darkOrdinary}, {second, darkOrdinary}});
+    expectPolicy(bit(ordinaryAttribute) | bit(partialAttribute) | darkFlag,
+                 "Ordinary dark page turn did not use partial mode");
     pageRefresh(&page, true, true);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     require(attribute(page, imageAttribute) && attribute(page, fullAttribute) && !attribute(page, ordinaryAttribute) &&
@@ -161,9 +165,9 @@ int main(int argc, char **argv) {
 #endif
     const quint64 lightText = bit(lightOrdinaryAttribute) | bit(fullAttribute);
     flush(first, {{first, lightText}});
-    expectPolicy(lightText, "Light text turn lost its native full policy");
+    expectPolicy(bit(lightOrdinaryAttribute) | bit(partialAttribute), "Light reading bars did not use partial mode");
     flush(split, {{first, lightText}, {second, lightText}});
-    expectPolicy(lightText, "Split light turn lost its native full policy");
+    expectPolicy(bit(lightOrdinaryAttribute) | bit(partialAttribute), "Split reading bars did not use one partial policy");
     reader.setProperty("reader_page_turn", true);
     reader.setProperty("reader_mono_repairs", QVariant::fromValue(QRegion(first)));
     flush(split, {{first, lightText}, {second, lightText}});
@@ -251,6 +255,25 @@ int main(int argc, char **argv) {
     expectPolicy(ordinary | bit(start), "Animation phase omitted the synchronous screen flush flag");
     require(animationArms == 1, "Animation phase was not armed once");
     animationAvailable = false;
+    reader.setProperty("reader_plain_controls", false);
+    for (const char *backend : {"mxc_epdc_fb", "unknown"}) {
+        reader.setProperty("reader_refresh_backend", backend);
+        setReaderRefreshWindow(&reader);
+        pageRefresh(&page, false, true);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        const quint64 input = bit(132) | bit(129);
+#else
+        const quint64 input = bit(Qt::WA_KoboEpdWfModeAutoText) | bit(Qt::WA_KoboEpdUpdateModeHeuristic);
+#endif
+        flush(split, {{first, input}, {second, input}});
+        require(submittedFlags.size() == 1, "Fallback control update did not merge");
+        const quint64 policy = submittedFlags[0].second;
+        reader.setProperty("reader_page_turn", true);
+        flush(split, {{first, input}, {second, input}});
+        require(submittedRegion == QRegion(reader.rect()), "Fallback turn did not cover the whole screen");
+        expectPolicy(policy, "Fallback turn changed the existing mode or waveform");
+        require(!reader.property("reader_page_turn").toBool(), "Fallback turn request was not consumed");
+    }
     setReaderRefreshWindow(nullptr);
     std::puts("PASS: dark refresh policies, animation suppression and native flush scope");
     return 0;

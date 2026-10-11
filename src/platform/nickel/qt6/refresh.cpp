@@ -129,6 +129,22 @@ void flushReader(QBackingStore *store, const QRegion &region, QWindow *target, c
                 return;
             }
         }
+        const bool plainControls = !dark && readerWindow->property("reader_plain_controls").toBool();
+        if ((pageTurn || plainControls) && !direction && compatible &&
+            refreshBackend(readerWindow) == RefreshBackend::Mtk &&
+            policies.size() == 1 && policies[0].second == ordinaryPolicy(dark)) {
+            // Keep one submission while the driver compares pixels within the rectangle.
+            const quint64 policy = (policies[0].second & ~(heuristic | full)) | partialMode;
+            nativeFlush(store, damage, target, offset, {{policies[0].first, policy}});
+            return;
+        }
+        if (pageTurn && !direction && compatible && refreshBackend(readerWindow) != RefreshBackend::Mtk &&
+            policies.size() == 1 && policies[0].second == ordinaryPolicy(dark)) {
+            // Older and unknown backends keep their reading policy over the whole screen.
+            const QRect screen = readerWindow->rect();
+            nativeFlush(store, QRegion(screen), target, offset, {{screen, policies[0].second}});
+            return;
+        }
         nativeFlush(store, damage, target, offset, policies);
     };
     if (region.rectCount() > 1 && compatible) {

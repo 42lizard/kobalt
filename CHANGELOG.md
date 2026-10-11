@@ -1,3 +1,13 @@
+## v1.0-beta.3
+
+### What's changed
+
+- Fixed unchanged header and footer text flashing during ordinary page turns on MTK devices. These turns now use partial update mode.
+
+- Use whole-screen coverage for ordinary page turns on older and unknown hardware, keeping the existing update mode and waveform.
+
+- Avoid cleanup flashes when opening reading controls over text-only pages in light mode. Closing the controls by tapping the page or title retains cleanup. Dark-mode controls use cleanup when opening and closing.
+
 ## v1.0-beta.2
 
 ### What's changed

@@ -234,6 +234,22 @@ static void flushReaderUsing(QBackingStore *store, const QRegion &region, QWindo
                 return;
             }
         }
+        const bool plainControls = !dark && readerWindow->property("reader_plain_controls").toBool();
+        if ((pageTurn || plainControls) && !direction && compatible &&
+            refreshBackend(readerWindow) == RefreshBackend::Mtk &&
+            chosen.size() == 1 && chosen[0].second == ordinaryPolicy(dark, wide)) {
+            // Keep one submission while the driver compares pixels within the rectangle.
+            const quint64 policy = (chosen[0].second & ~(heuristic | full)) | partialMode;
+            submit(damage, {{chosen[0].first, policy}});
+            return;
+        }
+        if (pageTurn && !direction && compatible && refreshBackend(readerWindow) != RefreshBackend::Mtk &&
+            chosen.size() == 1 && chosen[0].second == ordinaryPolicy(dark, wide)) {
+            // Older and unknown backends keep their reading policy over the whole screen.
+            const QRect screen = readerWindow->rect();
+            submit(QRegion(screen), {{screen, chosen[0].second}});
+            return;
+        }
         submit(damage, chosen);
     };
     if (region.rectCount() > 1 && compatible) {

@@ -1015,7 +1015,9 @@ void Reader::syncNavigation() {
 
 void Reader::showControls() {
     model->cancelPendingTurn();
-    flashAfterMenu = false;
+    flashAfterMenu = property("reader_dark").toBool();
+    if (flashAfterMenu)
+        requestFlash("menu-open");
     dismissLinks();
     linkReturn->hide();
     updateMenuStatus();
