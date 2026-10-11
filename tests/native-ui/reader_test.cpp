@@ -57,10 +57,20 @@
 #include <QTextDocument>
 #include <QTemporaryDir>
 #include <QPaintEvent>
+#include <QThread>
+#include <atomic>
 
 using namespace kobalt;
 namespace {
 const QSize nativeSize(1264, 1680);
+std::atomic_bool delayUsbEncoding{false}, usbEncodingReturned{false};
+QString usbPosition(const ReaderModel &model, QString *error) {
+    if (delayUsbEncoding) {
+        QThread::msleep(2500);
+        usbEncodingReturned = true;
+    }
+    return nickel::positionCodec().encode(model, error);
+}
 AssetBundle *testAssets = nullptr;
 FontCopies *testFontCopies = nullptr;
 EngineFontInputs testFonts;
@@ -3292,6 +3302,130 @@ private slots:
         QTest::addColumn<bool>("markFinished");
         QTest::newRow("still-reading") << false;
         QTest::newRow("mark-finished") << true;
+    }
+    void nativeProgressAutosave_data() {
+        QTest::addColumn<bool>("sleep");
+        QTest::addColumn<QString>("outcome");
+        for (const bool sleep : {false, true}) {
+            for (const auto *outcome : {"saved", "newer", "failed"}) {
+                const auto name = QString("%1-%2").arg(sleep ? "sleep" : "background", outcome);
+                QTest::newRow(qPrintable(name)) << sleep << QString::fromLatin1(outcome);
+            }
+        }
+    }
+    void nativeProgressAutosave() {
+        QFETCH(bool, sleep);
+        QFETCH(QString, outcome);
+        QTemporaryDir root;
+        auto paths = testPaths();
+        paths.directory = root.path();
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        const auto identity = QUrl::fromLocalFile(QFileInfo(fixture()).absoluteFilePath()).toString();
+        host.progress = std::make_shared<test::HostProgress>();
+        host.progress->current = {identity, "OEBPS/c1.xhtml", 100, 1, true};
+        host.positions = nickel::positionCodec();
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        QTRY_VERIFY(host.progress->writes > 0);
+        auto *timer = host.window()->findChild<QTimer *>("rrNativeProgressTimer");
+        QVERIFY(timer);
+        QCOMPARE(timer->interval(), 30000);
+        const int openingWrites = host.progress->writes;
+        QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+        QCOMPARE(host.progress->writes, openingWrites);
+        QVERIFY(host.session()->go(1));
+        QTRY_VERIFY(!host.session()->busy());
+        const auto anchor = host.session()->state().value("position").toString();
+        QString error;
+        const auto expected = host.session()->savedNativePosition(&error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QVERIFY(!expected.isEmpty());
+        const double percent = 100.0 * host.session()->page() / host.session()->pages();
+        const int writes = host.progress->writes;
+        if (outcome == "newer") {
+            host.progress->publish({identity, "OEBPS/c3.xhtml#kobo.8.1:7", 200, 1, true});
+        }
+        host.progress->failWrite = outcome == "failed";
+        const auto before = host.progress->current;
+        if (sleep) {
+            host.window()->sleepReader();
+        } else {
+            QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+        }
+        QCOMPARE(host.progress->writes, writes + (outcome == "saved" ? 1 : 0));
+        if (outcome == "saved") {
+            QCOMPARE(host.progress->current.location, expected);
+            QCOMPARE(host.progress->percent, percent);
+            QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+            QCOMPARE(host.progress->writes, writes + 1);
+        } else {
+            QVERIFY(host.progress->current == before);
+        }
+        QCOMPARE(storage::readJson(paths.bookState(identity)).value("position").toString(), anchor);
+    }
+    void usbFinalSave_data() {
+        QTest::addColumn<QString>("outcome");
+        for (const auto &outcome : {"saved", "failed", "newer", "timeout"}) {
+            QTest::newRow(outcome) << QString::fromLatin1(outcome);
+        }
+    }
+    void usbFinalSave() {
+        QFETCH(QString, outcome);
+        struct ResetDelay {
+            ~ResetDelay() {
+                delayUsbEncoding = false;
+            }
+        } resetDelay;
+        QTemporaryDir root;
+        auto paths = testPaths();
+        paths.directory = root.path();
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        const auto identity = QUrl::fromLocalFile(QFileInfo(fixture()).absoluteFilePath()).toString();
+        host.progress = std::make_shared<test::HostProgress>();
+        host.progress->current = {identity, "OEBPS/c1.xhtml", 100, 1, true};
+        host.positions = nickel::positionCodec();
+        host.positions.encode = usbPosition;
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QTRY_VERIFY(!host.session()->busy());
+        const int writes = host.progress->writes;
+        host.progress->failWrite = outcome == "failed";
+        if (outcome == "newer") {
+            host.progress->publish({identity, "OEBPS/c3.xhtml#kobo.8.1:7", 200, 1, true});
+        }
+        const auto before = host.progress->current;
+        usbEncodingReturned = false;
+        delayUsbEncoding = outcome == "timeout";
+        int completed = 0;
+        QElapsedTimer elapsed;
+        elapsed.start();
+        host.window()->prepareUsb([&] {
+            ++completed;
+        });
+        QTRY_COMPARE_WITH_TIMEOUT(completed, 1, 3000);
+        QVERIFY(elapsed.elapsed() < 2400);
+        if (outcome == "timeout") {
+            QTRY_VERIFY_WITH_TIMEOUT(usbEncodingReturned.load(), 3000);
+            // Drain the late engine callback while the window remains alive.
+            QTest::qWait(100);
+        }
+        delayUsbEncoding = false;
+        QCOMPARE(completed, 1);
+        QCOMPARE(host.progress->writes, writes + (outcome == "saved" ? 1 : 0));
+        if (outcome != "saved") {
+            QVERIFY(host.progress->current == before);
+        }
+        const auto local = storage::readJson(paths.bookState(identity));
+        QVERIFY(!local.value("position").toString().isEmpty());
     }
     void finishChoiceSurvivesSleepAndRequiresActiveReader() {
         QFETCH(bool, markFinished);

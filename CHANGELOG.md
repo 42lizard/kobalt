@@ -2,6 +2,10 @@
 
 ### What's changed
 
+- Save changed reading progress to Nickel every 30 seconds while reading and before sleep, so the sleep screen can show the current progress.
+
+- Save reading progress before USB export, while preserving newer synced progress and allowing USB to continue if saving fails.
+
 - Fixed unchanged header and footer text flashing during ordinary page turns on MTK devices. These turns now use partial update mode.
 
 - Use whole-screen coverage for ordinary page turns on older and unknown hardware, keeping the existing update mode and waveform.

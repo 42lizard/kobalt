@@ -9,6 +9,7 @@ extern void (*nativeShowSleepView)(void *);
 extern void (*nativeHideSleepView)(void *);
 extern bool (*nativeCanSuspend)(void *);
 extern void (*nativeUsbConnect)(void *);
+extern void (*nativeUsbWorkflow)(void *);
 extern void (*nativeAboutUsbConnect)(void *);
 extern void (*nativePowerOff)(void *, bool);
 extern void (*nativeReboot)(void *);
@@ -21,6 +22,8 @@ public:
     explicit NativeLifecycle(QObject *parent);
     static bool powerAvailable();
     static bool suspended();
+    static bool sleepSaveAllowed();
+    static bool usbSaveAllowed();
     bool connected() const {
         return connected_;
     }
@@ -42,6 +45,7 @@ public:
     static bool canSuspend();
     static void beginUsb();
     static bool interceptUsb(QObject *manager);
+    static bool interceptUsbWorkflow(QObject *manager);
     enum class Shutdown { PowerOff, BatteryLow, Reboot };
     static bool interceptShutdown(QObject *manager, Shutdown mode);
 #ifndef KOBALT_READER_HARDWARE
@@ -57,9 +61,10 @@ private slots:
     void unplugging();
 
 private:
+    bool savingBeforeSleep = false;
     bool connected_ = false, asleep = false, usbPending = false, exported = false, poweringOff = false;
     bool storageReady = false, remounting = false;
-    QPointer<QObject> pendingGadget;
+    QPointer<QObject> pendingGadget, pendingWorkflow;
     void finishUsb();
     quint64 generation = 0;
     UsbRemoval usbRemoval;

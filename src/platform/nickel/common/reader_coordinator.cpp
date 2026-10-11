@@ -121,10 +121,18 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
     lifecycle->prepareUsb = [this](std::function<void()> ready) {
         authorization->setBlocked(true);
         timer.stop();
-        disposeForTransition([this, ready = std::move(ready)] {
-            environment_.assets.invalidate();
-            ready();
-        });
+        auto release = [this, ready = std::move(ready)] {
+            kobalt::diagnostic("usb-release-start");
+            disposeForTransition([this, ready] {
+                environment_.assets.invalidate();
+                ready();
+            });
+        };
+        if (run.reader) {
+            run.reader->prepareUsb(std::move(release));
+        } else {
+            release();
+        }
     };
     lifecycle->prepareShutdown = [this](std::function<void()> ready) {
         authorization->setBlocked(true);

@@ -62,6 +62,7 @@ public:
     void refreshRenderNotice();
     bool readyForPresentation() const override;
     void checkpoint() override;
+    void prepareUsb(std::function<void()> finished) override;
     void prepareShutdown(std::function<void()> finished) override;
     void sleepReader() override;
     void prepareWake() override;
@@ -84,8 +85,12 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
+    void prepareTransition(std::function<void()> finished, int timeoutMs);
     // Construction, in this order. Each step builds one group of widgets and
     // connects its signals.
+    void saveNativeProgress();
+    QString savedNativeAnchor;
+    int savedNativePage = -1, savedNativePages = -1;
     void buildReadingPage();
     void startClockTimer();
     void buildToolbar();

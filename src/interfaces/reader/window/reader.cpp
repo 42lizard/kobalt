@@ -59,6 +59,14 @@ void Reader::checkpoint() {
 }
 
 void Reader::prepareShutdown(std::function<void()> finished) {
+    prepareTransition(std::move(finished), 0);
+}
+void Reader::prepareUsb(std::function<void()> finished) {
+    prepareTransition(std::move(finished), 2000);
+}
+void Reader::prepareTransition(std::function<void()> finished, int timeoutMs) {
+    auto elapsed = std::make_shared<QElapsedTimer>();
+    elapsed->start();
     model->cancelPendingTurn();
     book->stopReading();
     lifecycleHidden = true;
@@ -67,13 +75,32 @@ void Reader::prepareShutdown(std::function<void()> finished) {
     clockTimer->stop();
     setEnabled(false);
     save(true);
-    model->nativePosition([this, finished](const QString &location, const QString &error) {
-        // A pending sync conflict keeps its native bookmark and the local
-        // checkpoint. Shutdown cannot wait for a new confirmation dialog.
-        book->writeNative(location, error);
-        save(true);
-        finished();
-    });
+    auto completed = std::make_shared<bool>(false);
+    if (timeoutMs) {
+        kobalt::qt::later(qMax(0, timeoutMs - int(elapsed->elapsed())), this, [completed, finished] {
+            if (std::exchange(*completed, true)) {
+                return;
+            }
+            kobalt::diagnostic("usb-save-timeout");
+            finished();
+        });
+    }
+    model->nativePosition(
+        [this, completed, elapsed, timeoutMs, finished](const QString &location, const QString &error) {
+            if (std::exchange(*completed, true)) {
+                return;
+            }
+            if (timeoutMs && elapsed->elapsed() >= timeoutMs) {
+                kobalt::diagnostic("usb-save-timeout");
+            } else {
+                // Keep a newer Nickel bookmark if reconciliation or the locked
+                // comparison rejects this save. Device transitions cannot ask
+                // the reader to resolve a conflict before they continue.
+                book->writeNative(location, error);
+                save(true);
+            }
+            finished();
+        });
 }
 
 void Reader::sleepReader() {
@@ -86,6 +113,7 @@ void Reader::sleepReader() {
     page->animationDirection = 0;
     setProperty("reader_animation_direction", 0);
     appearanceEdit.clearContinuation();
+    saveNativeProgress();
     checkpoint();
     closeSearch();
     dismissLookup();
@@ -146,6 +174,31 @@ void Reader::wakeReader() {
         if (!lifecycleHidden && isVisible())
             repaint();
     });
+}
+
+void Reader::saveNativeProgress() {
+    if (!book->canWriteNative() || model->image().isNull() || !model->error().isEmpty() || appearanceEdit.preview() ||
+        importingProgress || syncDialog) {
+        return;
+    }
+    const auto anchor = model->state().value("position").toString();
+    if (anchor.isEmpty() ||
+        (anchor == savedNativeAnchor && model->page() == savedNativePage && model->pages() == savedNativePages)) {
+        return;
+    }
+    QString error;
+    const auto location = model->savedNativePosition(&error);
+    if (!book->writeNative(location, error)) {
+        return;
+    }
+    QJsonObject state;
+    book->checkpoint(&state);
+    const auto result = state.value("native_writeback").toString();
+    if (result == "verified" || result == "time-only") {
+        savedNativeAnchor = anchor;
+        savedNativePage = model->page();
+        savedNativePages = model->pages();
+    }
 }
 
 void Reader::progressTick() {
@@ -1198,14 +1251,9 @@ void Reader::recordOpening() {
         syncDialog || finishDialog || services.suspended() || book->deviceTransition())
         return;
     recordedOpening = true;
-    model->nativePosition([this](const QString &location, const QString &mappingError) {
-        if (closing || lifecycleHidden)
-            return;
-        // A newer synced position waits for the reader's choice; the
-        // sync dialog asks, and exit saves afterwards.
-        book->writeNative(location, mappingError);
-        save(true);
-    });
+    // A newer synced position waits for the reader's choice.
+    saveNativeProgress();
+    save(true);
 }
 
 void Reader::finishExit() {

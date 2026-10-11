@@ -95,6 +95,14 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
             return layoutKey();
         },
         book->paths().annotations(), book->identity(), book->fingerprint(), model->title());
+    auto *nativeSaveTimer = new QTimer(this);
+    nativeSaveTimer->setObjectName("rrNativeProgressTimer");
+    connect(nativeSaveTimer, &QTimer::timeout, this, [this] {
+        if (!closing && !lifecycleHidden && !exportRunning && !model->busy() && !progressBlocked()) {
+            saveNativeProgress();
+        }
+    });
+    nativeSaveTimer->start(30000);
     bookmarks->changed = [this] {
         refresh();
     };

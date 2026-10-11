@@ -85,12 +85,13 @@ void prepareNeighbours(ReaderModel &model, int direction, const std::function<bo
 }
 // `neighbours` is false when the caller hands the frame to the screen first
 // and prepares the neighbour pages afterwards.
-ReaderFrame capture(ReaderModel &model, bool neighbours = true) {
+ReaderFrame capture(ReaderModel &model, const PositionCodec &positions, bool neighbours = true) {
     engineActivity().checkpoint();
     ReaderFrame result;
     result.image = model.image(model.page());
     result.links = model.pageLinks();
     result.state = model.state();
+    result.nativePosition = model.platformPosition(positions, &result.nativePositionError);
     captureChapters(result, model);
     result.state["page"] = model.page();
     result.state["pages"] = model.pages();
@@ -426,7 +427,7 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                         outcome = OpeningResult::failed(OpeningFailureKind::InvalidContent,
                                                         strings::key("error.cannot_restore_the_retained_position"));
                     if (outcome.ready() && !cancelled()) {
-                        result = capture(*engine, false);
+                        result = capture(*engine, positions, false);
                         result.author = engine->author();
                         result.cover = engine->coverThumbnail();
                         report(OpeningStage::Ready, 100);
@@ -471,7 +472,7 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                             locate(initial);
                         if (outcome.ready()) {
                             report(OpeningStage::Ready, 0);
-                            result = capture(*engine, false);
+                            result = capture(*engine, positions, false);
                             result.author = engine->author();
                             result.cover = engine->coverThumbnail();
                             report(OpeningStage::Ready, 100);
@@ -569,10 +570,11 @@ void ReaderSession::openPreview(const ReaderSession &source, QSize size, std::fu
     preview_ = true;
     desiredSize = size;
     QPointer<ReaderSession> guard(this);
+    const auto positions = positions_;
     auto engine = model, book = source.model;
     kobalt::qt::invoke(
         engineWorker(),
-        [guard, engine, book, size, finished, lease, job] {
+        [guard, engine, book, size, finished, lease, job, positions] {
             EngineJob activity;
             QElapsedTimer timer;
             timer.start();
@@ -584,7 +586,7 @@ void ReaderSession::openPreview(const ReaderSession &source, QSize size, std::fu
             else if (!engine->openPreview(*book, size, &error))
                 result.error = error;
             else
-                result = capture(*engine, false);
+                result = capture(*engine, positions, false);
             diagnostic("preview-end", {{"elapsed_ms", double(timer.elapsed())}, {"failed", !result.error.isEmpty()}});
             kobalt::qt::invoke(
                 qApp,
@@ -782,7 +784,7 @@ bool ReaderSession::goToNative(const QString &location, std::function<void(QStri
             diagnostic("native-import-start");
             QString error;
             engine->goToPlatform(positions, location, &error);
-            auto result = capture(*engine);
+            auto result = capture(*engine, positions);
             diagnostic("native-import-end", {{"failed", !error.isEmpty()}});
             kobalt::qt::invoke(
                 qApp,
@@ -1086,10 +1088,11 @@ void ReaderSession::loadImages() {
     const auto job = revision;
     QPointer<ReaderSession> guard(this);
     const auto lease = lease_;
+    const auto positions = positions_;
     const bool preview = preview_;
     kobalt::qt::invoke(
         engineWorker(),
-        [guard, engine, latest, job, lease, preview] {
+        [guard, engine, latest, job, lease, preview, positions] {
             EngineJob activity;
             ReaderFrame result;
             bool loaded = false;
@@ -1098,7 +1101,7 @@ void ReaderSession::loadImages() {
                 timer.start();
                 loaded = engine->loadNextImage();
                 if (loaded && latest->load() == job)
-                    result = capture(*engine, false);
+                    result = capture(*engine, positions, false);
                 if (loaded)
                     diagnostic("image-load-end",
                                {{"elapsed_ms", double(timer.elapsed())},
@@ -1224,6 +1227,7 @@ void ReaderSession::request(bool appearanceChange, RenderReason reason) {
 void ReaderSession::dispatch(bool pageTurn) {
     running = true;
     turning = pageTurn;
+    const auto positions = positions_;
     const auto requested = desired;
     const auto size = desiredSize;
     const auto anchor = std::exchange(destination, {});
@@ -1255,7 +1259,7 @@ void ReaderSession::dispatch(bool pageTurn) {
     };
     kobalt::qt::invoke(
         engineWorker(),
-        [guard, engine, requested, size, anchor, delta, target, job, lease, progress] {
+        [guard, engine, requested, size, anchor, delta, target, job, lease, progress, positions] {
             EngineJob activity;
             QElapsedTimer timer;
             timer.start();
@@ -1287,7 +1291,7 @@ void ReaderSession::dispatch(bool pageTurn) {
             const auto error = result.error;
             // The panel needs far longer to draw a page than the engine does. Hand
             // the frame over first and prepare the neighbour pages after it.
-            result = capture(*engine, false);
+            result = capture(*engine, positions, false);
             if (!error.isEmpty())
                 result.error = error;
             if (!appearanceChanged && anchor.isEmpty() && result.error.isEmpty() && qAbs(delta) == 1 &&

@@ -14,7 +14,9 @@ public:
         return progress_->deviceTransition();
     }
     bool writable() const override {
-        return !NativeLifecycle::suspended() && !progress_->deviceTransition();
+        return (!NativeLifecycle::suspended() || NativeLifecycle::usbSaveAllowed() ||
+                NativeLifecycle::sleepSaveAllowed()) &&
+               !progress_->deviceTransition();
     }
     ReadingProgress read(QString *error) const override {
         return progress_->read(error);

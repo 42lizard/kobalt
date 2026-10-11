@@ -57,6 +57,14 @@ bool NativeLifecycle::suspended() {
     static const auto visible = symbol<bool (*)(const void *)>("_ZN19PlugWorkflowManager20pluggedInViewVisibleEv");
     return (manager && visible && visible(manager())) || nativeSleeping();
 }
+bool NativeLifecycle::usbSaveAllowed() {
+    // The USB prompt can cover the reader before storage is exported. Only
+    // the held workflow permits its final write; sleep and PIN still block it.
+    return active && active->pendingWorkflow && !active->exported && !active->poweringOff && !nativeSleeping();
+}
+bool NativeLifecycle::sleepSaveAllowed() {
+    return active && active->savingBeforeSleep && !active->storageBlocked() && !active->shuttingDown();
+}
 void (*nativeHideSleepView)(void *);
 extern "C" __attribute__((visibility("default"))) void kobalt_hide_sleep_view(void *manager) {
     const auto lifecycle = active;
@@ -96,6 +104,7 @@ void NativeLifecycle::finishSleepView() {
 }
 bool (*nativeCanSuspend)(void *);
 void (*nativeUsbConnect)(void *);
+void (*nativeUsbWorkflow)(void *);
 void (*nativeAboutUsbConnect)(void *);
 void (*nativePowerOff)(void *, bool);
 void (*nativeReboot)(void *);
@@ -107,6 +116,11 @@ extern "C" __attribute__((visibility("default"))) void kobalt_power_off(void *ma
 extern "C" __attribute__((visibility("default"))) void kobalt_reboot(void *manager) {
     if (!NativeLifecycle::interceptShutdown(static_cast<QObject *>(manager), NativeLifecycle::Shutdown::Reboot))
         nativeReboot(manager);
+}
+extern "C" __attribute__((visibility("default"))) void kobalt_usb_workflow(void *manager) {
+    if (!NativeLifecycle::interceptUsbWorkflow(static_cast<QObject *>(manager))) {
+        nativeUsbWorkflow(manager);
+    }
 }
 extern "C" __attribute__((visibility("default"))) void kobalt_usb_about_to_connect(void *manager) {
     NativeLifecycle::beginUsb();
@@ -122,8 +136,8 @@ extern "C" __attribute__((visibility("default"))) void kobalt_usb_connect(void *
 NativeLifecycle::NativeLifecycle(QObject *parent) : QObject(parent) {
     const auto power = symbol<QObject *(*)()>("_ZN22N3PowerWorkflowManager14sharedInstanceEv");
     const auto usb = symbol<QObject *(*)()>("_ZN19PlugWorkflowManager14sharedInstanceEv");
-    if (!power || !usb || !nativeCanSuspend || !nativeUsbConnect || !nativeAboutUsbConnect || !nativeShowSleepView ||
-        !nativeHideSleepView || !nativePowerOff || !nativeReboot)
+    if (!power || !usb || !nativeUsbWorkflow || !nativeCanSuspend || !nativeUsbConnect || !nativeAboutUsbConnect ||
+        !nativeShowSleepView || !nativeHideSleepView || !nativePowerOff || !nativeReboot)
         return;
     const auto a = connect(power(), SIGNAL(aboutToSleep()), this, SLOT(aboutToSleep()), Qt::DirectConnection);
     const auto b = connect(power(), SIGNAL(resumedFromSleep()), this, SLOT(resumed()), Qt::DirectConnection);
@@ -145,8 +159,11 @@ void NativeLifecycle::aboutToSleep() {
     asleep = true;
     engineActivity().pause(!draining && !storageBlocked());
     diagnostic("sleep-start");
-    if (sleep)
+    savingBeforeSleep = true;
+    if (sleep) {
         sleep();
+    }
+    savingBeforeSleep = false;
 }
 void NativeLifecycle::resumed() {
     // Nickel may still be finishing its resume/PIN handler on this stack.
@@ -178,6 +195,7 @@ bool NativeLifecycle::interceptShutdown(QObject *manager, Shutdown mode) {
     ++active->generation;
     active->usbPending = false;
     active->pendingGadget.clear();
+    active->pendingWorkflow.clear();
     engineActivity().pause(false);
     diagnostic("shutdown-release-start", kobalt::qt::object({{"reboot", mode == Shutdown::Reboot}}));
     QPointer<QObject> guard(manager);
@@ -195,6 +213,37 @@ bool NativeLifecycle::interceptShutdown(QObject *manager, Shutdown mode) {
             nativeReboot(guard.data());
         else
             nativePowerOff(guard.data(), mode == Shutdown::BatteryLow);
+    });
+    return true;
+}
+bool NativeLifecycle::interceptUsbWorkflow(QObject *manager) {
+    if (!active || !active->prepareUsb) {
+        return false;
+    }
+    if (active->storageBlocked() || active->poweringOff || active->removalPending || active->pendingWorkflow) {
+        return true;
+    }
+    const auto directory = QString::fromLatin1(nickel::configDir);
+    active->usbRemoval.begin(QFile::exists(directory + QStringLiteral("/.initialized")),
+                             QFile::exists(directory + QStringLiteral("/uninstall")));
+    auto guard = active;
+    const auto request = ++active->generation;
+    active->pendingWorkflow = manager;
+    active->usbPending = true;
+    active->storageReady = false;
+    engineActivity().pause(false);
+    diagnostic("usb-save-start");
+    active->prepareUsb([guard, request] {
+        if (!guard || request != guard->generation || !guard->usbPending || !guard->pendingWorkflow) {
+            return;
+        }
+        auto *manager = guard->pendingWorkflow.data();
+        guard->pendingWorkflow.clear();
+        guard->storageReady = true;
+        diagnostic("usb-release-complete");
+        // Resume the whole caller, not just its aboutToConnect signal. Nickel
+        // can now clear its views and databases without racing our save.
+        nativeUsbWorkflow(manager);
     });
     return true;
 }
@@ -258,6 +307,7 @@ void NativeLifecycle::disconnected() {
     active->usbPending = false;
     active->pendingGadget.clear();
     active->storageReady = false;
+    active->pendingWorkflow.clear();
     active->resumed();
 }
 void NativeLifecycle::processingDone() {

@@ -17,6 +17,7 @@ struct ReaderFrame {
     qint64 damageFrom = 0;
     QJsonObject state, resources;
     QString title, author, error;
+    QString nativePosition, nativePositionError;
     QImage cover;
     QStringList fonts;
     QVector<ReadingFont> fontCatalog;
@@ -147,6 +148,11 @@ public:
         return !temporaryAppearance.isEmpty();
     }
     QJsonObject persistentState() const;
+    // Captured with the displayed frame, so sleep never waits for the engine worker.
+    QString savedNativePosition(QString *error) const {
+        *error = frame.nativePositionError;
+        return frame.nativePosition;
+    }
     int page() const {
         return frame.state.value("page").toInt();
     }

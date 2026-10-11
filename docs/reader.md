@@ -110,7 +110,7 @@ On Kobo, closing a book also saves its parsed document and its pages in `.adds/k
 
 ## Reading position and progress
 
-Kobalt saves the position in its own per-book file and writes it back to Nickel when the book opens and when it closes. The first opening imports Nickel's saved position. On later openings, a newer Nickel position wins over the local one. Like Nickel's reader, the write at opening marks the book as the one being read, so Home and the sleep screen show it. Sleep saves only the local position. Like Nickel's reader, Kobalt opens every saved position: when the exact place is missing, it opens the start of the chapter, and when the chapter is missing, the start of the book. It shows no message, and logs a `native-position-fallback` event with the chapter file.
+Kobalt saves the position in its own per-book file and writes it back to Nickel when the book opens, every 30 seconds while reading, before sleep and when it closes. Background saves skip an unchanged position and wait until the reader is idle. A busy database or newer synced progress keeps the local position without overwriting Nickel. The first opening imports Nickel's saved position. On later openings, a newer Nickel position wins over the local one. Like Nickel's reader, the write at opening marks the book as the one being read, so Home and the sleep screen show it. Sleep saves the local position and attempts native progress writeback before Nickel prepares its sleep screen. Like Nickel's reader, Kobalt opens every saved position: when the exact place is missing, it opens the start of the chapter, and when the chapter is missing, the start of the book. It shows no message, and logs a `native-position-fallback` event with the chapter file.
 
 Kobalt recognizes a changed book by the file size and the ZIP directory, which holds the checksum of every file in the book. When the book changes, for example after an update from the store, Kobalt discards its saved position and typography for that book and imports Nickel's position.
 
@@ -229,7 +229,7 @@ Ordinary page turns reuse chapter pages and the available font list in memory. C
 
 Before sleep, Kobalt saves its position and pauses its work. The page stays on screen until Nickel's sleep screen is ready. Kobalt then shows the sleep screen with one full refresh, which also clears the page, so the screen flashes once, as in Nickel's own reader. After wake, Kobalt checks authorization before it shows the book again. If wake or USB cancellation arrives while the previous operation is still releasing resources, Kobalt completes that release before checking authorization again.
 
-A confirmed USB connection closes the book, saves the local position and releases every file on user storage before Nickel exports the storage. Reopen the book from the library afterwards.
+A confirmed USB connection saves the local position and attempts to save native progress before Nickel starts its USB workflow. The native save keeps newer Nickel progress, allows two seconds for position conversion and does not wait for another database writer. A failed or timed-out save does not cancel USB. Kobalt then closes the book and releases every file on user storage before Nickel exports the storage. Reopen the book from the library afterwards.
 
 Power-off and reboot wait for Kobalt to save reading time and progress before Nickel closes its database. When the application exits, Kobalt stops its engine worker before releasing any remaining cached book models.
 
