@@ -48,6 +48,8 @@ if(NOT CRENGINE_SOURCE)
 endif()
 find_package(Qt${KOBALT_QT_MAJOR} REQUIRED COMPONENTS Network Sensors)
 add_subdirectory(src/interfaces/reader/ui)
+# Device FreeType needs PNG even in checks that only link reader widgets.
+target_link_libraries(reader-widgets PRIVATE png z)
 add_library(reader-orientation STATIC src/platform/api/reader_orientation.cpp ${KOBALT_ORIENTATION_SOURCE})
 set_target_properties(reader-orientation PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(reader-orientation PUBLIC Qt${KOBALT_QT_MAJOR}::Sensors Qt${KOBALT_QT_MAJOR}::Gui PRIVATE Qt${KOBALT_QT_MAJOR}::GuiPrivate ${CMAKE_DL_LIBS})
