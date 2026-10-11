@@ -7,8 +7,8 @@
 #include <QMap>
 
 namespace kobalt {
-// Lists archive members without reading their payloads. The selected resource
-// adapter supplies bytes; the default adapter reads ZIP entries directly.
+// Lists archive members and validates supported font obfuscation metadata.
+// Other payloads come from the selected resource adapter.
 class Publication {
 public:
     bool protectedBook() const {

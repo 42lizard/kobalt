@@ -3,6 +3,7 @@
 #include "publication/resource_cache.h"
 #include <QCoreApplication>
 #include <QFile>
+#include <QBuffer>
 #include <QTemporaryDir>
 #include <QtEndian>
 #include <zlib.h>
@@ -142,6 +143,35 @@ int main(int argc, char **argv) {
                 }
             }
         }
+    for (bool deflated : {false, true}) {
+        QBuffer borrowed;
+        borrowed.setData(zip("borrowed payload", deflated));
+        if (!borrowed.open(QIODevice::ReadOnly))
+            qFatal("open borrowed input");
+        {
+            ZipResource stream;
+            if (!stream.open(borrowed, "image.png"))
+                qFatal("open borrowed ZIP resource");
+            QByteArray bytes;
+            while (stream.valid() && !stream.finished())
+                bytes += stream.next();
+            if (!stream.valid() || bytes != "borrowed payload")
+                qFatal("borrowed resource bytes");
+        }
+        if (!borrowed.isOpen() || !borrowed.seek(0) || borrowed.read(4) != QByteArray("PK\3\4", 4))
+            qFatal("resource destroyed or closed borrowed input");
+        borrowed.close();
+        borrowed.setData(zip("corrupt", deflated, true));
+        if (!borrowed.open(QIODevice::ReadOnly))
+            qFatal("reopen borrowed input");
+        ZipResource corrupt;
+        if (!corrupt.open(borrowed, "image.png"))
+            qFatal("open borrowed corrupt resource");
+        while (corrupt.valid() && !corrupt.finished())
+            corrupt.next();
+        if (corrupt.valid())
+            qFatal("borrowed input bypassed CRC validation");
+    }
     save(path, zip("payload", false));
     ZipResource stream;
     if (stream.open(path, "absent.png"))

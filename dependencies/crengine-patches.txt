@@ -8,3 +8,4 @@ crengine-vertical-writing.patch
 crengine-cache-write-errors.patch
 crengine-bionic-reading.patch
 crengine-optical-size.patch
+crengine-idpf-font-key.patch

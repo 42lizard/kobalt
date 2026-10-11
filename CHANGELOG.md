@@ -3,6 +3,7 @@
 ### Fixed
 
 - Fixed opening EPUBs with repeated identical manifest items. Conflicting duplicate IDs remain unsupported.
+- Fixed opening EPUBs with standard IDPF-obfuscated embedded TrueType or OpenType fonts.
 
 - Fixed left alignment and justification moving publisher-centered text to the left.
 - Fixed reversed landscape touch targets on affected Clara devices with firmware 4, using NickelRotate’s coordinate correction.

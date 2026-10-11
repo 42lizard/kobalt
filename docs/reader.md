@@ -86,7 +86,7 @@ The event log records startup checks, opening stages, timings, memory and save r
 
 ## Opening books
 
-The default build opens unencrypted local EPUBs selected through Nickel, regardless of their folder. This includes onboard and SD storage, hidden folders, Kobo's built-in Dropbox and Google Drive downloads, and folders used by third-party sync services. Local files can have any filename or use a symlink; Nickel's EPUB MIME type and Kobalt's archive inspection determine whether they are supported. DRM-free Kobo purchases also open, including extensionless books stored by Nickel. Book previews, PDFs and protected books use Nickel's reader.
+The default build opens unencrypted local EPUBs selected through Nickel, regardless of their folder. This includes onboard and SD storage, hidden folders, Kobo's built-in Dropbox and Google Drive downloads, and folders used by third-party sync services. Local files can have any filename or use a symlink; Nickel's EPUB MIME type and Kobalt's archive inspection determine whether they are supported. DRM-free Kobo purchases also open, including extensionless books stored by Nickel. Embedded TrueType and OpenType fonts using standard IDPF font obfuscation are supported. This font embedding method is not DRM. Other resource encryption and unsupported font obfuscation still use Nickel. Book previews, PDFs and protected books use Nickel's reader.
 
 On firmware 4, sideloaded filenames and saved chapter prefixes preserve literal `#`, `?` and percent sequences such as `%20`.
 

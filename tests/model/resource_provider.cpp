@@ -1,4 +1,5 @@
 #include "publication/resource_server.h"
+#include "publication/publication.h"
 #include "publication/native_resources.h"
 #include "publication/resource_cache.h"
 #include "support/diagnostics.h"
@@ -288,6 +289,62 @@ int main(int argc, char **argv) {
     require(!server->open(path, factory) && counts.opened == 0, "encryption metadata reached resource provider");
     require(inspectionError() == "error.this_publication_needs_unsupported_font_or_resource_handling",
             "encryption metadata lost inspection reason");
+    QMap<QString, QByteArray> obfuscatedFiles = {
+        {"mimetype", "application/epub+zip"},
+        {"META-INF/container.xml",
+         "<container xmlns='urn:oasis:names:tc:opendocument:xmlns:container'><rootfiles><rootfile full-path='book.opf' media-type='application/oebps-package+xml'/></rootfiles></container>"},
+        {"book.opf",
+         "<package xmlns='http://www.idpf.org/2007/opf' unique-identifier='book-id'><metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:identifier id='book-id'> test identifier </dc:identifier></metadata><manifest><item id='font' href='font.otf' media-type='application/vnd.ms-opentype'/></manifest></package>"},
+        {"font.otf", "obfuscated font bytes"},
+        {"META-INF/encryption.xml",
+         "<encryption xmlns='urn:oasis:names:tc:opendocument:xmlns:container' xmlns:enc='http://www.w3.org/2001/04/xmlenc#'><enc:EncryptedData><enc:EncryptionMethod Algorithm='http://www.idpf.org/2008/embedding'/><enc:CipherData><enc:CipherReference URI='font.otf'/></enc:CipherData></enc:EncryptedData></encryption>"}};
+    Publication inspection;
+    QString reason;
+    require(inspection.inspect(zip(obfuscatedFiles), &reason), "accept standard IDPF font metadata");
+    const auto validMetadata = obfuscatedFiles.value("META-INF/encryption.xml");
+    for (const auto &replacement : {QPair<QByteArray, QByteArray>{"http://www.idpf.org/2008/embedding", "urn:unknown"},
+                                    {"font.otf", "book.opf"},
+                                    {"font.otf", "missing.otf"},
+                                    {"font.otf", "../font.otf"},
+                                    {"font.otf", "font%2eotf"},
+                                    {"font.otf", "https://invalid.test/font.otf"},
+                                    {"http://www.w3.org/2001/04/xmlenc#", "urn:wrong-namespace"},
+                                    {"enc:CipherReference", "enc:CipherValue"}}) {
+        obfuscatedFiles["META-INF/encryption.xml"] = validMetadata;
+        obfuscatedFiles["META-INF/encryption.xml"].replace(replacement.first, replacement.second);
+        require(!inspection.inspect(zip(obfuscatedFiles), &reason),
+                "reject unsupported or ambiguous encryption metadata");
+    }
+    obfuscatedFiles["META-INF/encryption.xml"] = "<!DOCTYPE encryption [<!ENTITY target 'font.otf'>]>" + validMetadata;
+    require(!inspection.inspect(zip(obfuscatedFiles), &reason), "reject encryption metadata DTD");
+    auto repeated = validMetadata;
+    const auto declaration =
+        validMetadata.mid(validMetadata.indexOf("<enc:EncryptedData>"),
+                          validMetadata.indexOf("</encryption>") - validMetadata.indexOf("<enc:EncryptedData>"));
+    repeated.replace("</encryption>", declaration + "</encryption>");
+    obfuscatedFiles["META-INF/encryption.xml"] = repeated;
+    require(!inspection.inspect(zip(obfuscatedFiles), &reason), "reject repeated obfuscated font target");
+    obfuscatedFiles["META-INF/encryption.xml"] = validMetadata;
+    const auto validPackage = obfuscatedFiles.value("book.opf");
+    for (const auto &replacement : {QPair<QByteArray, QByteArray>{"http://www.idpf.org/2007/opf", "urn:wrong"},
+                                    {"<manifest>", "<manifest xmlns='urn:wrong'>"},
+                                    {"<metadata ", "<outside><metadata "},
+                                    {"application/vnd.ms-opentype", "application/xhtml+xml"}}) {
+        obfuscatedFiles["book.opf"] = validPackage;
+        obfuscatedFiles["book.opf"].replace(replacement.first, replacement.second);
+        if (replacement.first == "<metadata ")
+            obfuscatedFiles["book.opf"].replace("</metadata>", "</metadata></outside>");
+        require(!inspection.inspect(zip(obfuscatedFiles), &reason), "reject invalid package font declarations");
+    }
+    obfuscatedFiles["book.opf"] = validPackage;
+    obfuscatedFiles["META-INF/encryption.xml"] = validMetadata;
+    obfuscatedFiles["book.opf"].replace("id='book-id'", "id='other'");
+    require(!inspection.inspect(zip(obfuscatedFiles), &reason), "reject missing unique identifier");
+    obfuscatedFiles["META-INF/license.lcpl"] = "{}";
+    OpeningResult protectedResult;
+    require(!inspection.inspect(zip(obfuscatedFiles), &reason, &protectedResult) && inspection.protectedBook() &&
+                protectedResult.failure() && protectedResult.failure()->kind == OpeningFailureKind::Protected,
+            "font metadata must not bypass LCP detection");
     QImage image(3, 2, QImage::Format_ARGB32);
     image.fill(Qt::black);
     QByteArray png;

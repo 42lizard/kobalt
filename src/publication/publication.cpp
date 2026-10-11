@@ -1,5 +1,10 @@
 #include "support/strings.h"
 #include "publication.h"
+#include "zip_resource.h"
+#include <QXmlStreamReader>
+#include <QDir>
+#include <QFileInfo>
+#include <QRegularExpression>
 #include <QCryptographicHash>
 #include <QSet>
 #include <QBuffer>
@@ -37,6 +42,171 @@ bool safeName(const QString &name) {
             return false;
     // These prefixes belong to Nickel's other HTTP handlers.
     return !name.startsWith("TENG/") && !name.startsWith("FONT_ROUTE/") && !name.startsWith("EPUBPATH");
+}
+// Font obfuscation is an EPUB embedding convention, not content encryption.
+// CREngine decodes IDPF fonts. Admit only metadata that describes that path.
+bool supportedFontMetadata(QIODevice &source, const QMap<QString, qint64> &sizes) {
+    constexpr qint64 limit = 2 * 1024 * 1024;
+    auto read = [&](const QString &name) -> QByteArray {
+        ZipResource stream;
+        if (sizes.value(name, -1) < 0 || sizes.value(name) > limit || !stream.open(source, name, limit))
+            return {};
+        QByteArray bytes;
+        while (stream.valid() && !stream.finished())
+            bytes += stream.next();
+        return stream.valid() && stream.finished() ? bytes : QByteArray();
+    };
+    auto cleanXml = [](QXmlStreamReader &xml) {
+        return xml.tokenType() != QXmlStreamReader::DTD && xml.tokenType() != QXmlStreamReader::EntityReference;
+    };
+    QXmlStreamReader descriptor(read("META-INF/container.xml"));
+    QString packagePath;
+    int rootfiles = 0, descriptorDepth = 0;
+    while (!descriptor.atEnd()) {
+        descriptor.readNext();
+        if (!cleanXml(descriptor))
+            return false;
+        if (descriptor.isEndElement()) {
+            --descriptorDepth;
+            continue;
+        }
+        if (!descriptor.isStartElement())
+            continue;
+        ++descriptorDepth;
+        if (descriptor.namespaceUri() != QStringLiteral("urn:oasis:names:tc:opendocument:xmlns:container") ||
+            (descriptorDepth == 1 && descriptor.name() != QStringLiteral("container")) ||
+            (descriptorDepth == 2 && descriptor.name() != QStringLiteral("rootfiles")))
+            return false;
+        if (descriptorDepth == 3 && descriptor.name() == QStringLiteral("rootfile")) {
+            if (++rootfiles != 1)
+                return false;
+            packagePath = descriptor.attributes().value("full-path").toString();
+            if (descriptor.attributes().value("media-type") != QStringLiteral("application/oebps-package+xml"))
+                return false;
+        }
+    }
+    if (descriptor.hasError() || !safeName(packagePath))
+        return false;
+    QXmlStreamReader package(read(packagePath));
+    QString identifierId, identifier;
+    int matchingIdentifiers = 0, depth = 0, metadataDepth = -1, manifestDepth = -1;
+    QSet<QString> fonts, ids, paths;
+    const QSet<QString> fontTypes = {"application/vnd.ms-opentype",
+                                     "application/x-font-ttf",
+                                     "application/x-font-opentype",
+                                     "application/font-sfnt",
+                                     "font/otf",
+                                     "font/ttf"};
+    while (!package.atEnd()) {
+        package.readNext();
+        if (!cleanXml(package))
+            return false;
+        if (package.isEndElement()) {
+            if (depth == metadataDepth)
+                metadataDepth = -1;
+            if (depth == manifestDepth)
+                manifestDepth = -1;
+            --depth;
+            continue;
+        }
+        if (!package.isStartElement())
+            continue;
+        ++depth;
+        if (depth == 1) {
+            if (package.name() != QStringLiteral("package") ||
+                package.namespaceUri() != QStringLiteral("http://www.idpf.org/2007/opf"))
+                return false;
+            identifierId = package.attributes().value("unique-identifier").toString();
+        } else if (depth == 2 && package.namespaceUri() == QStringLiteral("http://www.idpf.org/2007/opf") &&
+                   package.name() == QStringLiteral("metadata"))
+            metadataDepth = depth;
+        else if (depth == 2 && package.namespaceUri() == QStringLiteral("http://www.idpf.org/2007/opf") &&
+                 package.name() == QStringLiteral("manifest"))
+            manifestDepth = depth;
+        else if (depth == metadataDepth + 1 && metadataDepth == 2 && package.name() == QStringLiteral("identifier") &&
+                 package.namespaceUri() == QStringLiteral("http://purl.org/dc/elements/1.1/") &&
+                 package.attributes().value("id") == identifierId && !identifierId.isEmpty()) {
+            ++matchingIdentifiers;
+            identifier = package.readElementText();
+            --depth;
+        } else if (depth == manifestDepth + 1 && manifestDepth == 2 &&
+                   package.namespaceUri() == QStringLiteral("http://www.idpf.org/2007/opf") &&
+                   package.name() == QStringLiteral("item")) {
+            const auto attributes = package.attributes();
+            const auto id = attributes.value("id").toString();
+            const auto href = attributes.value("href").toString();
+            const QUrl url(href);
+            if (id.isEmpty() || ids.contains(id) || href.isEmpty() || !url.isValid() || !url.scheme().isEmpty() ||
+                !url.authority().isEmpty() || url.hasQuery() || url.hasFragment() || href.contains('%') ||
+                href.contains('\\') || href.startsWith('/'))
+                return false;
+            const auto path = QDir::cleanPath(QFileInfo(packagePath).path() + '/' + href);
+            if (!safeName(path) || paths.contains(path))
+                return false;
+            ids.insert(id);
+            paths.insert(path);
+            if (fontTypes.contains(attributes.value("media-type").toString()) && sizes.contains(path))
+                fonts.insert(path);
+        }
+    }
+    identifier.remove(QRegularExpression("[ \t\r\n]"));
+    if (package.hasError() || matchingIdentifiers != 1 || identifier.isEmpty())
+        return false;
+    const auto metadata = read("META-INF/encryption.xml");
+    QXmlStreamReader check(metadata);
+    while (!check.atEnd()) {
+        check.readNext();
+        if (!cleanXml(check))
+            return false;
+    }
+    if (check.hasError())
+        return false;
+    QXmlStreamReader xml(metadata);
+    if (!xml.readNextStartElement() || xml.name() != QStringLiteral("encryption") ||
+        xml.namespaceUri() != QStringLiteral("urn:oasis:names:tc:opendocument:xmlns:container"))
+        return false;
+    QSet<QString> targets;
+    while (xml.readNextStartElement()) {
+        if (xml.name() != QStringLiteral("EncryptedData") ||
+            xml.namespaceUri() != QStringLiteral("http://www.w3.org/2001/04/xmlenc#"))
+            return false;
+        QString algorithm, target;
+        int methods = 0, cipherData = 0, references = 0;
+        while (xml.readNextStartElement()) {
+            if (xml.namespaceUri() != QStringLiteral("http://www.w3.org/2001/04/xmlenc#"))
+                return false;
+            if (xml.name() == QStringLiteral("EncryptionMethod")) {
+                if (++methods != 1)
+                    return false;
+                algorithm = xml.attributes().value("Algorithm").toString();
+                if (xml.readNextStartElement())
+                    return false;
+            } else if (xml.name() == QStringLiteral("CipherData")) {
+                if (++cipherData != 1)
+                    return false;
+                while (xml.readNextStartElement()) {
+                    if (xml.name() != QStringLiteral("CipherReference") ||
+                        xml.namespaceUri() != QStringLiteral("http://www.w3.org/2001/04/xmlenc#") || ++references != 1)
+                        return false;
+                    target = xml.attributes().value("URI").toString();
+                    if (xml.readNextStartElement())
+                        return false;
+                }
+            } else
+                return false;
+        }
+        if (methods != 1 || cipherData != 1 || references != 1 ||
+            algorithm != QStringLiteral("http://www.idpf.org/2008/embedding") || !safeName(target) ||
+            target.contains('%') || !fonts.contains(target) || targets.contains(target))
+            return false;
+        targets.insert(target);
+    }
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!cleanXml(xml))
+            return false;
+    }
+    return !xml.hasError() && !targets.isEmpty();
 }
 }
 bool Publication::inspect(const QByteArray &source, QString *error, OpeningResult *result) {
@@ -163,9 +333,9 @@ bool Publication::inspect(QIODevice &source, QString *error, OpeningResult *resu
     if (at != int(directorySize) || !names_.contains("META-INF/container.xml") || !names_.contains("mimetype"))
         return inspectionFailure(error, result, OpeningFailureKind::InvalidContent,
                                  strings::key("error.missing_publication_container"));
-    // Keep scanning past font metadata so an explicit LCP license or encrypted
-    // member is recognized regardless of ZIP directory order.
-    if (unsupportedMetadata)
+    // Scan the whole directory before admitting supported font metadata, so an
+    // LCP license or encrypted member is rejected regardless of entry order.
+    if (unsupportedMetadata && !supportedFontMetadata(source, sizes_))
         return inspectionFailure(error, result, OpeningFailureKind::Unsupported,
                                  strings::key("error.this_publication_needs_unsupported_font_or_resource_handling"));
     names_.removeOne("mimetype");

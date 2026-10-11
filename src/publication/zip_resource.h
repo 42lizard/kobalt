@@ -1,6 +1,7 @@
 #pragma once
 #include <QByteArray>
 #include <QString>
+#include <QIODevice>
 #include <memory>
 
 namespace kobalt {
@@ -11,6 +12,8 @@ public:
     ZipResource();
     ~ZipResource();
     bool open(const QString &path, const QString &name, qint64 limit = 32 * 1024 * 1024);
+    // The caller keeps source alive until the stream is destroyed.
+    bool open(QIODevice &source, const QString &name, qint64 limit = 32 * 1024 * 1024);
     QByteArray next();
     qint64 size() const;
     bool valid() const;

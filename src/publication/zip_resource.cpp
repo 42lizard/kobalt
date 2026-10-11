@@ -15,7 +15,8 @@ quint32 u32(const QByteArray &b, int p) {
 }
 }
 struct ZipResource::Data {
-    QFile file;
+    std::unique_ptr<QFile> ownedFile;
+    QIODevice *source = nullptr;
     qint64 packed = 0, size = 0, emitted = 0;
     quint32 expectedCrc = 0, crc = 0;
     bool deflated = false, initialized = false, valid = true, finished = false;
@@ -30,11 +31,19 @@ ZipResource::ZipResource() = default;
 ZipResource::~ZipResource() = default;
 bool ZipResource::open(const QString &path, const QString &name, qint64 limit) {
     data_.reset();
-    auto data = std::make_unique<Data>();
-    auto &file = data->file;
-    file.setFileName(path);
-    if (!file.open(QIODevice::ReadOnly))
+    auto file = std::make_unique<QFile>(path);
+    if (!file->open(QIODevice::ReadOnly) || !open(*file, name, limit))
         return false;
+    data_->ownedFile = std::move(file);
+    return true;
+}
+bool ZipResource::open(QIODevice &source, const QString &name, qint64 limit) {
+    data_.reset();
+    if (source.isSequential())
+        return false;
+    auto data = std::make_unique<Data>();
+    data->source = &source;
+    auto &file = source;
     const auto length = file.size(), tailStart = qMax<qint64>(0, length - 65557);
     if (!file.seek(tailStart))
         return false;
@@ -100,7 +109,7 @@ QByteArray ZipResource::next() {
     QByteArray output;
     if (!d.deflated) {
         const auto count = qMin<qint64>(ResourceCache::blockBytes, d.packed);
-        output = d.file.read(count);
+        output = d.source->read(count);
         if (output.size() != count) {
             d.valid = false;
             return {};
@@ -119,7 +128,7 @@ QByteArray ZipResource::next() {
                 if (inputRead)
                     break;
                 const auto count = qMin<qint64>(d.input.size(), d.packed);
-                if (d.file.read(d.input.data(), count) != count) {
+                if (d.source->read(d.input.data(), count) != count) {
                     d.valid = false;
                     return {};
                 }
@@ -156,7 +165,7 @@ QByteArray ZipResource::next() {
         d.stream.avail_out = 1;
         if (!d.stream.avail_in && d.packed) {
             const auto count = qMin<qint64>(d.input.size(), d.packed);
-            if (d.file.read(d.input.data(), count) != count) {
+            if (d.source->read(d.input.data(), count) != count) {
                 d.valid = false;
                 return {};
             }
