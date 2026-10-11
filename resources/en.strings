@@ -129,7 +129,6 @@
 "error.dictionary_lookup_is_unavailable_on_this_firmware" = "Dictionary lookup is unavailable on this firmware.";
 "error.dictionary_selection_is_unavailable" = "Dictionary selection is unavailable.";
 "error.dictionary_state_could_not_be_restored" = "Dictionary state could not be restored.";
-"error.encrypted_or_obfuscated_books_stay_in_nickel" = "Encrypted or obfuscated books stay in Nickel";
 "error.encrypted_or_unsupported_epub" = "Encrypted or unsupported EPUB";
 "error.expanded_publication_is_too_large" = "Expanded publication is too large";
 "error.explicit_native_bookmark_is_unsupported" = "Explicit native bookmark is unsupported";
