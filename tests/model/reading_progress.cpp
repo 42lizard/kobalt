@@ -1,12 +1,28 @@
 #include "support/qt_compat.h"
 #include "reading/reading_progress.h"
 #include "platform/nickel/common/native_location.h"
+#include "platform/nickel/common/local_book_path.h"
 #include "platform/nickel/qt5/native_location.h"
 #include <QCoreApplication>
 #include "check.h"
 using namespace kobalt;
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
+    for (const auto &path : {QStringLiteral("/mnt/onboard/.sync/.books/.hidden.epub"),
+                             QStringLiteral("/mnt/onboard/.kobo/dropbox/.nested/book.epub"),
+                             QStringLiteral("/mnt/onboard/.kobo/google_drive/book.epub"),
+                             QStringLiteral("/mnt/onboard/.adds/kobocloud/library/book.epub"),
+                             QStringLiteral("/mnt/sd/kobocloud/book.epub"),
+                             QStringLiteral("/mnt/third-party-sync/books/book#part?%20.epub"),
+                             QStringLiteral("/mnt/third-party-sync/books/extensionless")}) {
+        require(localReaderBookPath("file://" + path) == path,
+                "Local EPUB path was restricted by its folder or changed by URL decoding");
+    }
+    for (const auto &identity :
+         {QStringLiteral("https://example.org/book.epub"), QStringLiteral("file://server/book.epub"),
+          QStringLiteral("file://relative.epub"), QStringLiteral("12345678-1234-1234-1234-123456789abc"), QString()}) {
+        require(localReaderBookPath(identity).isEmpty(), "Nonlocal identity became a local EPUB path");
+    }
     for (const auto &name :
          {QStringLiteral("book.kepub.epub"), QStringLiteral("book#part.kepub.epub"),
           QStringLiteral("book?part.kepub.epub"), QStringLiteral("book%20part.kepub.epub"),

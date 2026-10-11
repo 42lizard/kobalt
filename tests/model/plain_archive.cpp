@@ -1,10 +1,14 @@
 #include "publication/native_archive.h"
 #include "publication/layout_compatibility.h"
 #include "publication/resource_cache.h"
+#include "publication/publication.h"
+#include "platform/nickel/common/local_book_path.h"
 #include "check.h"
 #include "support/qt_compat.h"
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QNetworkReply>
 #include <QTemporaryDir>
 #include <QtEndian>
@@ -83,6 +87,41 @@ int main(int argc, char **argv) {
          "<package><manifest><item id='first' href='first.xhtml' media-type='application/xhtml+xml'/><item id='later' href='later.xhtml' media-type='application/xhtml+xml'/></manifest><spine><itemref idref='first'/><itemref idref='later'/></spine></package>"},
         {"first.xhtml", "<html><body><p>Plain first chapter.</p></body></html>"},
         {"later.xhtml", "<html><body><p>Plain later chapter.</p></body></html>"}};
+    for (const auto &relative :
+         {QStringLiteral(".sync/.books/.hidden.epub"), QStringLiteral(".kobo/dropbox/.nested/book.epub"),
+          QStringLiteral(".kobo/google_drive/book.epub"), QStringLiteral(".adds/kobocloud/books/book.epub"),
+          QStringLiteral("third-party-sync/books/book#part?%20.epub"),
+          QStringLiteral("third-party-sync/books/extensionless")}) {
+        const auto bookPath = dir.path() + '/' + relative;
+        require(QDir().mkpath(QFileInfo(bookPath).absolutePath()), "create sync folder");
+        QFile book(bookPath);
+        const auto bytes = zip(files);
+        require(book.open(QIODevice::WriteOnly) && book.write(bytes) == bytes.size(), "write sync EPUB");
+        book.close();
+        QFile source(localReaderBookPath("file://" + bookPath));
+        Publication publication;
+        QString error;
+        require(source.open(QIODevice::ReadOnly) && publication.inspect(source, &error),
+                "EPUB in a hidden or sync folder failed inspection");
+        require(!publication.protectedBook(), "Unprotected sync EPUB was treated as protected");
+        source.close();
+        const auto linkedPath = bookPath + ".link";
+        require(QFile::link(bookPath, linkedPath), "create EPUB symlink");
+        QFile linked(localReaderBookPath("file://" + linkedPath));
+        require(linked.open(QIODevice::ReadOnly) && publication.inspect(linked, &error),
+                "Local EPUB symlink failed inspection");
+        linked.close();
+
+        auto protectedFiles = files;
+        protectedFiles["META-INF/license.lcpl"] = "{}";
+        const auto protectedBytes = zip(protectedFiles);
+        require(book.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+                    book.write(protectedBytes) == protectedBytes.size(),
+                "write protected sync EPUB");
+        book.close();
+        require(source.open(QIODevice::ReadOnly) && !publication.inspect(source, &error) && publication.protectedBook(),
+                "Protected EPUB in a hidden or sync folder escaped protection checks");
+    }
     std::unique_ptr<native::ResourceArchive> archive;
     auto save = [&](bool badCrc = false) {
         archive.reset();

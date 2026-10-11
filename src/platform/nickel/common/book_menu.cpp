@@ -1,4 +1,5 @@
 #include "book_menu.h"
+#include "local_book_path.h"
 #include "publication/publication.h"
 #include "support/strings.h"
 #include "support/diagnostics.h"
@@ -112,29 +113,16 @@ ReaderBookRoute readerBookRoute(const void *volume, QString *identity, QString *
     if (adobe(volume) || lcp(volume))
         return Route::Protected;
 #endif
-    // Nickel stores sideloaded ContentIDs as file:// followed by the literal
-    // path. URL parsing would truncate #/? and decode literal percent sequences.
-    // Nickel's built-in cloud downloads live inside .kobo. Only these two
-    // folders bypass the hidden parent check; hidden entries below them do not.
-    const QString storageRoot =
-        id.startsWith("file:///mnt/onboard/.kobo/dropbox/")        ? QStringLiteral("/mnt/onboard/.kobo/dropbox/")
-        : id.startsWith("file:///mnt/onboard/.kobo/google_drive/") ? QStringLiteral("/mnt/onboard/.kobo/google_drive/")
-        : id.startsWith("file:///mnt/onboard/")                    ? QStringLiteral("/mnt/onboard/")
-        : id.startsWith("file:///mnt/sd/")                         ? QStringLiteral("/mnt/sd/")
-                                                                   : QString();
-    const bool sideloaded = !storageRoot.isEmpty();
-    auto filename = sideloaded ? id.mid(7) : QString();
+    auto filename = localReaderBookPath(id);
     const bool purchased =
         QRegularExpression("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
             .match(id)
             .hasMatch();
     if (purchased)
         filename = "/mnt/onboard/.kobo/kepub/" + id;
-    if (QFileInfo(filename).canonicalFilePath() != filename || filename.isEmpty() ||
-        (!purchased && (!sideloaded || !filename.startsWith(storageRoot) ||
-                        filename.mid(storageRoot.size()).split('/').filter(QRegularExpression("^\\.")).size() ||
-                        !filename.endsWith(".epub", Qt::CaseInsensitive))))
+    if (filename.isEmpty() || !QFileInfo(filename).isFile()) {
         return Route::Unsupported;
+    }
     if (path)
         *path = filename;
     const QFileInfo fileInfo(filename);
