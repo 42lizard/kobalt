@@ -18,6 +18,17 @@ static QByteArray read(const QString &path) {
 }
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
+    const auto device = kobalt::diagnosticDeviceFields(
+        "PRIVATE-SERIAL,4.9.77,4.45.23646,4.9.77,4.9.77,00000000-0000-0000-0000-000000000390\n");
+    if (device.value("hardware_uuid").toString() != "00000000-0000-0000-0000-000000000390" ||
+        device.value("firmware").toString() != "4.45.23646" || device.size() != 2 ||
+        QJsonDocument(device).toJson().contains("PRIVATE-SERIAL")) {
+        qFatal("Device diagnostics lost model or disclosed serial");
+    }
+    if (!kobalt::diagnosticDeviceFields("PRIVATE-SERIAL,broken").isEmpty() ||
+        !kobalt::diagnosticDeviceFields("PRIVATE-SERIAL,x,private firmware,x,x,PRIVATE-SERIAL").isEmpty()) {
+        qFatal("Malformed device fields disclosed arbitrary data");
+    }
     const auto code = QStringLiteral("error.native_publication_transfer_timed_out");
     if (kobalt::diagnosticErrorCode(kobalt::strings::get(code.toLatin1().constData())) != code ||
         kobalt::diagnosticErrorCode(code) != code || !kobalt::diagnosticErrorCode({}).isEmpty() ||

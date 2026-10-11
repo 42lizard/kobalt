@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QRegularExpression>
 #include <cerrno>
 #include <cstdio>
 #include <fcntl.h>
@@ -20,6 +21,25 @@ QMutex mutex;
 QString logPath;
 bool paused = false;
 constexpr qint64 limit = 128 * 1024;
+}
+QJsonObject diagnosticDeviceFields(const QByteArray &version) {
+    const auto fields = version.trimmed().split(',');
+    if (fields.size() != 6) {
+        return {};
+    }
+    QJsonObject result;
+    const auto firmware = QString::fromLatin1(fields[2].trimmed());
+    const auto hardware = QString::fromLatin1(fields[5].trimmed());
+    // Persist only model and firmware fields. The first field is the serial.
+    static const QRegularExpression firmwarePattern(QStringLiteral("^[0-9]+(?:\\.[0-9]+){2,}$"));
+    static const QRegularExpression hardwarePattern(QStringLiteral("^00000000-0000-0000-0000-[0-9]{12}$"));
+    if (firmwarePattern.match(firmware).hasMatch()) {
+        result["firmware"] = firmware;
+    }
+    if (hardwarePattern.match(hardware).hasMatch()) {
+        result["hardware_uuid"] = hardware;
+    }
+    return result;
 }
 QString diagnosticErrorCode(const QString &reason) {
     if (reason.isEmpty())
@@ -46,7 +66,20 @@ void initializeDiagnostics(const QString &directory) {
             return;
         logPath = directory + "/events.jsonl";
     }
-    diagnostic("startup", kobalt::qt::object({{"build", __DATE__ " " __TIME__}, {"qt", qVersion()}}));
+    auto fields = kobalt::qt::object({{"build", __DATE__ " " __TIME__}, {"qt", qVersion()}});
+#ifdef KOBALT_VERSION
+    fields["version"] = QString::fromLatin1(KOBALT_VERSION);
+#endif
+#ifdef KOBALT_READER_HARDWARE
+    QFile version("/mnt/onboard/.kobo/version");
+    if (version.open(QIODevice::ReadOnly)) {
+        const auto device = diagnosticDeviceFields(version.read(512));
+        for (auto it = device.begin(); it != device.end(); ++it) {
+            fields[it.key()] = it.value();
+        }
+    }
+#endif
+    diagnostic("startup", fields);
 }
 void diagnostic(const char *event, QJsonObject fields, bool durable) {
     const int savedErrno = errno;

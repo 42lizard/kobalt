@@ -7,6 +7,7 @@
 #include "platform/nickel/common/native_progress.h"
 #include "platform/nickel/common/native_ui.h"
 #include "support/diagnostics.h"
+#include "platform/nickel/common/native_startup.h"
 #include "platform/nickel/common/reader_environment.h"
 #include "platform/nickel/common/reader_coordinator.h"
 #include <NickelHook.h>
@@ -39,11 +40,16 @@ template <class T> T symbol(const char *name) {
 std::function<bool(const void *, const void *)> beginOpening;
 bool alternativeEnabled();
 bool nativeInitialized = false;
+bool nativeFinishing = false;
 std::function<void()> nativeInitializationFinished;
 extern "C" __attribute__((visibility("default"))) void kobalt_finish_initialization(void *application) {
+    kobalt::diagnostic("native-initialization-enter");
+    nativeFinishing = true;
     nativeFinishInitialization(application);
-    // The power manager is created inside this call. Its lazy singleton getter
-    // cannot be used to test whether Nickel has finished creating it.
+    nativeFinishing = false;
+    kobalt::diagnostic("native-initialization-return");
+    // Wait until Nickel has finished wiring its native workflows. A lazy
+    // singleton getter cannot prove that initialization is complete.
     nativeInitialized = true;
     if (nativeInitializationFinished)
         nativeInitializationFinished();
@@ -178,10 +184,24 @@ public:
         test = readJson("/instance/kobalt-startup-test.json");
 #endif
         connect(&retry, &QTimer::timeout, this, [this] {
-            if (++ticks >= 120)
+            if (++ticks >= 120 && nativeInitialized)
                 retry.stop();
             attempt(false);
-            if (ticks >= 120 && !controller && !rejected)
+            if (!controller && !rejected && ticks % 20 == 0) {
+                kobalt::diagnostic(
+                    "startup-state",
+                    kobalt::qt::object(
+                        {{"native_initialized", nativeInitialized},
+                         {"native_finishing", nativeFinishing},
+                         {"power_guard_known", kobalt::nickel::startup_detail::constructionGuard() != nullptr},
+                         {"power_constructed", kobalt::nickel::startup_detail::existingPower() != nullptr},
+                         {"native_state_ready", kobalt::nickel::nativeStartupReady()},
+                         {"reason", lastWait},
+                         {"ticks", ticks},
+                         {"elapsed_ms", double(elapsed.elapsed())}}),
+                    false);
+            }
+            if (ticks >= 120 && nativeInitialized && !controller && !rejected)
                 kobalt::diagnostic("startup-deferred", kobalt::qt::object({{"reason", lastWait}}));
         });
         retry.setInterval(250);
@@ -193,6 +213,11 @@ public:
         });
     }
     bool open(const void *volume, const void *context) {
+        kobalt::diagnostic("startup-opener",
+                           kobalt::qt::object({{"native_initialized", nativeInitialized},
+                                               {"controller_ready", bool(controller)},
+                                               {"rejected", rejected}}),
+                           false);
         if (initializing) {
             reentered = true;
             return false;
@@ -208,7 +233,20 @@ public:
     void attempt(bool fromOpener) {
         if (controller || rejected || initializing)
             return;
-        if (!nativeInitialized) {
+        if (!nativeInitialized && !nativeFinishing && kobalt::nickel::nativeStartupReady()) {
+            nativeInitialized = true;
+            kobalt::diagnostic("startup-recovered", kobalt::qt::object({{"reason", "native-state"},
+                                                                        {"elapsed_ms", double(elapsed.elapsed())}}));
+        }
+        if (!nativeInitialized || nativeFinishing) {
+            if (elapsed.elapsed() >= 30000) {
+                rejected = true;
+                retry.stop();
+                writeJson(sessionReport,
+                          kobalt::qt::object({{"status", "stock"}, {"reason", "Native initialization not observed"}}));
+                kobalt::diagnostic("startup-failed", kobalt::qt::object({{"reason", "native-initialization"}}));
+                return;
+            }
             waiting("native-initialization");
             return;
         }
@@ -323,6 +361,13 @@ private:
 
 int initialize() {
     kobalt::initializeDiagnostics(QString::fromLatin1(configDir));
+    kobalt::diagnostic("startup-hooks",
+                       kobalt::qt::object({{"finish_hook_available", bool(nativeFinishInitialization)},
+                                           {"finish_next_is_stock",
+                                            reinterpret_cast<void *>(nativeFinishInitialization) ==
+                                                dlsym(RTLD_DEFAULT, "_ZN18Nickel3Application20finishInitializationEv")},
+                                           {"native_initialized", nativeInitialized},
+                                           {"application_available", bool(qApp)}}));
 #ifdef KOBALT_READER_TEMPORARY
     if (!armFlag(KOBALT_CONFIG_DIR "/uninstall-now", "Temporary reader: remove on the next Nickel start.\n")) {
         kobalt::diagnostic("removal-arm-failed");
@@ -381,6 +426,7 @@ int initialize() {
         },
         alternativeEnabled);
     startup->start();
+    kobalt::diagnostic("startup-listening");
     return 0;
 }
 }

@@ -63,6 +63,8 @@ NickelHook also parks the library outside `imageformats` for the first three sec
 
 To install a new build over a temporary build, copy the new package, then delete `.adds/kobalt/uninstall-now` before you eject. If you leave it, the next start removes the new library.
 
+Kobalt waits for Nickel to finish initialization before creating its reader controller. If Kobalt misses the completion callback, it can recover by checking the existing Power Manager and Nickel's application connection. The check does not create the manager. An unrecognized native layout cannot enable recovery. If native readiness is still unconfirmed after 30 seconds, Kobalt records `startup-failed` and keeps the built-in reader active for that boot.
+
 ## Files on user storage
 
 All files are in `.adds/kobalt/`.
@@ -82,7 +84,7 @@ All files are in `.adds/kobalt/`.
 | `uninstall`, `uninstall-now` | Removal control, see above |
 | `doc` | Short user instructions |
 
-The event log records startup checks, opening stages, timings, memory and save results. Archive inspection failures include the specific `error_code` in the `native-resource-failed` event with stage `publication-inspection`. It does not record book text, titles, file paths, serials or account data. A position fallback records the name of the chapter file inside the book. `state.json` and `session.json` can contain book identifiers, so keep them private. The log shows the last recorded operation, not a crash stack trace.
+The event log records startup checks, opening stages, timings, memory and save results. The startup event includes the firmware version and hardware UUID when available. The hardware UUID identifies the model, not an individual device. Startup events also record hook availability, entry and return of Nickel initialization, periodic wait state and book-opening retries. Archive inspection failures include the specific `error_code` in the `native-resource-failed` event with stage `publication-inspection`. It does not record book text, titles, file paths, serials or account data. A position fallback records the name of the chapter file inside the book. `state.json` and `session.json` can contain book identifiers, so keep them private. The log shows the last recorded operation, not a crash stack trace.
 
 ## Opening books
 

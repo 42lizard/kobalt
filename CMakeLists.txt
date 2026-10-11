@@ -87,7 +87,7 @@ configure_file(src/support/build_info.h.in build_info.h @ONLY)
 target_include_directories(kobalt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_options(kobalt PRIVATE -Wall -Wextra -Werror
     -Wno-missing-field-initializers -fvisibility=hidden)
-target_link_libraries(kobalt PRIVATE Qt${KOBALT_QT_MAJOR}::Widgets ${CMAKE_DL_LIBS} pthread)
+target_link_libraries(kobalt PRIVATE Qt${KOBALT_QT_MAJOR}::Widgets Qt${KOBALT_QT_MAJOR}::GuiPrivate ${CMAKE_DL_LIBS} pthread)
 target_link_options(kobalt PRIVATE -Wl,--no-undefined)
 target_compile_definitions(kobalt PRIVATE KOBALT_LAYOUT_POLICY="${LAYOUT_POLICY}")
 if(KOBALT_PAGE_ANIMATIONS)

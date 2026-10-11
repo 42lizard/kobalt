@@ -1,9 +1,11 @@
 #pragma once
 #include "qt_compat.h"
+#include <QByteArray>
 #include <QJsonObject>
 #include <QString>
 
 namespace kobalt {
+QJsonObject diagnosticDeviceFields(const QByteArray &version);
 QString diagnosticErrorCode(const QString &reason);
 void pauseDiagnostics(bool paused);
 void initializeDiagnostics(const QString &directory);
