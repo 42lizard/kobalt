@@ -2,6 +2,8 @@
 
 ### Fixed
 
+- Fixed opening and appearance previews for EPUBs whose structural CSS selectors require styles to be recalculated after parsing. Publisher image spacing and centered text are preserved.
+
 - Fixed opening EPUBs with repeated identical manifest items. Conflicting duplicate IDs remain unsupported.
 - Fixed opening EPUBs with standard IDPF-obfuscated embedded TrueType or OpenType fonts.
 - Added evenly spaced line-spacing slider marks with snapping at 100%, 110%, 120%, 130%, 140%, 150%, 175%, 200%, 250% and 300%. Plus and minus still adjust spacing by one percentage point.

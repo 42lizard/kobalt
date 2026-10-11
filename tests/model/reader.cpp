@@ -337,8 +337,43 @@ static void checkIdpfFonts() {
                 "IDPF font preview changed publisher glyphs");
     }
 }
+static void checkDeferredPublisherStyles() {
+    const QByteArray prefix =
+        "<html xmlns='http://www.w3.org/1999/xhtml'><head><style>body{margin:0}p{margin:0;text-indent:0}";
+    auto book = [&](bool deferred) {
+        const QByteArray css = deferred ? "img:only-of-type{margin-top:48px}p.caption:nth-of-type(1){text-align:center}"
+                                        : "img{margin-top:48px}p.caption{text-align:center}";
+        return storedEpub(
+            {{"mimetype", "application/epub+zip"},
+             {"META-INF/container.xml",
+              "<container xmlns='urn:oasis:names:tc:opendocument:xmlns:container'><rootfiles><rootfile full-path='book.opf' media-type='application/oebps-package+xml'/></rootfiles></container>"},
+             {"book.opf",
+              "<package xmlns='http://www.idpf.org/2007/opf' version='2.0'><metadata/><manifest><item id='chapter' href='chapter.xhtml' media-type='application/xhtml+xml'/><item id='image' href='image.svg' media-type='image/svg+xml'/></manifest><spine><itemref idref='chapter'/></spine></package>"},
+             {"chapter.xhtml",
+              prefix + css +
+                  "</style></head><body><img src='image.svg' width='160' height='80'/><p class='caption'>Centered caption</p><p>Ordinary prose remains left aligned.</p></body></html>"},
+             {"image.svg",
+              "<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80'><rect width='160' height='80' fill='black'/></svg>"}});
+    };
+    QString error;
+    QByteArray page, preview;
+    for (bool deferred : {false, true}) {
+        kobalt::ReaderModel model(kobalt::test::readerFonts());
+        require(model.open(book(deferred), QSize(800, 1000), {}, &error), qPrintable(error));
+        kobalt::ReaderModel section(kobalt::test::readerFonts());
+        require(section.openPreview(model, QSize(800, 1000), &error), qPrintable(error));
+        if (!deferred) {
+            page = hash(model.image(0));
+            preview = hash(section.image(0));
+        } else {
+            require(hash(model.image(0)) == page, "Deferred publisher styles changed image spacing or centering");
+            require(hash(section.image(0)) == preview, "Deferred publisher styles changed the section preview");
+        }
+    }
+}
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
+    checkDeferredPublisherStyles();
     checkIdpfFonts();
     const auto positions = kobalt::nickel::positionCodec();
     const QVector<kobalt::ReadingFont> axisFixture{

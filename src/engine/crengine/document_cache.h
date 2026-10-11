@@ -52,7 +52,7 @@ inline QString documentCacheName(const QByteArray &fingerprint) {
 inline lUInt32 documentCacheChecksum(const QByteArray &policy, int domVersion) {
     // Bump when the cached book's contents change for a reason the policy
     // does not cover.
-    constexpr int version = 2;
+    constexpr int version = 3;
     const auto digest = QCryptographicHash::hash(
         policy + '|' + QByteArray::number(version) + '|' + QByteArray::number(domVersion), QCryptographicHash::Sha256);
     return lUInt32(uchar(digest[0])) << 24 | lUInt32(uchar(digest[1])) << 16 | lUInt32(uchar(digest[2])) << 8 |

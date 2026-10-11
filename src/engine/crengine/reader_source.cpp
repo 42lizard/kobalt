@@ -399,7 +399,18 @@ bool ReaderModel::openSource(std::shared_ptr<ReaderSource> source, QSize size, c
     // A cached book was saved with these markers and its styles. Marking it
     // again would discard the cached pages.
     if (!openedFromCache_) {
-        markBodyAlignment(engine_->getDocument());
+        auto *document = engine_->getDocument();
+        auto *root = document->getRootNode();
+        if (root->getStyle().isNull()) {
+            // Structural CSS selectors can invalidate styles after parsing.
+            // Publisher alignment and leading-image margins need them before
+            // Kobalt adds its layout markers, without paginating the document.
+            auto *stylesheet = document->getStyleSheet();
+            stylesheet->push();
+            root->initNodeStyleRecursive(nullptr);
+            stylesheet->pop();
+        }
+        markBodyAlignment(document);
         markChapterLeadingImages(engine_.get());
         markKoboLinkDecorations();
         // Loading computed styles before the body markers existed, including in previews.
