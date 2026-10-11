@@ -3,13 +3,14 @@
 #include "check.h"
 #include <QJsonArray>
 #include <cstdio>
+#include <utility>
 
 using namespace kobalt;
 
 int main() {
     // Appearance settings decide the layout. The list must stay complete, because a
     // missing key would let a retained layout survive a changed setting.
-    require(appearance::keys.size() == 15, "The appearance keys changed without this check");
+    require(appearance::keys.size() == 16, "The appearance keys changed without this check");
 
     const auto from = qt::object({{"font_pixels", 40},
                                   {"line_spacing", QJsonValue(QJsonValue::Null)},
@@ -61,6 +62,28 @@ int main() {
     other["show_header"] = true;
     require(appearance::same(other, from), "A setting outside the keys changed the comparison");
 
+    for (const auto &entry : {std::pair<int, int>{100, 100},
+                              {120, 144},
+                              {122, 150},
+                              {140, 196},
+                              {150, 225},
+                              {173, 299},
+                              {174, 300},
+                              {180, 300}}) {
+        auto legacy = qt::object({{"line_spacing", entry.first}, {"position", "chapter#saved"}});
+        appearance::migrateLineSpacing(legacy);
+        require(legacy.value("line_spacing").toInt() == entry.second &&
+                    legacy.value("position").toString() == "chapter#saved",
+                "Legacy spacing migration lost the approximate height or reading position");
+        const auto migrated = legacy;
+        appearance::migrateLineSpacing(legacy);
+        require(legacy == migrated, "Spacing migration ran twice");
+    }
+    for (const auto &value : {QJsonValue(), QJsonValue(QJsonValue::Null), QJsonValue(QStringLiteral("invalid"))}) {
+        auto saved = qt::object({{"line_spacing", value}});
+        appearance::migrateLineSpacing(saved);
+        require(saved.value("line_spacing") == value, "Missing or invalid spacing was converted to a number");
+    }
     QJsonObject fresh;
     appearance::applyFontDefault(fresh, qt::object({{"default_font_face", "NV Ancizar Serif"}}));
     require(fresh["font_face"].toString() == "NV Ancizar Serif" &&
@@ -106,17 +129,17 @@ int main() {
                 defaults.value("font_weight").toInt() == 450 && defaults.value("hyphenation").toString() == "off",
             "Typography defaults changed");
     require(!defaults.contains("dark_mode") && !defaults.contains("smooth_images") &&
-                !defaults.contains("bionic_reading") && defaults.size() == 11,
+                !defaults.contains("bionic_reading") && defaults.size() == 12,
             "Restoring typography must not change display choices");
     readingPpi.store(212);
     require(appearance::typographyDefaults().value("font_pixels").toInt() == defaultFontPixels(),
             "Default text size did not follow the screen density");
     readingPpi.store(300);
     const auto benchmark = appearance::benchmarkTypography("file:///mnt/onboard/kobalt-benchmark.kepub.epub");
-    require(benchmark.size() == 15 && benchmark.value("font_face").toString().isEmpty() &&
+    require(benchmark.size() == 16 && benchmark.value("font_face").toString().isEmpty() &&
                 benchmark.value("font_pixels").toInt() == defaultFontPixels() &&
                 benchmark.value("margin_pixels").toInt() == 60 && benchmark.value("top_margin_pixels").toInt() == 60 &&
-                benchmark.value("line_spacing").toInt() == 120 && !benchmark.value("dark_mode").toBool() &&
+                benchmark.value("line_spacing").toInt() == 144 && !benchmark.value("dark_mode").toBool() &&
                 benchmark.value("hyphenation").toString() == "off",
             "Benchmark typography changed");
     require(appearance::benchmarkTypography("file:///mnt/onboard/other.epub").isEmpty() &&

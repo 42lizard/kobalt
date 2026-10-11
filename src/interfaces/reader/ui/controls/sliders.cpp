@@ -12,6 +12,7 @@
 #include <QMouseEvent>
 #include <QTouchEvent>
 #include <QtMath>
+#include <algorithm>
 
 namespace kobalt::ui {
 namespace m = metrics;
@@ -24,16 +25,18 @@ SettingSlider::SettingSlider(QWidget *parent, int minimum, int maximum, int step
     setFocusPolicy(Qt::NoFocus);
     setAttribute(Qt::WA_AcceptTouchEvents);
 }
-void SettingSlider::setMarkers(const QVector<int> &values) {
+void SettingSlider::setMarkers(const QVector<int> &values, MarkerMode mode) {
     QVector<int> next;
     for (const int value : values) {
         if (value < minimum() || value > maximum() || next.contains(value))
             continue;
         next.append(value);
     }
-    if (markers == next)
+    std::sort(next.begin(), next.end());
+    if (markers == next && markerMode == mode)
         return;
     markers = next;
+    markerMode = mode;
     update();
 }
 void SettingSlider::nudge(int steps) {
@@ -44,17 +47,13 @@ void SettingSlider::nudge(int steps) {
 void SettingSlider::paintEvent(QPaintEvent *) {
     QPainter painter(this);
     painter.fillRect(rect(), palette().color(QPalette::Window));
-    const int span = qMax(1, width() - 2 * m::control::sliderInset);
-    const auto position = [this, span](int marker) {
-        return m::control::sliderInset + QStyle::sliderPositionFromValue(minimum(), maximum(), marker, span);
-    };
-    const int x = position(value());
+    const int x = positionForValue(value());
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(QPen(palette().color(QPalette::WindowText), m::control::sliderMarkerWidth));
     for (const int marker : markers) {
         if (marker < minimum() || marker > maximum())
             continue;
-        painter.drawLine(position(marker), m::control::sliderMarkerTop, position(marker),
+        painter.drawLine(positionForValue(marker), m::control::sliderMarkerTop, positionForValue(marker),
                          m::control::sliderMarkerTop + m::control::sliderMarkerHeight);
     }
     painter.setPen(QPen(palette().color(QPalette::WindowText), 1));
@@ -114,7 +113,30 @@ void SettingSlider::hideEvent(QHideEvent *event) {
     cancel();
     QSlider::hideEvent(event);
 }
+int SettingSlider::positionForValue(int value) const {
+    const int span = qMax(1, width() - 2 * m::control::sliderInset);
+    if (markerMode == MarkerMode::Stops && markers.size() > 1) {
+        if (value <= markers.first()) {
+            return m::control::sliderInset;
+        }
+        for (int index = 1; index < markers.size(); ++index) {
+            if (value <= markers[index]) {
+                const double fraction = double(value - markers[index - 1]) / (markers[index] - markers[index - 1]);
+                return m::control::sliderInset + qRound(span * (index - 1 + fraction) / (markers.size() - 1));
+            }
+        }
+        return m::control::sliderInset + span;
+    }
+    return m::control::sliderInset + QStyle::sliderPositionFromValue(minimum(), maximum(), value, span);
+}
 void SettingSlider::moveTo(qreal x) {
+    if (markerMode == MarkerMode::Stops && markers.size() > 1) {
+        const int span = qMax(1, width() - 2 * m::control::sliderInset);
+        const int index =
+            qBound(0, qRound((x - m::control::sliderInset) * (markers.size() - 1) / span), int(markers.size() - 1));
+        setValue(markers[index]);
+        return;
+    }
     const int raw = QStyle::sliderValueFromPosition(minimum(), maximum(), qRound(x) - m::control::sliderInset,
                                                     qMax(1, width() - 2 * m::control::sliderInset));
     setValue(qBound(minimum(), minimum() + qRound(double(raw - minimum()) / singleStep()) * singleStep(), maximum()));

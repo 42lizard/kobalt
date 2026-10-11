@@ -2935,6 +2935,44 @@ int main(int argc, char **argv) {
     slide(QEvent::MouseButtonPress, 25);
     slide(QEvent::MouseButtonRelease, 275);
     require(commits == 1 && slider.value() == 0, "Single-page slider emitted a jump");
+    slider.setRange(100, 300);
+    const QVector<int> spacingStops{100, 110, 120, 130, 140, 150, 175, 200, 250, 300};
+    slider.setMarkers(spacingStops, kobalt::ui::SettingSlider::MarkerMode::Stops);
+    const int inset = kobalt::ui::metrics::control::sliderInset;
+    slider.resize(360 + 2 * inset, 72);
+    for (int index = 0; index < spacingStops.size(); ++index) {
+        const int x = inset + 40 * index;
+        slide(QEvent::MouseButtonPress, x + (index == spacingStops.size() - 1 ? -12 : 12));
+        require(slider.value() == spacingStops[index], "Pointer did not snap to equally spaced line-height stops");
+        slide(QEvent::MouseButtonRelease, x);
+        slider.nudge(1);
+        require(slider.value() == qMin(300, spacingStops[index] + 1), "Plus skipped a granular line-height value");
+        slider.nudge(-1);
+        require(slider.value() == (index == spacingStops.size() - 1 ? 299 : spacingStops[index]),
+                "Minus snapped instead of changing line height by one percent");
+    }
+    for (const bool dark : {false, true}) {
+        QPalette colors = originalPalette;
+        colors.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        colors.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        slider.setPalette(colors);
+        slider.setValue(151);
+        const auto image = slider.grab().toImage();
+        const int markerY =
+            kobalt::ui::metrics::control::sliderMarkerTop + kobalt::ui::metrics::control::sliderMarkerHeight / 2;
+        for (int index = 0; index < spacingStops.size(); ++index) {
+            require(qGray(image.pixel(inset + 40 * index, markerY)) == (dark ? 255 : 0),
+                    "Nonlinear slider marks were not equally spaced");
+        }
+        require(qGray(image.pixel(inset + 20, markerY)) == (dark ? 0 : 255),
+                "Nonlinear slider drew a marker between its stops");
+    }
+    slider.setValue(151);
+    const int beforeSnap = commits;
+    slide(QEvent::MouseButtonPress, inset + 240);
+    QApplication::sendEvent(&slider, &cancel);
+    slide(QEvent::MouseButtonRelease, inset + 240);
+    require(slider.value() == 151 && commits == beforeSnap, "Cancelling a snapped gesture lost the granular value");
     kobalt::ui::FontButton font(&panel);
     font.ensurePolished();
     font.resize(500, kobalt::ui::metrics::choices::fontButtonHeight);

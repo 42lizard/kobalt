@@ -625,10 +625,12 @@ int main(int argc, char **argv) {
     require(central >= 0, "Missing test ZIP directory");
     corrupt[central + 8] = char(corrupt[central + 8] | 1);
     require(!kobalt::ReaderModel::supportedArchive(corrupt, &error), "Encrypted ZIP accepted");
-    // Use a bundled comparison face on both firmware versions.
+    // Use current line-height units and a bundled comparison face on both firmware versions.
+    // The boolean hyphenation value still exercises the legacy setting.
     const QJsonObject legacySettings = kobalt::qt::object({{"font_face", "NV Bitter"},
                                                            {"font_pixels", 32},
                                                            {"line_spacing", 120},
+                                                           {"line_spacing_version", 1},
                                                            {"margin_pixels", 36},
                                                            {"hyphenation", true}});
     for (int cycle = 0; cycle < 2; ++cycle) {
@@ -675,7 +677,7 @@ int main(int argc, char **argv) {
     std::fflush(stdout);
     require(text && pagination, "Missing parsing or pagination progress");
     const auto progressCount = progress.size();
-    require(defaults.fontFace() == "Libron" && defaults.fontSize() == 46 && defaults.spacing() == 122 &&
+    require(defaults.fontFace() == "Libron" && defaults.fontSize() == 46 && defaults.spacing() == 150 &&
                 defaults.margin() == 48 && defaults.alignment() == "left" &&
                 defaults.state().value("hyphenation").toString() == "off",
             "New books do not use the bundled typography defaults");
@@ -1543,6 +1545,70 @@ int main(int argc, char **argv) {
         require(spaced.append(name, content, &error), qPrintable(error));
     }
     const auto spacedBytes = spaced.finish(&error);
+    // Identical glyphs on forced lines expose the actual rendered line pitch.
+    // Measure pixels so applying the percentage twice cannot pass this check.
+    kobalt::Publication lineHeightFixture;
+    require(lineHeightFixture.inspect(bytes, &error), qPrintable(error));
+    for (const auto &name : lineHeightFixture.names()) {
+        auto resource = source->OpenStream(Utf8ToUnicode(name.toUtf8().constData()).c_str(), LVOM_READ);
+        QByteArray content(int(resource->GetSize()), '\0');
+        lvsize_t read = 0;
+        require(resource->Read(content.data(), content.size(), &read) == LVERR_OK && read == lvsize_t(content.size()),
+                "Cannot read line-height fixture resource");
+        if (name.endsWith(".xhtml")) {
+            content = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Line height</title>"
+                      "<style>p { margin:0; text-indent:0; }</style></head>"
+                      "<body><p>H<br/>H<br/>H<br/>H</p></body></html>";
+        }
+        require(lineHeightFixture.append(name, content, &error), qPrintable(error));
+    }
+    const auto lineHeightBytes = lineHeightFixture.finish(&error);
+    auto linePitch = [](const QImage &image) {
+        QVector<int> starts;
+        bool previousInk = false;
+        for (int y = 0; y < image.height(); ++y) {
+            bool ink = false;
+            for (int x = 0; x < image.width(); ++x) {
+                ink |= qGray(image.pixel(x, y)) < 128;
+            }
+            if (ink && !previousInk) {
+                starts.append(y);
+            }
+            previousInk = ink;
+        }
+        require(starts.size() >= 4, "Line-height fixture did not render four lines");
+        const int pitch = starts[1] - starts[0];
+        require(starts[2] - starts[1] == pitch && starts[3] - starts[2] == pitch,
+                "Line-height fixture has inconsistent pitch");
+        return pitch;
+    };
+    {
+        kobalt::ReaderModel height(kobalt::test::readerFonts());
+        auto settings = kobalt::qt::object({{"font_pixels", 40},
+                                            {"line_spacing", 150},
+                                            {"line_spacing_version", 1},
+                                            {"margin_pixels", 0},
+                                            {"top_margin_pixels", 0},
+                                            {"bottom_margin_pixels", 0}});
+        require(height.open(lineHeightBytes, QSize(320, 720), settings, &error), qPrintable(error));
+        require(linePitch(height.image(0)) == 60, "150% did not render at 1.5 times the font size");
+        for (const int spacing : {100, 200, 300}) {
+            require(height.style(40, spacing), "Cannot change line height");
+            require(linePitch(height.image(0)) == 40 * spacing / 100, "Relayout multiplied line height twice");
+        }
+        require(!height.style(40, 301), "Spacing above 300% was accepted");
+        settings.remove("line_spacing_version");
+        settings["line_spacing"] = 122;
+        require(height.open(lineHeightBytes, QSize(320, 720), settings, &error) && height.spacing() == 150,
+                "Opening did not migrate saved 122% to 150%");
+        const auto migrated = height.state();
+        require(height.open(lineHeightBytes, QSize(320, 720), migrated, &error) && height.spacing() == 150 &&
+                    linePitch(height.image(0)) == 60,
+                "Reopening migrated spacing applied the conversion again");
+        kobalt::ReaderModel preview(kobalt::test::readerFonts());
+        require(preview.openPreview(height, height.viewport(), &error) && linePitch(preview.image(0)) == 60,
+                "Preview multiplied or migrated line height again");
+    }
     auto checkSpaces = [](const QImage &image) {
         QVector<QVector<int>> lines;
         QVector<bool> columns(image.width(), false);

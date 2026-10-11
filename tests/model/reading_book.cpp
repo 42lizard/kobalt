@@ -127,10 +127,13 @@ int main(int argc, char **argv) {
         });
         return session;
     };
-    for (const auto &original : {QJsonObject(), qt::object({{"font_pixels", 31},
-                                                            {"font_face", "Libron"},
-                                                            {"line_spacing", QJsonValue(QJsonValue::Null)},
-                                                            {"dark_mode", true}})}) {
+    for (const auto &original : {qt::object({{"line_spacing", 122}}), QJsonObject(),
+                                 qt::object({{"font_pixels", 31},
+                                             {"font_face", "Libron"},
+                                             {"line_spacing", QJsonValue(QJsonValue::Null)},
+                                             {"dark_mode", true}})}) {
+        auto migratedOriginal = original;
+        appearance::migrateLineSpacing(migratedOriginal);
         const QString identity = "file:///mnt/onboard/kobalt-benchmark.kepub.epub";
         auto session = std::make_unique<ReaderSession>(test::readerFonts(), test::readerPlaceholder());
         bool ready = false;
@@ -168,19 +171,20 @@ int main(int argc, char **argv) {
             require(snapshot.value("font_pixels").toInt() == defaultFontPixels(),
                     "Live snapshot lost benchmark appearance");
             const auto persisted = storage::readJson(statePath);
-            require(appearance::same(persisted, original),
+            require(appearance::same(persisted, migratedOriginal),
                     "Checkpoint persisted temporary appearance or added absent keys");
             require(benchmark.session()->turn(1), "Benchmark cannot turn");
             waitUntil([&] {
                 return !benchmark.session()->busy();
             });
             require(benchmark.checkpoint(&snapshot), "Benchmark turn checkpoint failed");
-            require(appearance::same(storage::readJson(statePath), original),
+            require(appearance::same(storage::readJson(statePath), migratedOriginal),
                     "Turn checkpoint changed original appearance");
             retained = benchmark.session()->retained();
             require(bool(retained), "Benchmark could not retain its parsed document");
         }
-        require(appearance::same(storage::readJson(statePath), original), "Closing changed original appearance");
+        require(appearance::same(storage::readJson(statePath), migratedOriginal),
+                "Closing changed original appearance");
         ready = false;
         lease = std::make_shared<SourceLease>();
         retained->open({identity,
@@ -199,7 +203,8 @@ int main(int argc, char **argv) {
             return ready;
         });
         require(!retained->temporaryTypography() &&
-                    retained->fontSize() == original.value("font_pixels").toInt(defaultFontPixels()),
+                    retained->fontSize() == original.value("font_pixels").toInt(defaultFontPixels()) &&
+                    retained->spacing() == migratedOriginal.value("line_spacing").toInt(defaultLineSpacing),
                 "Normal reopening retained temporary typography");
         auto ordinary = open();
         require(!ordinary->temporaryTypography(), "Unmatched opening inherited benchmark typography");

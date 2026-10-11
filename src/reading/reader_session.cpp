@@ -245,6 +245,7 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
     auto saved = std::move(request.saved);
     temporaryAppearance = request.temporaryAppearance;
     originalAppearance = request.originalAppearance;
+    appearance::migrateLineSpacing(originalAppearance);
     const auto pinnedAppearance = temporaryAppearance;
     const auto nativeLocation = std::move(request.platformLocation),
                layoutCachePath = std::move(request.layoutCachePath);
@@ -369,6 +370,7 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                 saved["bionic_reading"] = bionic;
                 saved["dark_mode"] = dark;
                 saved["smooth_images"] = smooth;
+                appearance::migrateLineSpacing(saved);
                 if (!pinnedAppearance.isEmpty())
                     appearance::copy(saved, pinnedAppearance);
                 const auto initial = saved.value("position").toString().isEmpty() ? nativeLocation : QString();
@@ -649,8 +651,8 @@ bool ReaderSession::style(int pixels, int spacing, const QString &face, int marg
 bool ReaderSession::style(int pixels, int spacing, const QString &face, int margin, const QString &alignment) {
     if (temporaryTypography())
         return false;
-    if (pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 || spacing > 180 || margin < 0 ||
-        margin > maximumMarginPixels() || (!face.isEmpty() && !frame.fonts.contains(face)) ||
+    if (pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 || spacing > maximumLineSpacing ||
+        margin < 0 || margin > maximumMarginPixels() || (!face.isEmpty() && !frame.fonts.contains(face)) ||
         (alignment != "publisher" && alignment != "left" && alignment != "justify" && alignment != "center" &&
          alignment != "right"))
         return false;

@@ -12,7 +12,9 @@ public:
     bool interacting() const {
         return tracking;
     }
-    void setMarkers(const QVector<int> &values);
+    enum class MarkerMode { Positions, Stops };
+    // Stops are evenly spaced and snap pointer gestures. Buttons retain singleStep().
+    void setMarkers(const QVector<int> &values, MarkerMode mode = MarkerMode::Positions);
     void nudge(int steps);
 
 protected:
@@ -27,6 +29,8 @@ private:
     bool tracking = false;
     int original = 0;
     QVector<int> markers;
+    MarkerMode markerMode = MarkerMode::Positions;
+    int positionForValue(int value) const;
     void moveTo(qreal x);
     void cancel();
     void finish();

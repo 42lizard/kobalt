@@ -4,7 +4,8 @@
 
 - Fixed opening EPUBs with repeated identical manifest items. Conflicting duplicate IDs remain unsupported.
 - Fixed opening EPUBs with standard IDPF-obfuscated embedded TrueType or OpenType fonts.
-
+- Added evenly spaced line-spacing slider marks with snapping at 100%, 110%, 120%, 130%, 140%, 150%, 175%, 200%, 250% and 300%. Plus and minus still adjust spacing by one percentage point.
+- Fixed line spacing being applied twice. 150% now means 1.5 times the font size. Existing book settings are converted to preserve their approximate spacing, with 122% becoming 150% and a maximum of 300%.
 - Fixed left alignment and justification moving publisher-centered text to the left.
 - Fixed reversed landscape touch targets on affected Clara devices with firmware 4, using NickelRotate’s coordinate correction.
 - Fixed opening and saved chapter lookup for sideloaded filenames containing `#`, `?` or literal percent escapes on firmware 4. If files fail to open, an explanation is logged.

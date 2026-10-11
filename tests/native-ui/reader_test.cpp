@@ -455,7 +455,8 @@ private slots:
             QCOMPARE(panel.sizeSlider->minimum(), 14);
             QCOMPARE(panel.sizeSlider->maximum(), 40);
             QCOMPARE(panel.spacingSlider->minimum(), 100);
-            QCOMPARE(panel.spacingSlider->maximum(), 180);
+            QCOMPARE(panel.spacingSlider->maximum(), 300);
+            QCOMPARE(panel.spacingSlider->singleStep(), 1);
             QCOMPARE(panel.marginSlider->singleStep(), 3);
             QCOMPARE(panel.verticalMarginSlider->singleStep(), 3);
             QCOMPARE(panel.verticalMarginSlider->parentWidget()->parentWidget(), layout);
@@ -2155,6 +2156,13 @@ private slots:
         QTRY_VERIFY(!host.session()->busy());
     }
     void openTurnAndPersist() {
+        if (!qEnvironmentVariableIsSet("KOBALT_TEST_SETTINGS") && !qEnvironmentVariableIsSet("KOBALT_TEST_PAGE")) {
+            // Earlier tests change this book's appearance and position.
+            const auto identity = QUrl::fromLocalFile(QFileInfo(fixture()).absoluteFilePath()).toString();
+            const auto statePath = testPaths().bookState(identity);
+            QVERIFY(!QFile::exists(statePath) || QFile::remove(statePath));
+            QVERIFY(storage::writeJson(testPaths().preferences(), {}));
+        }
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
         QSignalSpy opened(&host, &test::ReaderHost::opened), failed(&host, &test::ReaderHost::failed),
             closed(&host, &test::ReaderHost::closed);

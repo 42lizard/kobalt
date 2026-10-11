@@ -329,10 +329,11 @@ QVector<ReadingFont> ReaderModel::fontCatalog() {
 void ReaderModel::setDocumentCache(QString directory, QByteArray fingerprint, QByteArray policy, qint64 bytes) {
     cacheDirectory_ = std::move(directory);
     cacheFingerprint_ = std::move(fingerprint);
-    // Parsed pages from the older CSS density and leading-image policy must
-    // not survive this renderer change. The density is fixed by the host
+    // Parsed pages from older density, image and double-scaled line-height
+    // policies must not survive these renderer changes. The density is fixed by the host
     // before any model opens and is shared by the main reader and previews.
-    cachePolicy_ = std::move(policy) + ":css-density-leading-v1:" + QByteArray::number(readingPpi.load());
+    cachePolicy_ =
+        std::move(policy) + ":css-density-leading-v1:line-height-v2:" + QByteArray::number(readingPpi.load());
     cacheBytes_ = bytes;
 }
 bool ReaderModel::saveDocumentCache() {
@@ -358,7 +359,9 @@ void ReaderModel::activateFontParameters() const {
     LVRendSetFontOpticalSize(opticalSizeAxis().available() ? opticalSize_ : 0);
     LVRendSetBaseFontWeight(axis.available() ? (bionic_ == "off" ? axisWeight_ : axis.defaultValue) : 400);
 }
-void ReaderModel::configure(QSize size, const QJsonObject &saved) {
+void ReaderModel::configure(QSize size, const QJsonObject &settings) {
+    auto saved = settings;
+    appearance::migrateLineSpacing(saved);
     // Outline thickness must not affect layout-time italic overhang measurements.
     setExtraFontWeight(0);
     engine_.reset();
@@ -375,7 +378,7 @@ void ReaderModel::configure(QSize size, const QJsonObject &saved) {
     darkMode_ = saved.value("dark_mode").toBool(false);
     smoothImages_ = saved.value("smooth_images").toBool(true);
     pixels_ = qBound(minimumFontPixels(), saved.value("font_pixels").toInt(defaultFontPixels()), maximumFontPixels());
-    spacing_ = qBound(100, saved.value("line_spacing").toInt(defaultLineSpacing), 180);
+    spacing_ = qBound(100, saved.value("line_spacing").toInt(defaultLineSpacing), maximumLineSpacing);
     margin_ = qBound(0, saved.value("margin_pixels").toInt(defaultMarginPixels()), maximumMarginPixels());
     topMargin_ =
         qBound(0, saved.value("top_margin_pixels").toInt(defaultVerticalMarginPixels(margin_)), maximumMarginPixels());
@@ -455,7 +458,8 @@ void ReaderModel::configure(QSize size, const QJsonObject &saved) {
     engine_->setViewMode(DVM_PAGES, 1);
     engine_->setDefaultFontFace(lString8((face_.isEmpty() ? defaultFace_ : face_).toUtf8().constData()));
     engine_->setFontSize(pixels_);
-    engine_->setDefaultInterlineSpace(spacing_);
+    // CSS sets the line height; the engine must not multiply it again.
+    engine_->setDefaultInterlineSpace(100);
     engine_->setPageMargins(lvRect(margin_, topMargin_, margin_, bottomMargin_));
     engine_->setPageHeaderInfo(0);
     engine_->setShowCover(false);
@@ -589,10 +593,11 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     const auto hyphenation = settings.value("hyphenation").toString(hyphenation_);
     const bool dark = settings.value("dark_mode").toBool(darkMode_);
     const bool smooth = settings.value("smooth_images").toBool(smoothImages_);
-    if (!engine_ || pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 || spacing > 180 ||
-        margin < 0 || margin > maximumMarginPixels() || topMargin < 0 || topMargin > maximumMarginPixels() ||
-        bottomMargin < 0 || bottomMargin > maximumMarginPixels() || weight < 0 || weight > 8 ||
-        !validAlignment(alignment) || (hyphenation != "auto" && hyphenation != "on" && hyphenation != "off") ||
+    if (!engine_ || pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 ||
+        spacing > maximumLineSpacing || margin < 0 || margin > maximumMarginPixels() || topMargin < 0 ||
+        topMargin > maximumMarginPixels() || bottomMargin < 0 || bottomMargin > maximumMarginPixels() || weight < 0 ||
+        weight > 8 || !validAlignment(alignment) ||
+        (hyphenation != "auto" && hyphenation != "on" && hyphenation != "off") ||
         (bionic != "off" && bionic != "bold") || (!face.isEmpty() && !fontFaces().contains(face)) ||
         !fontFaces().contains(defaultFace))
         return false;
@@ -635,7 +640,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
         engine_->setDefaultFontFace(lString8((face.isEmpty() ? defaultFace_ : face).toUtf8().constData()));
         engine_->setPageMargins(lvRect(margin, topMargin, margin, bottomMargin));
         engine_->setFontSize(pixels);
-        engine_->setDefaultInterlineSpace(spacing);
+        engine_->setDefaultInterlineSpace(100);
         applyStyleSheet();
     }
     if (bionicChanged) {
@@ -1071,6 +1076,7 @@ QJsonObject ReaderModel::state() const {
                                {"position", position()},
                                {"font_pixels", pixels_},
                                {"line_spacing", spacing_},
+                               {"line_spacing_version", 1},
                                {"font_face", face_},
                                {"default_font_face", defaultFace_},
                                {"margin_pixels", margin_},

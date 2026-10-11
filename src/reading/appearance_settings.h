@@ -5,7 +5,8 @@
 
 namespace kobalt {
 inline constexpr auto defaultFontFace = "Libron";
-inline constexpr int defaultLineSpacing = 122;
+inline constexpr int defaultLineSpacing = 150;
+inline constexpr int maximumLineSpacing = 300;
 inline constexpr int defaultVariableFontWeight = 450;
 
 namespace appearance {
@@ -16,13 +17,26 @@ QJsonObject readerPreferences(const QJsonObject &global, const QJsonObject &book
 QJsonObject globalPreferences(QJsonObject preferences);
 // The saved settings that decide how the book is laid out and drawn. A
 // retained layout is reused only when all of them match.
-inline constexpr std::array<const char *, 15> keys{
-    "font_pixels",       "line_spacing",         "font_face",      "default_font_face", "margin_pixels",
-    "top_margin_pixels", "bottom_margin_pixels", "text_alignment", "bionic_reading",    "weight_steps",
-    "font_weight",       "font_optical_size",    "hyphenation",    "dark_mode",         "smooth_images"};
+inline constexpr std::array<const char *, 16> keys{
+    "line_spacing_version", "font_pixels",    "line_spacing",      "font_face",
+    "default_font_face",    "margin_pixels",  "top_margin_pixels", "bottom_margin_pixels",
+    "text_alignment",       "bionic_reading", "weight_steps",      "font_weight",
+    "font_optical_size",    "hyphenation",    "dark_mode",         "smooth_images"};
 // Copies every appearance key from `from` into `to`. A key that `from` does
 // not have is removed from `to`, so the engine uses its own default for it.
 void copy(QJsonObject &to, const QJsonObject &from);
+// Converts the old double-scaled spacing once, preserving its approximate height.
+inline void migrateLineSpacing(QJsonObject &saved) {
+    if (saved.value("line_spacing_version").toInt() >= 1) {
+        return;
+    }
+    if (!saved.value("line_spacing").isDouble()) {
+        return;
+    }
+    const int old = qBound(100, saved.value("line_spacing").toInt(122), 180);
+    saved["line_spacing"] = old == 122 ? 150 : qMin(maximumLineSpacing, (old * old + 50) / 100);
+    saved["line_spacing_version"] = 1;
+}
 // True when both objects have the same value, or no value, for every key.
 bool same(const QJsonObject &a, const QJsonObject &b);
 // The typography that Restore appearance defaults selects. Dark mode and
