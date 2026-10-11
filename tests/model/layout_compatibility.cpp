@@ -150,6 +150,32 @@ int main(int argc, char **argv) {
     QStringList requested;
     if (inspect(assets, &requested).verdict != L::Supported || requested.contains("OPS/huge.png"))
         qFatal("Assets fetched during layout inspection");
+    {
+        auto duplicate = publication();
+        const QByteArray item = "<item id='c' href='text/chapter.xhtml' media-type='application/xhtml+xml'/>";
+        duplicate["OPS/book.opf"].replace("</manifest>", item + "</manifest>");
+        QStringList requests;
+        if (inspect(duplicate, &requests).verdict != L::Supported || requests.count("OPS/text/chapter.xhtml") != 1)
+            qFatal("Identical duplicate manifest item rejected or inspected twice");
+        for (const auto &conflict : {
+                 QByteArray("<item id='c' href='text/other.xhtml' media-type='application/xhtml+xml'/>"),
+                 QByteArray("<item id='c' href='text/chapter.xhtml' media-type='image/png'/>"),
+                 QByteArray(
+                     "<item id='c' href='text/chapter.xhtml' media-type='application/xhtml+xml' properties='nav'/>"),
+                 QByteArray(
+                     "<item id='c' href='text/chapter.xhtml' media-type='application/xhtml+xml' fallback='other'/>"),
+             }) {
+            auto ambiguous = publication();
+            ambiguous["OPS/book.opf"].replace("</manifest>", conflict + "</manifest>");
+            expect(ambiguous, L::Incomplete, "Conflicting duplicate manifest item passed");
+        }
+        duplicate["OPS/text/chapter.xhtml"] = "<html><body style='writing-mode:vertical-lr'>Text</body></html>";
+        expect(duplicate, L::VerticalWriting, "Duplicate manifest item concealed unsupported writing mode");
+        auto image = publication();
+        const QByteArray imageItem = "<item id='image' href='image.jpg' media-type='image/jpeg'/>";
+        image["OPS/book.opf"].replace("</manifest>", imageItem + imageItem + "</manifest>");
+        expect(image, L::Supported, "Identical duplicate image manifest item rejected");
+    }
     auto large = publication();
     large["OPS/text/chapter.xhtml"] = QByteArray(3 * 1024 * 1024, 'x');
     expect(large, L::Incomplete, "Resource limit not enforced");

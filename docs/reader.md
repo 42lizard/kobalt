@@ -233,6 +233,8 @@ Power-off and reboot wait for Kobalt to save reading time and progress before Ni
 
 ## Limits
 
+Kobalt tolerates repeated manifest items when every attribute matches. Conflicting declarations with the same ID remain unsupported.
+
 - ZIP64 archives and `META-INF/encryption.xml` are not supported.
 - Resources are limited to 32 MiB each, and the source cache to 32 MiB in total. Images above the limits show a placeholder. An optional image that cannot load shows a warning and does not stop later images from loading. Renewing the source allows another attempt. Cancellation, revoked access and changed resource bytes still stop the session. Interlaced PNG images whose decoded storage exceeds 64 MiB are not rendered, including images embedded inside other resources. The parsed document, fonts and page images are outside the source-cache budget.
 - Typography changes lay out the whole book again. There is no partial reflow.

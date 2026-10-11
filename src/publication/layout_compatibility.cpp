@@ -277,6 +277,7 @@ public:
         if (container.hasError() || package.isEmpty())
             complete = false;
         QMap<QString, QString> manifest;
+        QMap<QString, QMap<QString, QString>> manifestAttributes;
         QStringList spine;
         QXmlStreamReader opf(complete ? read(package) : QByteArray());
         while (!opf.atEnd() && complete) {
@@ -295,10 +296,25 @@ public:
             } else if (name == "item") {
                 const auto id = a.value("id").toString();
                 const auto media = a.value("media-type").toString();
-                if (id.isEmpty() || manifest.contains(id)) {
+                QMap<QString, QString> attributes;
+                for (const auto &attribute : a) {
+                    attributes[attribute.namespaceUri().toString() + QChar(0) + attribute.name().toString()] =
+                        attribute.value().toString();
+                }
+                if (id.isEmpty()) {
                     complete = false;
                     break;
                 }
+                if (manifest.contains(id)) {
+                    // Repeated identical items do not change resource lookup or
+                    // layout. Conflicting declarations remain ambiguous.
+                    if (manifestAttributes.value(id) != attributes) {
+                        complete = false;
+                        break;
+                    }
+                    continue;
+                }
+                manifestAttributes.insert(id, attributes);
                 manifest[id] = a.value("href").toString();
                 // Include non-linear and linked reading sections, not just the
                 // first chapter. Fonts, images and audio are never requested.
