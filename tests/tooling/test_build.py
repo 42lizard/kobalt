@@ -126,6 +126,16 @@ class BuildInputTest(unittest.TestCase):
             self.assertIn(str(patch_path), dependencies)
             self.assertIn(str(inventory), dependencies)
 
+    def test_release_version_change_invalidates_recorded_build(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            version = root / 'VERSION'
+            version.write_text('v1.0-beta.1\n')
+            source_state.record(root, source_state.source_state(root))
+            self.assertTrue(source_state.current(root, root))
+            version.write_text('v1.0-beta.2\n')
+            self.assertFalse(source_state.current(root, root))
+
     def test_icon_generator_edit_invalidates_recorded_build(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
