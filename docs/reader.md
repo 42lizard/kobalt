@@ -84,7 +84,7 @@ The event log records startup checks, opening stages, timings, memory and save r
 
 ## Opening books
 
-The default build opens unencrypted sideloaded EPUBs and DRM-free Kobo purchases, including extensionless books stored by Nickel. Book previews, PDFs and protected books use Nickel's reader.
+The default build opens unencrypted sideloaded EPUBs under `/mnt/onboard/` and `/mnt/sd/`, including KoboCloud books exposed under `/mnt/sd/kobocloud/`, and DRM-free Kobo purchases, including extensionless books stored by Nickel. Book previews, PDFs and protected books use Nickel's reader.
 
 On firmware 4, sideloaded filenames and saved chapter prefixes preserve literal `#`, `?` and percent sequences such as `%20`.
 

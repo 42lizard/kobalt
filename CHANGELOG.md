@@ -4,6 +4,8 @@
 
 - Fixed opening and saved chapter lookup for sideloaded filenames containing `#`, `?` or literal percent escapes on firmware 4. If files fail to open, an explanation is logged.
 
+- Fixed opening DRM-free EPUBs from SD storage, including KoboCloud books under `/mnt/sd/kobocloud/`.
+
 ## v1.0-beta.1
 
 ### What's New
