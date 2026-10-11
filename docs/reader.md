@@ -80,11 +80,13 @@ All files are in `.adds/kobalt/`.
 | `uninstall`, `uninstall-now` | Removal control, see above |
 | `doc` | Short user instructions |
 
-The event log records startup checks, opening stages, timings, memory and save results. It does not record book text, titles, file paths, serials or account data. A position fallback records the name of the chapter file inside the book. `state.json` and `session.json` can contain book identifiers, so keep them private. The log shows the last recorded operation, not a crash stack trace.
+The event log records startup checks, opening stages, timings, memory and save results. Archive inspection failures include the specific `error_code` in the `native-resource-failed` event with stage `publication-inspection`. It does not record book text, titles, file paths, serials or account data. A position fallback records the name of the chapter file inside the book. `state.json` and `session.json` can contain book identifiers, so keep them private. The log shows the last recorded operation, not a crash stack trace.
 
 ## Opening books
 
 The default build opens unencrypted sideloaded EPUBs and DRM-free Kobo purchases, including extensionless books stored by Nickel. Book previews, PDFs and protected books use Nickel's reader.
+
+On firmware 4, sideloaded filenames and saved chapter prefixes preserve literal `#`, `?` and percent sequences such as `%20`.
 
 Loading a local book does not require Wi-Fi or an internet connection. On Kobo, Kobalt checks the local loopback interface before opening its resource service. It brings that interface up if needed and preserves its existing IPv4 address. It does not enable Wi-Fi or change other network interfaces.
 

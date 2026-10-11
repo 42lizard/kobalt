@@ -1,6 +1,7 @@
 #include "publication/resource_server.h"
 #include "publication/native_resources.h"
 #include "publication/resource_cache.h"
+#include "support/diagnostics.h"
 #include "support/qt_compat.h"
 #include "check.h"
 #include <QCoreApplication>
@@ -10,6 +11,8 @@
 #include <QFile>
 #include <QHostAddress>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkReply>
 #include <QPointer>
 #include <QTcpSocket>
@@ -246,7 +249,9 @@ int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     QTemporaryDir dir;
     require(dir.isValid(), "temporary directory");
-    const auto path = dir.path() + "/book.epub";
+    initializeDiagnostics(dir.path());
+    const auto logPath = dir.path() + "/events.jsonl";
+    const auto path = dir.path() + "/book#part?name%20.kepub.epub";
     QFile file(path);
     require(file.open(QIODevice::WriteOnly), "create malformed fixture");
     file.write("not a ZIP");
@@ -258,6 +263,31 @@ int main(int argc, char **argv) {
     auto server = std::make_unique<native::ResourceServer>();
     require(!server->open(path, factory), "reject malformed publication");
     require(counts.opened == 0, "inspect before invoking provider factory");
+    auto inspectionError = [&] {
+        QFile log(logPath);
+        require(log.open(QIODevice::ReadOnly), "read archive inspection log");
+        const auto bytes = log.readAll();
+        require(!bytes.contains(path.toUtf8()), "archive inspection log disclosed book path");
+        QJsonObject result;
+        for (const auto &line : bytes.split('\n')) {
+            const auto record = QJsonDocument::fromJson(line).object();
+            if (record.value("event").toString() == "native-resource-failed" &&
+                record.value("stage").toString() == "publication-inspection") {
+                result = record;
+            }
+        }
+        return result.value("error_code").toString();
+    };
+    require(inspectionError() == "error.unsupported_publication_size", "malformed archive lost inspection reason");
+    const auto encrypted = zip({{"mimetype", "application/epub+zip"},
+                                {"META-INF/container.xml", "<container/>"},
+                                {"META-INF/encryption.xml", "<encryption/>"}});
+    require(file.open(QIODevice::WriteOnly) && file.write(encrypted) == encrypted.size(),
+            "write encryption metadata fixture");
+    file.close();
+    require(!server->open(path, factory) && counts.opened == 0, "encryption metadata reached resource provider");
+    require(inspectionError() == "error.this_publication_needs_unsupported_font_or_resource_handling",
+            "encryption metadata lost inspection reason");
     QImage image(3, 2, QImage::Format_ARGB32);
     image.fill(Qt::black);
     QByteArray png;

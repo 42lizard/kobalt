@@ -170,6 +170,8 @@ ReaderBookRoute readerBookRoute(const void *volume, QString *identity, QString *
     if (!file.open(QIODevice::ReadOnly))
         return Route::Failed;
     if (!publication.inspect(file, &error)) {
+        diagnostic("native-resource-failed",
+                   {{"stage", "publication-inspection"}, {"error_code", diagnosticErrorCode(error)}});
         if (publication.protectedBook()) {
             rememberNativeBook(id, filename, true);
             return Route::Protected;

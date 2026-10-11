@@ -4,7 +4,6 @@
 #include "support/strings.h"
 #include "support/diagnostics.h"
 #include <QDir>
-#include <QUrl>
 #include <QVariantMap>
 #include <dlfcn.h>
 
@@ -60,10 +59,8 @@ bool NativePublication::open(const void *volume, const void *bookmark, QString *
                     strings::get("error.native_publication_api_is_unavailable"));
     const auto &native = api();
     identity_ = native.identity(volume);
-    const QUrl url(identity_);
-    if (url.isLocalFile())
-        path_ = url.toLocalFile();
-    else {
+    path_ = nickel4::localBookPath(identity_);
+    if (path_.isEmpty()) {
         // Firmware 4's getKepubPath returns the directory, not the book path.
         if (identity_.isEmpty() || identity_.contains('/') || identity_.contains('\\') || identity_ == "." ||
             identity_ == "..")

@@ -7,11 +7,15 @@
 // offset. The shared reader uses the same parts with percent-encoding and an
 // optional ":offset".
 namespace kobalt::nickel4 {
+// Nickel's sideloaded IDs contain literal paths, not percent-encoded URLs.
+inline QString localBookPath(const QString &book) {
+    return book.startsWith("file:///") ? book.mid(7) : QString();
+}
 // Older Kobo bookmarks prefix the chapter path with the book and use ! for
 // path separators. Firmware 4 chapter rows use a plain file path as that
 // prefix. Only decode the form when it belongs to this publication.
 inline QString chapter(const QString &book, const QString &raw) {
-    for (const auto &prefix : {book + '!', QUrl(book).toLocalFile() + '!'}) {
+    for (const auto &prefix : {book + '!', localBookPath(book) + '!'}) {
         if (prefix.size() < 2 || !raw.startsWith(prefix))
             continue;
         const int hash = raw.indexOf('#', prefix.size());

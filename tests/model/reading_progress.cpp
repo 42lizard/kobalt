@@ -1,11 +1,30 @@
 #include "support/qt_compat.h"
 #include "reading/reading_progress.h"
 #include "platform/nickel/common/native_location.h"
+#include "platform/nickel/qt5/native_location.h"
 #include <QCoreApplication>
 #include "check.h"
 using namespace kobalt;
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
+    for (const auto &name :
+         {QStringLiteral("book.kepub.epub"), QStringLiteral("book#part.kepub.epub"),
+          QStringLiteral("book?part.kepub.epub"), QStringLiteral("book%20part.kepub.epub"),
+          QStringLiteral("book%23part.kepub.epub"), QString::fromUtf8("caf\xc3\xa9 book.kepub.epub")}) {
+        for (const auto &root : {QStringLiteral("/mnt/onboard/"), QStringLiteral("/mnt/sd/")}) {
+            const auto path = root + name;
+            const auto identity = QStringLiteral("file://") + path;
+            require(nickel4::localBookPath(identity) == path, "Sideloaded filename was decoded as a URL");
+            for (const auto &prefix : {identity, path}) {
+                require(nickel4::chapter(identity, prefix + "!OEBPS!chapter.xhtml#kobo.1.1") ==
+                            "OEBPS/chapter.xhtml#kobo.1.1",
+                        "Literal sideloaded filename prevented legacy chapter decoding");
+            }
+        }
+    }
+    require(nickel4::localBookPath("12345678-1234-1234-1234-123456789abc").isEmpty() &&
+                nickel4::localBookPath("https://example.org/book.epub").isEmpty(),
+            "Nonlocal book identity became a sideloaded path");
     require(publicationLocation("book", "book!OEBPS!chapter.xhtml#kobo.1.1:7") == "OEBPS/chapter.xhtml#kobo.1.1:7",
             "Legacy bookmark lost its chapter or offset");
     require(publicationLocation("book", "book!chapter.xhtml") == "chapter.xhtml",
