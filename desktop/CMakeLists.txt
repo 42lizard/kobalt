@@ -29,6 +29,7 @@ set(KOBALT_DEPENDENCY_PREFIX "${KOBALT_TEST_DEPENDENCIES}")
 add_subdirectory("${SRC}/interfaces/reader/ui" reader-widgets)
 include("${KOBALT_ROOT}/cmake/EngineSources.cmake")
 add_library(desktop-model STATIC ${KOBALT_ENGINE_SOURCES})
+target_compile_definitions(desktop-model PRIVATE KOBALT_VERSION="${KOBALT_VERSION}")
 target_include_directories(desktop-model PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(desktop-model SYSTEM PRIVATE "${CRENGINE_SOURCE}/crengine/include" "${CRENGINE_BUILD}"
     "${KOBALT_TEST_DEPENDENCIES}/include" "${KOBALT_TEST_DEPENDENCIES}/include/harfbuzz"

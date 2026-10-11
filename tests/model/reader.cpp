@@ -6,6 +6,7 @@
 #include <QTemporaryDir>
 #include <QDir>
 #include "engine/crengine/reader_model.h"
+#include "engine/crengine/document_cache.h"
 #include "engine/crengine/page_pixels.h"
 #include "publication/publication.h"
 #include "support/strings.h"
@@ -1319,9 +1320,14 @@ int main(int argc, char **argv) {
         require(cacheRoot.isValid(), "Cannot create a document cache directory");
         const auto cacheDirectory = cacheRoot.path() + "/.cache";
         const QByteArray fingerprint(64, 'a'), policy("document-cache-test");
+        require(kobalt::documentCacheChecksum(policy, 1, "v1.0-beta.1") !=
+                    kobalt::documentCacheChecksum(policy, 1, "v1.0-beta.2"),
+                "A different Kobalt version reused the document cache identity");
+        require(kobalt::documentCacheChecksum(policy, 1) == kobalt::documentCacheChecksum(policy, 1, KOBALT_VERSION),
+                "The document cache identity omitted the compiled Kobalt version");
         // CREngine leaves books under 30 kB out of its cache.
         const qint64 cachedBytes = 1024 * 1024;
-        const auto settings = kobalt::qt::object({{"text_alignment", "left"}});
+        const auto settings = kobalt::qt::object({{"text_alignment", "left"}, {"bionic_reading", "off"}});
         const auto opened = [&](kobalt::ReaderModel &target, const QByteArray &key, const QByteArray &rules,
                                 const QJsonObject &saved) {
             target.setDocumentCache(cacheDirectory, key, rules, cachedBytes);
@@ -1368,8 +1374,8 @@ int main(int argc, char **argv) {
         require(emphasizedAgain.applyAppearance(settings) && emphasizedAgain.saveDocumentCache(),
                 "Cannot cache a book after disabling Bionic reading");
         opened(plainAgain, fingerprint, policy, settings);
-        require(plainAgain.openedFromCache() && hash(plainAgain.image(0)) == hash(parsed.image(0)),
-                "A mode change saved the wrong document cache identity");
+        require(plainAgain.openedFromCache(), "A mode change saved the wrong document cache identity");
+        require(hash(plainAgain.image(0)) == hash(parsed.image(0)), "A mode change saved different cached pages");
         // A different typography reuses the parsed book but lays it out again.
         const auto larger = kobalt::qt::object({{"text_alignment", "left"}, {"font_pixels", 44}});
         kobalt::ReaderModel parsedLarger(model.fontInputs()), restoredLarger(model.fontInputs());
@@ -1383,10 +1389,32 @@ int main(int argc, char **argv) {
                         hash(parsedLarger.image(i)) == hash(restoredLarger.image(i)),
                     "A cached book drew different pages with new typography");
         kobalt::ReaderModel otherPolicy(model.fontInputs()), otherBook(model.fontInputs());
-        opened(otherPolicy, fingerprint, "changed-policy", settings);
-        require(!otherPolicy.openedFromCache(), "A changed cache policy reused a parsed book");
         opened(otherBook, QByteArray(64, 'b'), policy, settings);
         require(!otherBook.openedFromCache(), "Another fingerprint reused a parsed book");
+        require(otherBook.saveDocumentCache(), "Cannot cache another book");
+        const auto oldEntries = QDir(cacheDirectory).entryList({"*.cr3"}, QDir::Files);
+        require(oldEntries.size() == 2, "Cache retained superseded reading modes");
+        {
+            kobalt::DocumentCacheScope cache(cacheDirectory);
+            require(cache.enabled(), "Cannot initialize cache cleanup check");
+            require(!ldomDocCache::removeObsolete(
+                        Utf8ToUnicode(lString8(fingerprint.constData())),
+                        Utf8ToUnicode(
+                            lString8((cacheDirectory + "/" + oldEntries.first() + ".missing").toUtf8().constData()))),
+                    "Cache cleanup accepted a missing replacement");
+        }
+        require(QDir(cacheDirectory).entryList({"*.cr3"}, QDir::Files) == oldEntries,
+                "A missing replacement removed old caches");
+        opened(otherPolicy, fingerprint, "changed-policy", settings);
+        require(!otherPolicy.openedFromCache(), "A changed cache policy reused a parsed book");
+        require(otherPolicy.saveDocumentCache(), "Cannot save the changed cache policy");
+        const auto newEntries = QDir(cacheDirectory).entryList({"*.cr3"}, QDir::Files);
+        require(newEntries.size() == 2 && newEntries != oldEntries,
+                "Saving a new cache retained the old policy or removed another book");
+        opened(otherPolicy, fingerprint, "changed-policy", settings);
+        opened(otherBook, QByteArray(64, 'b'), policy, settings);
+        require(otherPolicy.openedFromCache() && otherBook.openedFromCache(),
+                "Cache cleanup lost the replacement, another book or their index entries");
     }
     {
         kobalt::ReaderModel recycling(model.fontInputs()), fresh(model.fontInputs());

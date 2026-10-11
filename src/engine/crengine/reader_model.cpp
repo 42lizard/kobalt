@@ -343,8 +343,16 @@ bool ReaderModel::saveDocumentCache() {
     const auto name = engine_->getDocProps()->getStringDef(DOC_PROP_FILE_NAME, "");
     if (QString::fromUtf8(UnicodeToUtf8(name).c_str()) != documentCacheName(cacheFingerprint_))
         return false;
+    auto *document = engine_->getDocument();
     DocumentCacheScope cache(cacheDirectory_);
-    return cache.enabled() && engine_->updateCache() == CR_DONE;
+    if (!cache.enabled() || engine_->updateCache() != CR_DONE)
+        return false;
+    if (document->hasCacheFile()) {
+        if (!document->updateCacheFileName())
+            return false;
+        ldomDocCache::removeObsolete(name, document->getCacheFilePath());
+    }
+    return true;
 }
 FontWeightAxis ReaderModel::weightAxis() const {
     return fontWeightAxis(readingFonts, face_);

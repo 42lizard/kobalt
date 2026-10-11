@@ -35,6 +35,7 @@ set(KOBALT_DEPENDENCY_PREFIX "${DEPENDENCY_PREFIX}")
 add_subdirectory("${SRC}/interfaces/reader/ui" reader-widgets)
 include("${KOBALT_ROOT}/cmake/EngineSources.cmake")
 add_library(android-model STATIC ${KOBALT_ENGINE_SOURCES} "${READER_ENGINE}")
+target_compile_definitions(android-model PRIVATE KOBALT_VERSION="${KOBALT_VERSION}")
 set_target_properties(android-model PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(android-model PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(android-model SYSTEM PRIVATE "${CRENGINE_SOURCE}/crengine/include" "${CRENGINE_BUILD}"
