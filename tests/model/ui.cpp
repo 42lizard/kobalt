@@ -1422,12 +1422,15 @@ int main(int argc, char **argv) {
     }
     // Compare visible mixed-case ink across the bundled families, independent
     // of their claimed font metrics. Use the same sample sizing as the picker.
-    for (const auto &file : QDir(kobalt::test::readerAssets().file("fonts/ebook-core")).entryList({"*.ttf"}))
-        require(QFontDatabase::addApplicationFont(kobalt::test::readerFontCopies().file(
-                    "ebook-core/" + file, kobalt::test::readerAssets().fontData("ebook-core/" + file))) >= 0,
-                "Core font could not be registered for optical check");
-    for (const auto *face : {"Libron", "Sourcerer", "NV Ancizar Serif", "NV Charis", "NV Garamond", "NV Jost",
-                             "NV Bitter", "NV Legible Next", "NV Literata", "NV Palatium"}) {
+    QStringList readingFamilies;
+    for (const auto &file : QDir(kobalt::test::readerAssets().file("fonts/ebook-core")).entryList({"*.ttf"})) {
+        const auto id = QFontDatabase::addApplicationFont(kobalt::test::readerFontCopies().file(
+            "ebook-core/" + file, kobalt::test::readerAssets().fontData("ebook-core/" + file)));
+        require(id >= 0, "Core font could not be registered for optical check");
+        readingFamilies.append(QFontDatabase::applicationFontFamilies(id));
+    }
+    readingFamilies.removeDuplicates();
+    for (const auto &face : readingFamilies) {
         const auto font = kobalt::ui::fontSample(face);
         require(QFontInfo(font).family() == face, "Optical font check used a fallback");
         QImage image(200, 100, QImage::Format_RGB32);

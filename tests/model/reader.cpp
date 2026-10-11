@@ -413,7 +413,11 @@ int main(int argc, char **argv) {
                         "Sideloaded source was misclassified");
             }
         }
-        require(core == 10 + variableCore && sideloaded == 1 &&
+        QFile collection(kobalt::test::readerAssets().file("fonts/ebook-core.json"));
+        require(collection.open(QIODevice::ReadOnly), "Cannot read core font collection");
+        const auto coreFiles = QJsonDocument::fromJson(collection.readAll()).object().value("files").toArray();
+        require(!coreFiles.isEmpty() && coreFiles.size() % 4 == 0, "Core collection lost a style");
+        require(core == coreFiles.size() / 4 + variableCore && sideloaded == 1 &&
                     interface == 1 + int(kobalt::scriptFallbackFontFiles.size()) && arabicFallback == 1 &&
                     hebrewFallback == 1,
                 "Core collection or font catalog incomplete");
@@ -1888,7 +1892,7 @@ int main(int argc, char **argv) {
     }
     kobalt::ReaderModel inlineHeading(css.fontInputs());
     require(inlineHeading.open(inlineBook.finish(&error), QSize(1072, 1328), {}, &error), qPrintable(error));
-    for (const auto &face : {QStringLiteral("Libron"), QStringLiteral("NV Legible Next")}) {
+    for (const auto &face : {QStringLiteral("Libron"), kobalt::test::headingReadingFace()}) {
         require(inlineHeading.applyAppearance(kobalt::qt::object({{"font_face", face}, {"bionic_reading", "off"}})),
                 "Cannot select the inline-heading regression font");
         int normalHeight = 0;

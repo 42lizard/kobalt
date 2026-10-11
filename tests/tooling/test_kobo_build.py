@@ -48,6 +48,16 @@ class KoboBuildScriptTests(unittest.TestCase):
         self.assertNotEqual(self.run_script().returncode, 0)
         self.assertEqual(len(self.calls.read_text().splitlines()), 1)
 
+    def test_mini_builds_accept_uncommitted_fixes(self):
+        self.environment['DIRTY'] = '1'
+        result = self.run_script('--mini')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.calls.read_text().splitlines()
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertIn('--mini --allow-dirty', call)
+        self.assertIn('/build/mini/', result.stdout)
+
     def test_dirty_source_prevents_any_build(self):
         self.environment['DIRTY'] = '1'
         self.assertNotEqual(self.run_script().returncode, 0)

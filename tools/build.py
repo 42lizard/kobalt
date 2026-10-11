@@ -157,6 +157,7 @@ def main():
     parser.add_argument('--page-animations', action=argparse.BooleanOptionalAction, default=True, help='include optional page animations')
     parser.add_argument('--hardware', action='store_true', default=True, help='persistent device package')
     parser.add_argument('--temporary', action='store_true', help='remove on the next Nickel restart, requires --hardware')
+    parser.add_argument('--mini', action='store_true', help='keep compatibility assets, Libron and NV Bitter; cap the ZIP at 25 MB')
     parser.add_argument('--in-toolchain', action='store_true', help='run directly inside the SDK at /work, without nested containers')
     parser.add_argument('--version', help='release version override; defaults to the tag or development fallback')
     parser.add_argument('--commit', help='commit to show in About (default: the checkout HEAD, if Git can read it)')
@@ -174,7 +175,7 @@ def main():
     if args.modified and not args.commit:
         parser.error('--modified requires --commit')
     commit, modified = (args.commit, args.modified) if args.commit else source_commit()
-    output = ROOT / output_path(selected, hardware=args.hardware, temporary=args.temporary)
+    output = ROOT / output_path(selected, hardware=args.hardware, temporary=args.temporary, mini=args.mini)
     output.mkdir(parents=True, exist_ok=True)
     fetch_fonts.fetch(ROOT)
     # Hash before compiling: an edit made during the build must count as newer.
@@ -188,7 +189,7 @@ def main():
         # Both targets download into the same cache.
         with acquire(ROOT / 'build/fetch.lock', wait=True):
             for name, spec in specs.items():
-                if (name != 'qtsensors' or selected.qt_major == 6):
+                if (name != 'qtsensors' or selected.qt_major == 6) and (name != 'fonttools' or args.mini):
                     fetch(name, spec, cache)
         engine = None if args.in_toolchain else detect()
         if engine is not None:
@@ -293,6 +294,7 @@ def main():
                                '-DKOBALT_READER_HARDWARE=' + ('ON' if args.hardware else 'OFF'),
                                '-DKOBALT_READER_TEMPORARY=' + ('ON' if args.temporary else 'OFF'),
                                '-DKOBALT_PAGE_ANIMATIONS=' + ('ON' if args.page_animations else 'OFF'),
+                               '-DKOBALT_MINI=' + ('ON' if args.mini else 'OFF'),
                                f'-DKOBALT_COMMIT={commit}', '-DKOBALT_COMMIT_MODIFIED=' + ('ON' if modified else 'OFF'),
                                '-DCMAKE_BUILD_TYPE=Release', f'-DCRENGINE_SOURCE=/work/{source}', f'-DCRENGINE_BUILD=/work/{build}',
                                f'-DQt{selected.qt_major}Sensors_DIR=' + (f'{prefix}/lib/cmake/Qt6Sensors' if selected.qt_major == 6 else '/tc/qt5/sysroot/usr/lib/cmake/Qt5Sensors')])
@@ -312,12 +314,12 @@ def main():
                 info.mode = 0o755
                 with library.open('rb') as stream:
                     archive.addfile(info, stream)
-            if assets.manifest(version=version) != (output / 'asset-manifest.json').read_bytes():
+            if assets.manifest(version=version, mini=args.mini) != (output / 'asset-manifest.json').read_bytes():
                 raise RuntimeError('Assets changed during the build; rebuild before packaging')
             install = output / 'install'
             if install.exists():
                 shutil.rmtree(install)
-            staged = assets.stage(output, version=version)
+            staged = assets.stage(output, version=version, mini=args.mini)
             assets.verify_assets(staged, (output / 'asset-manifest.json').read_bytes())
             (install / '.kobo').mkdir()
             shutil.copy2(output / selected.package_name, install / '.kobo' / selected.package_name)
@@ -325,6 +327,7 @@ def main():
                 for path in sorted(install.rglob('*')):
                     if path.is_file():
                         archive.write(path, path.relative_to(install).as_posix())
+            assets.check_package_size(output / 'Kobalt.zip', mini=args.mini)
             source_state.record(output, sources)
             print(output / selected.package_name)
             print(output / 'Kobalt.zip')

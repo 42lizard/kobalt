@@ -7,6 +7,7 @@
 # dependencies for the host and passes their locations.
 cmake_minimum_required(VERSION 3.19)
 project(kobalt_tests LANGUAGES C CXX)
+option(KOBALT_MINI "Test the mini Kobo asset bundle" OFF)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 get_filename_component(KOBALT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
@@ -27,6 +28,7 @@ add_test(NAME ui-architecture COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS
 add_test(NAME ui-correctness-inventory COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_ui_correctness.py")
 add_test(NAME ui-icon-vectors COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_ui_icon_vectors.py")
 add_test(NAME bundled-fonts COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_bundled_fonts.py")
+add_test(NAME mini-build COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_mini_build.py")
 add_test(NAME dependency-extraction COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_build.py")
 add_test(NAME install-receipt COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${KOBALT_TESTS}/tooling" -p test_install_receipt.py)
 add_test(NAME kobo-build-script COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${KOBALT_TESTS}/tooling" -p test_kobo_build.py)
@@ -45,8 +47,8 @@ execute_process(COMMAND "${Python3_EXECUTABLE}" -B -c
 # The reader and component tests read the same verified asset bundle as a
 # device installation.
 execute_process(COMMAND "${Python3_EXECUTABLE}" -B -c
-    "import sys; sys.path.insert(0, sys.argv[1]); import assets; from pathlib import Path; assets.stage(Path(sys.argv[2]))"
-    "${KOBALT_ROOT}/tools" "${CMAKE_BINARY_DIR}/assets"
+    "import sys; sys.path.insert(0, sys.argv[1]); import assets; from pathlib import Path; assets.stage(Path(sys.argv[2]), mini=sys.argv[3] == 'ON')"
+    "${KOBALT_ROOT}/tools" "${CMAKE_BINARY_DIR}/assets" "${KOBALT_MINI}"
     RESULT_VARIABLE asset_result)
 if(NOT asset_result EQUAL 0)
     message(FATAL_ERROR "Could not stage the test assets")

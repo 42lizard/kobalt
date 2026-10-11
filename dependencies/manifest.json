@@ -53,5 +53,10 @@
     "url": "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-14-3",
     "sha256": "dc49de6b01a266eef4876a4dd34d9842c475d3e28ff2eff63bd2fb760ab56261",
     "directory": "freetype-VER-2-14-3"
+  },
+  "fonttools": {
+    "url": "https://codeload.github.com/fonttools/fonttools/tar.gz/refs/tags/4.61.1",
+    "sha256": "7dfe8416ee774c0d70e086e08021dfa4e2284a89777e6ade1a6434e4157f7ab3",
+    "directory": "fonttools-4.61.1"
   }
 }

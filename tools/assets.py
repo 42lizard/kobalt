@@ -28,9 +28,25 @@ HYPHENATION = (
 )
 # Installed asset folders that the reader accepts.
 FOLDERS = ('fonts/', 'hyph/')
+MINI_ZIP_LIMIT = 25_000_000
 
 
-def source_path(name, root=ROOT):
+def source_path(name, root=ROOT, mini=False):
+    if mini and name == 'fonts/NotoSerifCJK-Regular.ttc':
+        import mini_fonts
+        return mini_fonts.prepare(root)
+    if mini and name == 'fonts/ebook-core.json':
+        core = json.loads((root / 'resources/fonts/ebook-core.json').read_text())
+        core['files'] = mini_collection(core)
+        data = (json.dumps(core, indent=2) + '\n').encode()
+        path = root / '.cache/kobalt/mini-fonts' / ('ebook-core-' + hashlib.sha256(data).hexdigest() + '.json')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists() or path.read_bytes() != data:
+            with tempfile.TemporaryDirectory(dir=path.parent) as temporary:
+                generated = Path(temporary) / 'ebook-core.json'
+                generated.write_bytes(data)
+                generated.replace(path)
+        return path
     if name.startswith('fonts/ebook-core/'):
         return fetch_fonts.font_path(name.removeprefix('fonts/ebook-core/'), root)
     resources = root / 'resources'
@@ -39,22 +55,39 @@ def source_path(name, root=ROOT):
     return path
 
 
-def manifest(root=ROOT, version=None):
+def mini_collection(core):
+    families = ('Libron', 'NV_Bitter')
+    files = [item for item in core['files'] if any(item['file'].startswith(family + '-') for family in families)]
+    if {item['file'] for item in files} != {family + '-' + face + '.ttf' for family in families
+                                          for face in ('Regular', 'Italic', 'Bold', 'BoldItalic')}:
+        raise ValueError('Mini build requires all four styles of Libron and NV Bitter')
+    return files
+
+
+def check_package_size(package, mini=False):
+    if mini and package.stat().st_size > MINI_ZIP_LIMIT:
+        package.unlink()
+        raise ValueError('Mini ZIP exceeds 25,000,000 bytes; no package was retained')
+
+
+def manifest(root=ROOT, version=None, mini=False):
     fetch_fonts.verify(root)
     fonts = root / 'resources/fonts'
     core = json.loads((fonts / 'ebook-core.json').read_text())
+    if mini:
+        core['files'] = mini_collection(core)
     names = ['fonts/' + name for name in ('ebook-core.json', *UI_FONTS, *FALLBACK_FONTS, *('ebook-core/' + item['file'] for item in core['files']))]
     names += ['hyph/' + name for name in HYPHENATION]
     files = []
     for name in sorted(names):
-        path = source_path(name, root)
+        path = source_path(name, root, mini=mini)
         data = path.read_bytes()
         files.append(dict(path=name, size=len(data), sha256=hashlib.sha256(data).hexdigest()))
     return (json.dumps(dict(schema=1, version=validate_version(version) if version is not None else release_version(root), files=files), sort_keys=True, separators=(',', ':')) + '\n').encode()
 
 
-def stage(output, root=ROOT, version=None):
-    data = manifest(root, version)
+def stage(output, root=ROOT, version=None, mini=False):
+    data = manifest(root, version, mini=mini)
     destination = output / 'install/.adds/kobalt/assets'
     # Recreate build assets so removed fonts cannot survive an incremental build.
     if destination.exists():
@@ -63,7 +96,8 @@ def stage(output, root=ROOT, version=None):
     for item in json.loads(data)['files']:
         target = destination / item['path']
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source_path(item['path'], root), target)
+        source = source_path(item['path'], root, mini=mini)
+        shutil.copyfile(source, target)
     (destination / 'manifest.json').write_bytes(data)
     return destination
 
@@ -165,8 +199,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version', help='version shared with the application build')
     parser.add_argument('--manifest', type=Path, required=True)
+    parser.add_argument('--mini', action='store_true', help='keep Libron, NV Bitter and compatibility assets')
     args = parser.parse_args()
-    data = manifest(version=args.version)
+    data = manifest(version=args.version, mini=args.mini)
     if not args.manifest.exists() or args.manifest.read_bytes() != data:
         args.manifest.write_bytes(data)
 

@@ -16,6 +16,7 @@ link_directories("${KOBALT_DEPENDENCY_PREFIX}/lib")
 option(KOBALT_PAGE_ANIMATIONS "Build optional reader page animations" ON)
 option(KOBALT_READER_HARDWARE "Build the native reader device package" ON)
 option(KOBALT_READER_TEMPORARY "Remove the reader on its next Nickel restart" OFF)
+option(KOBALT_MINI "Package Libron, NV Bitter and compatibility assets for focused testing" OFF)
 configure_file(${KOBALT_HOOK_ROOT}/nhplugin.h nhplugin.h COPYONLY)
 if(KOBALT_READER_TEMPORARY AND NOT KOBALT_READER_HARDWARE)
     message(FATAL_ERROR "KOBALT_READER_TEMPORARY requires KOBALT_READER_HARDWARE")
@@ -26,9 +27,15 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 file(GLOB_RECURSE KOBALT_ASSET_FILES CONFIGURE_DEPENDS resources/fonts/*.ttf resources/fonts/*.ttc
     vendor/ebook-fonts/*.ttf resources/hyph/*.pattern)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    ${KOBALT_ASSET_FILES} resources/fonts/ebook-core.json tools/assets.py tools/fetch_fonts.py tools/version.py)
+    ${KOBALT_ASSET_FILES} resources/fonts/ebook-core.json resources/fonts/noto-cjk.json
+    dependencies/manifest.json tools/assets.py tools/mini_fonts.py tools/fetch_fonts.py tools/version.py)
+set(KOBALT_ASSET_OPTIONS)
+if(KOBALT_MINI)
+    list(APPEND KOBALT_ASSET_OPTIONS --mini)
+endif()
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/assets.py"
     --manifest "${CMAKE_CURRENT_BINARY_DIR}/asset-manifest.json" --version "${KOBALT_VERSION}"
+    ${KOBALT_ASSET_OPTIONS}
     COMMAND_ERROR_IS_FATAL ANY)
 add_library(reader-fonts STATIC src/assets/bundled_fonts.cpp src/assets/assets.cpp)
 set_target_properties(reader-fonts PROPERTIES POSITION_INDEPENDENT_CODE ON)

@@ -182,6 +182,7 @@ def main():
     parser.add_argument('--no-engine', action='store_true', help='skip the tests that need CREngine')
     parser.add_argument('--build-only', action='store_true', help='build the tests without running them')
     parser.add_argument('--coverage', action='store_true', help='instrument the tests for llvm-cov (Clang only)')
+    parser.add_argument('--mini', action='store_true', help='test the mini Kobo asset bundle in a separate build directory')
     parser.add_argument('ctest', nargs='*', help='extra arguments for ctest, after --')
     args = parser.parse_args()
     if args.jobs < 1:
@@ -203,15 +204,18 @@ def main():
     # The tests stage the release asset bundle, which includes the reading
     # fonts. Check them before the long SDK and engine builds.
     fetch_fonts.fetch(ROOT, offline=args.offline)
+    if args.mini:
+        import mini_fonts
+        mini_fonts.prepare(ROOT, cache=args.cache.resolve(), offline=args.offline)
     with acquire(output / 'build.lock', wait=True):
         cache = args.cache.resolve()
         qt = args.qt.resolve() if args.qt else build_qt(output, args.jobs, cache, args.offline)
         engine = ['-DKOBALT_TEST_ENGINE=OFF'] if args.no_engine else build_engine(qt, output, args.jobs, cache, args.offline)
         # Instrumented objects get their own build directory, so switching
         # --coverage on or off never reuses objects built the other way.
-        tests = output / ('tests-coverage' if args.coverage else 'tests')
+        tests = output / ('tests' + ('-mini' if args.mini else '') + ('-coverage' if args.coverage else ''))
         configure = ['cmake', '-S', ROOT / 'tests', '-B', tests, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
-                     f'-DCMAKE_PREFIX_PATH={qt}', *engine]
+                     f'-DCMAKE_PREFIX_PATH={qt}', '-DKOBALT_MINI=' + ('ON' if args.mini else 'OFF'), *engine]
         if platform.system() == 'Darwin':
             configure.append('-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0')
         if args.coverage:

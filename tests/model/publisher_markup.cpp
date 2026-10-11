@@ -45,11 +45,14 @@ int main(int argc, char **argv) {
     {
         kobalt::ReaderModel model(kobalt::test::readerFonts());
         require(model.open(english, size,
-                           kobalt::qt::object({{"font_face", ""}, {"default_font_face", "NV Ancizar Serif"}}), &error),
+                           kobalt::qt::object(
+                               {{"font_face", ""}, {"default_font_face", kobalt::test::alternateReadingFace()}}),
+                           &error),
                 qPrintable(error));
         require(model.embeddedFontCount() == 0, "Unembedded book reported publisher fonts");
         const auto lead = find(model, "Linear text continues");
-        require(!lead.isEmpty() && model.goTo(lead.first().start) && model.textFontFace() == "NV Ancizar Serif",
+        require(!lead.isEmpty() && model.goTo(lead.first().start) &&
+                    model.textFontFace() == kobalt::test::alternateReadingFace(),
                 "Publisher Fonts ignored the custom fallback");
         require(model.applyAppearance(kobalt::qt::object({{"default_font_face", "Libron"}})),
                 "Cannot restore publisher fallback");

@@ -1,5 +1,7 @@
 # Reader behavior
 
+Mini Kobo test packages keep Libron, NV Bitter, interface fonts, all fallback fonts and all bundled hyphenation patterns. They have fewer recommended fonts in the font picker. Books configured with an omitted font use an available font instead. Mini packages use the same installation steps as full packages.
+
 This document describes what Kobalt does on a device today: which builds exist, how to install and remove them, what the reader supports and what is still unverified. Build commands are in the [development guide](development.md).
 
 ## Builds and firmware

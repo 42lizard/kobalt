@@ -6,6 +6,7 @@
 #include "interfaces/reader/ui/controls/paged_text.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "reader_host.h"
+#include "reader_inputs.h"
 #include "host_fixture.h"
 #include "host_style.h"
 #include "host_platform.h"
@@ -1305,8 +1306,10 @@ private slots:
         openText();
         const auto oldFace = host.session()->state().value("font_face");
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFont")));
-        const QString targetFace = oldFace.toString() == "Libron" ? QString("NV Ancizar Serif") : QString("Libron");
-        const QString targetLabel = oldFace.toString() == "Libron" ? QString("Ancizar Serif") : QString("Libron");
+        const QString targetFace =
+            oldFace.toString() == "Libron" ? kobalt::test::alternateReadingFace() : QString("Libron");
+        const QString targetLabel =
+            oldFace.toString() == "Libron" ? kobalt::test::alternateReadingLabel() : QString("Libron");
         QPushButton *choice = nullptr;
         for (auto *label : host.window()->findChildren<QLabel *>())
             if (label->objectName().endsWith("Title") && label->text() == targetLabel)
@@ -1389,7 +1392,7 @@ private slots:
         QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrFontDefaultDialog"));
         QPushButton *candidate = nullptr;
         for (auto *label : host.window()->findChildren<QLabel *>())
-            if (label->objectName().endsWith("Title") && label->text() == "Ancizar Serif")
+            if (label->objectName().endsWith("Title") && label->text() == kobalt::test::alternateReadingLabel())
                 candidate = qobject_cast<QPushButton *>(label->parentWidget());
         QVERIFY(candidate);
         QVERIFY(candidate->isVisible());
@@ -1419,7 +1422,7 @@ private slots:
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFontDefaultConfirm")));
         QTRY_VERIFY(!inspectReader(host)["preview_busy"].toBool());
         QCOMPARE(storage::readJson(testPaths().preferences())["default_font_face"].toString(),
-                 QString("NV Ancizar Serif"));
+                 kobalt::test::alternateReadingFace());
         QCOMPARE(inspectReader(host)["preview_settings"].toObject()["font_face"], selected);
         auto *help = host.window()->findChild<QPushButton *>("rrFontDefaultSlot");
         QVERIFY(help);
@@ -1427,10 +1430,10 @@ private slots:
         auto *helpSample = help->findChild<QLabel *>("rrFontDefaultSlotTitle");
         QVERIFY(helpSample);
         QCOMPARE(helpSample->text(), QString("Aa"));
-        QCOMPARE(QFontInfo(helpSample->font()).family(), QString("NV Ancizar Serif"));
+        QCOMPARE(QFontInfo(helpSample->font()).family(), kobalt::test::alternateReadingFace());
         QLabel *defaultCaption = nullptr;
         for (auto *label : host.window()->findChildren<QLabel *>()) {
-            if (label->objectName().endsWith("Title") && label->text() == "Ancizar Serif")
+            if (label->objectName().endsWith("Title") && label->text() == kobalt::test::alternateReadingLabel())
                 defaultCaption = label->parentWidget()->findChild<QLabel *>(label->objectName().chopped(5) + "Detail");
         }
         QVERIFY(defaultCaption);
@@ -1455,18 +1458,18 @@ private slots:
         QCOMPARE(inspectReader(host)["preview_settings"], previewBeforeHelp);
         auto *detail = host.window()->findChild<QLabel *>("rrFontChoice0Detail");
         QVERIFY(detail);
-        QVERIFY(detail->text().contains("USES ANCIZAR SERIF"));
+        QVERIFY(detail->text().contains("USES " + kobalt::test::alternateReadingLabel().toUpper()));
         QCOMPARE(detail->font().pixelSize(), ui::px(18));
         QCOMPARE(QFontInfo(detail->font()).family(), QFontInfo(ui::captionFont(ui::px(18))).family());
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFontClose")));
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrBookmarks")));
         QTRY_VERIFY(!host.session()->busy() && !inspectReader(host)["preview_ready"].toBool());
-        QCOMPARE(host.session()->state()["default_font_face"].toString(), QString("NV Ancizar Serif"));
+        QCOMPARE(host.session()->state()["default_font_face"].toString(), kobalt::test::alternateReadingFace());
         host.shutdown();
         QTRY_VERIFY(host.idle());
         host.open(fixture(), nativeSize);
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
-        QCOMPARE(host.session()->state()["default_font_face"].toString(), QString("NV Ancizar Serif"));
+        QCOMPARE(host.session()->state()["default_font_face"].toString(), kobalt::test::alternateReadingFace());
         QCOMPARE(host.session()->state()["font_face"], selected);
         QVERIFY(storage::writeJson(testPaths().preferences(), originalPreferences));
     }

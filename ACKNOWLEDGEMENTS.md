@@ -89,6 +89,8 @@ The [font manifests](resources/fonts/) and [icon manifest](resources/icons/lucid
 
 ## Build tools
 
+[FontTools](https://github.com/fonttools/fonttools), by Just van Rossum and contributors, removes CJK font hinting instructions when creating mini Kobo test packages. It uses the [MIT license](resources/notices/FontTools-MIT) and runs only during the build.
+
 [NickelTC](https://github.com/pgaskin/NickelTC), by Patrick Gaskin and contributors, supplies the firmware 4 Qt5 SDK used by Kobalt's toolchain. The Qt6 SDK uses the official Qt sources with the Kobo and OpenEmbedded changes credited above. The published [kobuild](https://github.com/nicoverbruggen/kobuild) images, maintained by Nico Verbruggen, provide the Kobo SDKs used by CI.
 
 The build and test scripts also use Python, CMake, Ninja, GNU Make, GCC or Clang, GNU Binutils, pkg-config, Docker or Podman, QEMU user-mode emulation and the Android SDK and NDK. These are development tools, rather than libraries bundled into the Kobalt reader package.

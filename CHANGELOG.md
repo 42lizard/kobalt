@@ -1,3 +1,9 @@
+## Unreleased
+
+### Technical changes
+
+- Added `--mini` Kobo test packages with Libron, NV Bitter and compatibility assets, separate build outputs and a 25 MB ZIP limit.
+
 ## v1.0-beta.2
 
 ### Fixed

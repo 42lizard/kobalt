@@ -13,6 +13,22 @@ inline AssetBundle &readerAssets() {
 #endif
     return assets;
 }
+inline QString alternateReadingFace() {
+    return bundledFontFiles(readerAssets())
+                   .contains(readerAssets().file("fonts/ebook-core/NV_Ancizar_Serif-Regular.ttf"))
+               ? QStringLiteral("NV Ancizar Serif")
+               : QStringLiteral("NV Bitter");
+}
+inline QString alternateReadingLabel() {
+    return alternateReadingFace() == QStringLiteral("NV Bitter") ? QStringLiteral("Bitter")
+                                                                 : QStringLiteral("Ancizar Serif");
+}
+inline QString headingReadingFace() {
+    return bundledFontFiles(readerAssets())
+                   .contains(readerAssets().file("fonts/ebook-core/NV_Legible_Next-Regular.ttf"))
+               ? QStringLiteral("NV Legible Next")
+               : QStringLiteral("NV Bitter");
+}
 inline FontCopies &readerFontCopies() {
     static FontCopies copies;
     return copies;

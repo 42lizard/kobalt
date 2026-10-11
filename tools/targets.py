@@ -26,10 +26,12 @@ def lock_path(selected, kind):
     return ROOT / 'build' / f'{selected.name}-{kind}.lock'
 
 
-def output_path(selected, *, hardware=True, temporary=False):
+def output_path(selected, *, hardware=True, temporary=False, mini=False):
     if temporary and not hardware:
         raise ValueError('Temporary reader builds require hardware mode')
     name = 'reader-hardware-temporary' if temporary else ('reader-hardware' if hardware else 'reader')
+    if mini:
+        name += '-mini'
     return Path(selected.build_root) / name
 
 
