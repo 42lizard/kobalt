@@ -110,11 +110,12 @@ def build_qt(output, jobs, cache=DEFAULT_CACHE, offline=False):
     return install
 
 
-def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False):
-    """Build CREngine and its dependencies for the host. Returns the CMake cache entries for tests/."""
+def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False, text_only=False):
+    """Build the pinned text dependencies and optionally CREngine for the host."""
     prefix = output / 'deps'
     specs = json.loads((ROOT / 'dependencies/manifest.json').read_text())
-    sources = fetch_sources(ENGINE_DEPENDENCIES, specs, cache, offline)
+    names = ('freetype', 'harfbuzz', 'fribidi') if text_only else ENGINE_DEPENDENCIES
+    sources = fetch_sources(names, specs, cache, offline)
     environment = os.environ.copy()
     environment['PKG_CONFIG_PATH'] = environment['PKG_CONFIG_LIBDIR'] = str(prefix / 'lib/pkgconfig')
     environment.pop('PKG_CONFIG_SYSROOT_DIR', None)
@@ -122,10 +123,11 @@ def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False):
         environment['MACOSX_DEPLOYMENT_TARGET'] = '14.0'
     pkgconfig = prefix / 'lib/pkgconfig'
     pkgconfig.mkdir(parents=True, exist_ok=True)
-    png, png_include, png_version = bundled_png(qt)
+    png, png_include, png_version = bundled_png(qt) if not text_only else (None, None, None)
     (pkgconfig / 'zlib.pc').write_text('Name: zlib\nDescription: Host zlib\nVersion: 1\nLibs: -lz\n')
-    (pkgconfig / 'libpng.pc').write_text(f'Name: libpng\nDescription: PNG from the Qt SDK\nVersion: {png_version}\n'
-                                         f'Libs: {png} -lz\nCflags: -I{png_include}\n')
+    if png:
+        (pkgconfig / 'libpng.pc').write_text(f'Name: libpng\nDescription: PNG from the Qt SDK\nVersion: {png_version}\n'
+                                             f'Libs: {png} -lz\nCflags: -I{png_include}\n')
     common = ['-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_POSITION_INDEPENDENT_CODE=ON',
               '-DBUILD_SHARED_LIBS=OFF', '-DCMAKE_INSTALL_LIBDIR=lib', f'-DCMAKE_INSTALL_PREFIX={prefix}',
               f'-DCMAKE_PREFIX_PATH={prefix}', '-DCMAKE_POLICY_VERSION_MINIMUM=3.5']
@@ -141,16 +143,19 @@ def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False):
                 subprocess.run([str(part) for part in command], env=environment, check=True)
         return directory
 
+    png_options = ['-DFT_DISABLE_PNG=ON'] if text_only else ['-DFT_DISABLE_PNG=OFF', f'-DPNG_LIBRARY={png}', f'-DPNG_PNG_INCLUDE_DIR={png_include}']
     dependency('freetype-' + sources['freetype'].name, sources['freetype'], '-DFT_DISABLE_HARFBUZZ=ON', '-DFT_DISABLE_BZIP2=ON',
-               '-DFT_DISABLE_BROTLI=ON', f'-DPNG_LIBRARY={png}', f'-DPNG_PNG_INCLUDE_DIR={png_include}')
+               '-DFT_DISABLE_BROTLI=ON', *png_options)
+    dependency('harfbuzz-' + sources['harfbuzz'].name, sources['harfbuzz'], '-DHB_BUILD_UTILS=OFF', '-DHB_BUILD_SUBSET=OFF', '-DHB_BUILD_RASTER=OFF',
+        '-DHB_BUILD_VECTOR=OFF', '-DHB_BUILD_GPU=OFF', '-DHB_HAVE_FREETYPE=ON')
+    build_autotools(sources['fribidi'], output / 'fribidi-autotools', prefix, jobs, environment=environment)
+    if text_only:
+        return ['-DKOBALT_TEST_ENGINE=OFF', f'-DKOBALT_TEST_DEPENDENCIES={prefix}', '-DKOBALT_TEST_PNG=']
     dependency('utf8proc', sources['utf8proc'], '-DUTF8PROC_ENABLE_TESTING=OFF')
     dependency('jpeg', sources['libjpeg-turbo'], '-DENABLE_SHARED=OFF', '-DENABLE_STATIC=ON',
                '-DWITH_TURBOJPEG=OFF', '-DWITH_TOOLS=OFF', '-DWITH_TESTS=OFF')
     dependency('xxhash', sources['xxhash'] / 'cmake_unofficial', '-DXXHASH_BUILD_XXHSUM=OFF')
-    dependency('harfbuzz-' + sources['harfbuzz'].name, sources['harfbuzz'], '-DHB_BUILD_UTILS=OFF', '-DHB_BUILD_SUBSET=OFF', '-DHB_BUILD_RASTER=OFF',
-        '-DHB_BUILD_VECTOR=OFF', '-DHB_BUILD_GPU=OFF', '-DHB_HAVE_FREETYPE=ON')
-    for name in ('fribidi', 'libunibreak'):
-        build_autotools(sources[name], output / (name + '-autotools'), prefix, jobs, environment=environment)
+    build_autotools(sources['libunibreak'], output / 'libunibreak-autotools', prefix, jobs, environment=environment)
     extensions = sources['koreader-base'] / 'thirdparty/lunasvg'
     svg = patched(sources['lunasvg'], [extensions / name for name in ('cmake_tweaks.patch', 'extended.patch', 'pkgconfig.patch')], output)
     dependency('lunasvg-build-' + svg.name.rsplit('-', 1)[-1], svg, f'-DXTENDED_DIR={extensions / "xtended"}',
@@ -190,7 +195,7 @@ def main():
     output = args.output.resolve()
     if args.qt and not (args.qt / 'lib/cmake/Qt6/Qt6Config.cmake').is_file():
         parser.error(f'No Qt 6 SDK at {args.qt}. See the testing section of docs/development.md.')
-    for command in ('cmake', 'ninja', 'ctest') + (() if args.no_engine else ('patch',)):
+    for command in ('cmake', 'ninja', 'ctest', 'make', 'pkg-config') + (() if args.no_engine else ('patch',)):
         if not shutil.which(command):
             parser.error(f'{command} is required; this tool does not install system packages')
     if args.coverage and not args.build_only:
@@ -210,7 +215,7 @@ def main():
     with acquire(output / 'build.lock', wait=True):
         cache = args.cache.resolve()
         qt = args.qt.resolve() if args.qt else build_qt(output, args.jobs, cache, args.offline)
-        engine = ['-DKOBALT_TEST_ENGINE=OFF'] if args.no_engine else build_engine(qt, output, args.jobs, cache, args.offline)
+        engine = build_engine(qt, output, args.jobs, cache, args.offline, text_only=args.no_engine)
         # Instrumented objects get their own build directory, so switching
         # --coverage on or off never reuses objects built the other way.
         tests = output / ('tests' + ('-mini' if args.mini else '') + ('-coverage' if args.coverage else ''))

@@ -2,6 +2,7 @@
 #include "../style/metrics.h"
 #include "../style/styles.h"
 #include "../style/fonts.h"
+#include "../style/private_text.h"
 #include "support/strings.h"
 #include <QPainter>
 #include <QResizeEvent>
@@ -84,7 +85,7 @@ void PageControls::setPage(int page, int count) {
     next->setEnabled(page + 1 < count);
 }
 PageNavigation::PageNavigation(QWidget *parent, const QString &prefix) {
-    title = new QLabel(parent);
+    title = new PrivateTextLabel(parent);
     title->setObjectName(prefix + "Title");
     title->setAlignment(Qt::AlignCenter);
     title->setTextFormat(Qt::PlainText);

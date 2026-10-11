@@ -102,6 +102,15 @@ int main(int argc, char **argv) {
     expect(a.available() && b.available(), "independent asset roots verify");
     expect(a.fontData("test.ttf") == "first synthetic font" && b.fontData("test.ttf") == "second synthetic font",
            "bundle data cannot cross roots");
+    std::function<QByteArray()> deferred;
+    {
+        AssetBundle temporaryBundle(first, "asset-test");
+        deferred = temporaryBundle.deferredFontData("test.ttf");
+    }
+    expect(deferred && deferred() == "first synthetic font", "deferred font reader owns its verified metadata");
+    write(first + "/fonts/test.ttf", "other synthetic font");
+    expect(deferred().isEmpty(), "deferred font reader rejects bytes changed after verification");
+    write(first + "/fonts/test.ttf", "first synthetic font");
     write(first + "/fonts/unlisted.ttf", "not in the verified manifest");
     expect(a.available() && a.fontData("unlisted.ttf").isEmpty(), "unlisted font bytes are never returned");
     expect(!AssetBundle(first, "wrong-version").available(),
@@ -128,6 +137,7 @@ int main(int argc, char **argv) {
     const auto copied = copies.file("test.ttf", a.fontData("test.ttf"));
     expect(!copied.isEmpty() && !copied.startsWith(first), "Qt font copy lives outside asset storage");
     expect(QDir(first).removeRecursively(), "remove source to model storage export");
+    expect(deferred().isEmpty(), "deferred font reader does not retain the source bytes");
     a.invalidate();
     expect(!a.available(), "removed assets fail after invalidation");
     QFile retained(copied);

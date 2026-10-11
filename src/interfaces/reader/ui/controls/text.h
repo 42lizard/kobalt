@@ -1,5 +1,6 @@
 #pragma once
 #include "../style/metrics.h"
+#include "../style/private_text.h"
 #include <QFont>
 #include <QLabel>
 #include <QVector>
@@ -29,9 +30,9 @@ struct SampleAppearance {
 // UTF-16 ranges of the first half of each supported word's letters.
 QVector<QPair<int, int>> samplePrefixes(const QString &text);
 // Font samples align their visible letters, independent of each font's ascent.
-class SampleLabel : public QLabel {
+class SampleLabel : public PrivateTextLabel {
 public:
-    using QLabel::QLabel;
+    using PrivateTextLabel::PrivateTextLabel;
     bool optical = false;
     void setAppearance(const SampleAppearance &value) {
         if (appearance == value)

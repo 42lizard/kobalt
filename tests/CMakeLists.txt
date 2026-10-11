@@ -2,7 +2,7 @@
 # adapter and the reader window. They build against a stock Qt 6 for the host
 # CPU and need no Kobo device, firmware or Nickel. Run them with tools/run_tests.py.
 #
-# The first tier needs only Qt. KOBALT_TEST_ENGINE adds the tests that open
+# The first tier uses Qt and the pinned text libraries. KOBALT_TEST_ENGINE adds the tests that open
 # real books through CREngine; tools/run_tests.py builds CREngine and its pinned
 # dependencies for the host and passes their locations.
 cmake_minimum_required(VERSION 3.19)
@@ -146,8 +146,10 @@ kobalt_check(resource-provider SOURCES tests/model/resource_provider.cpp src/pub
     src/support/diagnostics.cpp LIBRARIES Qt6::Gui Qt6::Network Threads::Threads ZLIB::ZLIB ${CMAKE_DL_LIBS})
 
 # Reader widgets without an engine.
+set(KOBALT_DEPENDENCY_PREFIX "${KOBALT_TEST_DEPENDENCIES}")
 add_library(reader-fonts STATIC "${KOBALT_ROOT}/src/assets/assets.cpp" "${KOBALT_ROOT}/src/assets/bundled_fonts.cpp")
 target_link_libraries(reader-fonts PUBLIC Qt6::Gui)
+include("${KOBALT_ROOT}/cmake/EngineSources.cmake")
 kobalt_test_options(reader-fonts)
 include("${KOBALT_ROOT}/cmake/ReaderComponents.cmake")
 kobalt_publication_library(test-publication)

@@ -97,6 +97,13 @@ QVector<QPair<int, int>> samplePrefixes(const QString &text) {
 
 void drawOpticalText(QPainter &painter, const QRectF &area, const QString &text, bool centered,
                      SampleAppearance appearance) {
+    if (needsPrivateText(text, painter.font())) {
+        const auto ranges = appearance.bionic == "bold" ? samplePrefixes(text) : QVector<QPair<int, int>>();
+        drawInterfaceText(painter, area.toRect(),
+                          elidePrivateText(text, painter.font(), qMax(0, int(area.width())), ranges),
+                          (centered ? Qt::AlignHCenter : Qt::AlignLeft) | Qt::AlignVCenter, appearance.weight, ranges);
+        return;
+    }
     const bool bold = appearance.bionic == "bold";
     const int weight = bold ? 0 : qBound(0, appearance.weight, 8);
     if (!bold && !weight) {
@@ -198,12 +205,39 @@ void drawOpticalText(QPainter &painter, const QRectF &area, const QString &text,
 }
 void SampleLabel::paintEvent(QPaintEvent *event) {
     if (!optical) {
-        QLabel::paintEvent(event);
+        PrivateTextLabel::paintEvent(event);
         return;
     }
     QPainter painter(this);
     painter.setFont(font());
     painter.setPen(palette().color(QPalette::WindowText));
+    if (needsPrivateText(text(), font())) {
+        if (wordWrap() && interfaceTextWidth(text(), font()) > width()) {
+            int split = -1, best = -1;
+            for (int i = 1; i < text().size() - 1; ++i) {
+                if (!text().at(i).isSpace()) {
+                    continue;
+                }
+                const auto first = text().left(i).trimmed(), second = text().mid(i + 1).trimmed();
+                const int widest = qMax(interfaceTextWidth(first, font()), interfaceTextWidth(second, font()));
+                if (best < 0 || widest < best) {
+                    best = widest;
+                    split = i;
+                }
+            }
+            const int lineHeight = measurePrivateTextSize(text(), font()).height() + px(5);
+            if (split >= 0 && lineHeight * 2 <= height()) {
+                const int top = (height() - lineHeight * 2) / 2;
+                drawOpticalText(painter, QRectF(0, top, width(), lineHeight), text().left(split).trimmed(),
+                                alignment().testFlag(Qt::AlignHCenter), appearance);
+                drawOpticalText(painter, QRectF(0, top + lineHeight, width(), lineHeight),
+                                text().mid(split + 1).trimmed(), alignment().testFlag(Qt::AlignHCenter), appearance);
+                return;
+            }
+        }
+        drawOpticalText(painter, rect(), text(), alignment().testFlag(Qt::AlignHCenter), appearance);
+        return;
+    }
     if (wordWrap() && painter.fontMetrics().boundingRect(text()).width() > width()) {
         // Keep whole words together. Balance two lines before eliding a word
         // that cannot fit, using the same optical painter for weight previews.
@@ -244,6 +278,23 @@ QFont fontSample(const QString &face) {
     font.setItalic(false);
     font.setHintingPreference(QFont::PreferNoHinting);
     font.setPixelSize(128);
+    if (needsPrivateText(QStringLiteral("Hox"), font)) {
+        const auto rendered = renderPrivateText(QStringLiteral("Hox"), font);
+        int first = rendered.image.height(), last = -1;
+        for (int y = 0; y < rendered.image.height(); ++y) {
+            for (int x = 0; x < rendered.image.width(); ++x) {
+                if (qAlpha(rendered.image.pixel(x, y)) >= 128) {
+                    first = qMin(first, y);
+                    last = y;
+                    break;
+                }
+            }
+        }
+        const int size =
+            last >= first ? qRound(128.0 * m::choices::sampleInkHeight / (last - first + 1)) : m::choices::sampleBase;
+        font.setPixelSize(qBound<int>(m::choices::sampleMinimum, size, m::choices::sampleMaximum));
+        return font;
+    }
     const auto resolved = QFontInfo(font).family();
     static QHash<QString, int> sizes;
     auto found = sizes.constFind(resolved);

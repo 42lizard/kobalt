@@ -291,7 +291,7 @@ void SearchPanel::redraw() {
         renderedSizes.append(QSize());
         auto *button = new ui::Button(this);
         buttons.append(button);
-        auto *meta = new QLabel(button);
+        auto *meta = new ui::PrivateTextLabel(button);
         metadata.append(meta);
         ui::captionLabel(meta);
         meta->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -332,7 +332,7 @@ void SearchPanel::redraw() {
         renderedStarts[row] = hit.start;
         renderedSizes[row] = labels[row]->size();
         buttons[row]->setObjectName(QString("rrSearchResult%1").arg(index));
-        metadata[row]->setText(QFontMetrics(ui::captionFont()).elidedText(caption(hit), Qt::ElideRight, textWidth));
+        metadata[row]->setText(ui::elideInterfaceText(caption(hit), metadata[row]->font(), textWidth));
         // The engine keeps a space at the edges of its context only where the
         // book has one, so punctuation stays attached to the match.
         QString before = hit.before, after = hit.after;

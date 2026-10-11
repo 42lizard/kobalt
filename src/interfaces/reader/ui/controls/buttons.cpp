@@ -1,4 +1,5 @@
 #include "buttons.h"
+#include "../style/private_text.h"
 #include "support/strings.h"
 #include "assets/font_catalog.h"
 #include "../style/fonts.h"
@@ -123,6 +124,20 @@ QPushButton *makeButton(QWidget *parent, QBoxLayout *layout, const char *name, c
     QObject::connect(button, &QPushButton::clicked, parent, std::move(action));
     return button;
 }
+QSize ElidingButton::sizeHint() const {
+    if (!needsPrivateText(text(), font())) {
+        return Button::sizeHint();
+    }
+    QStyleOptionButton option;
+    initStyleOption(&option);
+    option.text.clear();
+    option.icon = QIcon();
+    const auto measured = measurePrivateTextSize(text(), font());
+    const int iconWidth = icon().isNull() ? 0 : iconSize().width() + m::control::elidingIconGap;
+    return style()->sizeFromContents(QStyle::CT_PushButton, &option,
+                                     QSize(measured.width() + iconWidth, qMax(measured.height(), iconSize().height())),
+                                     this);
+}
 void ElidingButton::paintEvent(QPaintEvent *) {
     QStyleOptionButton option;
     initStyleOption(&option);
@@ -138,8 +153,9 @@ void ElidingButton::paintEvent(QPaintEvent *) {
         contents.setLeft(target.right() + 1 + m::control::elidingIconGap);
     }
     painter.setPen(palette().color(isEnabled() ? QPalette::WindowText : QPalette::Mid));
-    painter.drawText(contents, Qt::AlignLeft | Qt::AlignVCenter,
-                     fontMetrics().elidedText(text(), Qt::ElideRight, qMax(0, contents.width())));
+    painter.setFont(font());
+    drawInterfaceText(painter, contents, elideInterfaceText(text(), font(), qMax(0, contents.width())),
+                      Qt::AlignLeft | Qt::AlignVCenter);
 }
 
 StepButton::StepButton(ControlIcon icon, QWidget *parent)
@@ -188,7 +204,7 @@ void FontButton::setFace(const QString &face) {
     update();
 }
 QString FontButton::resolvedFace() const {
-    return QFontInfo(sample).family();
+    return needsPrivateText(QStringLiteral("Hox"), sample) ? sample.family() : QFontInfo(sample).family();
 }
 void DropdownButton::paintEvent(QPaintEvent *) {
     QPainter painter(this);
@@ -203,8 +219,8 @@ void DropdownButton::paintEvent(QPaintEvent *) {
     if (opticalLabel())
         drawOpticalText(painter, label, text(), false, sampleAppearance());
     else
-        painter.drawText(label, Qt::AlignLeft | Qt::AlignVCenter,
-                         painter.fontMetrics().elidedText(text(), Qt::ElideRight, label.width()));
+        drawInterfaceText(painter, label, elideInterfaceText(text(), painter.font(), label.width()),
+                          Qt::AlignLeft | Qt::AlignVCenter);
     const int size = m::choices::fontArrowSize;
     controlIcon(property("opens_upward").toBool() ? ControlIcon::Up : ControlIcon::Down, ink)
         .paint(&painter, QRect(width() - m::choices::fontArrowRight - size / 2, (height() - size) / 2, size, size));

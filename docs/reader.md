@@ -168,6 +168,8 @@ Code (`pre`, `code`, `kbd`, `samp` and `tt`) uses IBM Plex Mono, also when you c
 
 Noto Serif CJK uses the book's language and inline `lang` attributes to select regional glyph forms. Text without a recognized CJK language uses Japanese forms. The bundled Regular collection includes Japanese, Korean, Simplified Chinese, Traditional Chinese and Hong Kong Chinese faces. Font coverage does not enable vertical layout.
 
+Chapter lists, chapter headers and single-line interface controls use the bundled Noto fallback fonts for characters missing from the interface font. Kobalt shapes and draws this fallback text with its own font libraries. It loads fallback font bytes when text first needs them and shares the CJK collection between its regional faces. Coverage does not depend on the selected reading font or opening the font picker. CFF and collection fonts also use this path for font-picker samples, instead of the firmware font driver.
+
 Arabic and Hebrew text uses FriBidi for right-to-left ordering and HarfBuzz for letter shaping and mark placement. Paragraphs can mix right-to-left text with Latin words and numbers. Without a publisher or reader alignment override, paragraphs align to the start of their text direction. The bundled Arabic and Hebrew fonts also supply missing glyphs in chapter titles and other interface text. Text direction and EPUB page-turn direction are separate; the spine's page progression still controls taps and swipes.
 
 Thai word selection follows Qt’s Unicode boundaries. It can select a letter cluster rather than a complete dictionary word.

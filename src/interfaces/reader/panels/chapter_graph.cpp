@@ -6,6 +6,7 @@
 #include "support/strings.h"
 #include "chapter_graph.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/private_text.h"
 #include "interfaces/reader/ui/style/styles.h"
 #include <QLocale>
 #include <QPainter>
@@ -219,7 +220,7 @@ ChapterGraph::ChapterGraph(QWidget *parent) : Panel(parent, Qt::BottomEdge) {
     ui::captionLabel(chapterPage);
     chapterPage->setAlignment(Qt::AlignRight | Qt::AlignTop);
     chapterCaption->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    chapterTitle = new QLabel(this);
+    chapterTitle = new ui::PrivateTextLabel(this);
     chapterTitle->setObjectName("rrGraphChapterTitle");
     chapterTitle->setTextFormat(Qt::PlainText);
     ui::readerStyle(chapterTitle, ui::styles::font(c::labelText) + "background:transparent;");
@@ -392,7 +393,7 @@ void ChapterGraph::arrange() {
                              captionMetrics.height());
     // The title uses the whole row and elides only when it is longer than that.
     chapterTitle->setGeometry(c::inset, topPadding + m::titleTop, inner, titleMetrics.height());
-    chapterTitle->setText(titleMetrics.elidedText(title, Qt::ElideRight, inner));
+    chapterTitle->setText(ui::elideInterfaceText(title, chapterTitle->font(), inner));
     const int chart = chartTop();
     bars->setGeometry(c::inset, chart + m::barsTop, inner, m::chartHeight - m::barsTop - ui::metrics::control::border);
     message->setGeometry(c::inset, chart, inner, m::chartHeight);

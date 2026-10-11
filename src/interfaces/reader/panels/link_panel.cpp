@@ -7,6 +7,7 @@
 #include "support/strings.h"
 #include "link_panel.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/private_text.h"
 #include "interfaces/reader/ui/style/styles.h"
 #include <QPainter>
 
@@ -16,7 +17,7 @@ namespace c = ui::metrics::chrome;
 LinkPanel::LinkPanel(QWidget *parent) : Panel(parent, Qt::TopEdge) {
     setEdgeWidth(c::heavyRule);
     setObjectName("rrLinkPanel");
-    heading = new QLabel(this);
+    heading = new ui::PrivateTextLabel(this);
     heading->setObjectName("rrLinkHeading");
     QFont headingFont = ui::interfaceFont(c::countText);
     headingFont.setCapitalization(QFont::AllUppercase);

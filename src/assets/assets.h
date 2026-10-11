@@ -2,6 +2,7 @@
 #include <QByteArray>
 #include <QString>
 #include <memory>
+#include <functional>
 namespace kobalt {
 class AssetBundle {
 public:
@@ -14,6 +15,9 @@ public:
     void invalidate();
     QString file(const QString &name) const;
     QByteArray fontData(const QString &name) const;
+    // Capture verified metadata without retaining font bytes or this bundle.
+    // The reader checks the file again when it is first needed.
+    std::function<QByteArray()> deferredFontData(const QString &name) const;
     const QString &root() const;
 
 private:

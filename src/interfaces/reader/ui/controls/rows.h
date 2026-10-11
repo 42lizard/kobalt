@@ -1,5 +1,6 @@
 #pragma once
 #include "buttons.h"
+#include "../style/private_text.h"
 #include <QButtonGroup>
 #include <QFrame>
 #include <QPointer>
@@ -86,7 +87,7 @@ private:
     void arrange();
     void syncLabelStyles();
     void observeParent();
-    QLabel *title = nullptr, *detail = nullptr, *caption = nullptr, *leading = nullptr, *trailing = nullptr;
+    PrivateTextLabel *title = nullptr, *detail = nullptr, *caption = nullptr, *leading = nullptr, *trailing = nullptr;
     QPushButton *action = nullptr;
     QString titleText, detailText, captionText, leadingText;
     QString labelStyles[5];

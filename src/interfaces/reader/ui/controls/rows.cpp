@@ -3,6 +3,7 @@
 #include "../style/metrics.h"
 #include "../style/styles.h"
 #include "../style/fonts.h"
+#include "../style/private_text.h"
 #include "support/strings.h"
 #include <QPainter>
 #include <QResizeEvent>
@@ -13,11 +14,11 @@ namespace kobalt::ui {
 namespace m = metrics;
 ListRow::ListRow(QWidget *parent) : Button(parent) {
     readerStyle(this, "QPushButton{border:none;padding:0;min-height:0;background:transparent;}");
-    title = new QLabel(this);
-    detail = new QLabel(this);
-    caption = new QLabel(this);
-    leading = new QLabel(this);
-    trailing = new QLabel(this);
+    title = new PrivateTextLabel(this);
+    detail = new PrivateTextLabel(this);
+    caption = new PrivateTextLabel(this);
+    leading = new PrivateTextLabel(this);
+    trailing = new PrivateTextLabel(this);
     for (auto *label : {title, detail, caption, leading, trailing}) {
         label->setTextFormat(Qt::PlainText);
         label->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -187,8 +188,7 @@ void ListRow::arrange() {
     const int end = width() - (action ? int(m::chrome::cellWidth) : 0) - m::list::inset;
     const int lead = leadingText.isEmpty() ? 0 : int(m::list::leadingWidth);
     const auto *trailingCaption = accessory.caption();
-    const int trail = trailingCaption                             ? qMax(trailingCaption->reservedWidth,
-                                                                         qt::textWidth(QFontMetrics(trailing->font()), trailingCaption->text))
+    const int trail = trailingCaption ? qMax(trailingCaption->reservedWidth, trailing->textWidth(trailingCaption->text))
                       : accessory.kind() == Accessory::Kind::None ? 0
                                                                   : int(m::chrome::cellIcon);
     const int start = m::list::inset + lead + indentation;
@@ -197,7 +197,7 @@ void ListRow::arrange() {
     const int top = lines == 1 ? 0 : int(m::list::lineInset);
     const int lineHeight = qMax(1, (height() - 2 * top - m::control::border) / lines);
     title->setGeometry(start, top, textWidth, lineHeight);
-    title->setText(QFontMetrics(title->font()).elidedText(titleText, Qt::ElideRight, textWidth));
+    title->setText(title->elidedText(titleText, textWidth));
     int line = 1;
     detail->setVisible(!detailText.isEmpty());
     caption->setVisible(!captionText.isEmpty());
@@ -205,8 +205,7 @@ void ListRow::arrange() {
         if (item.second.isEmpty())
             continue;
         item.first->setGeometry(start, top + line++ * lineHeight, qMax(0, end - start), lineHeight);
-        item.first->setText(
-            QFontMetrics(item.first->font()).elidedText(item.second, Qt::ElideRight, item.first->width()));
+        item.first->setText(item.first->elidedText(item.second, item.first->width()));
     }
     leading->setVisible(!leadingText.isEmpty());
     leading->setText(leadingText);

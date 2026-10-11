@@ -4,6 +4,7 @@
 #include "reader_p.h"
 #include "support/strings.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/private_text.h"
 #include "platform/api/kobo_refresh.h"
 #include "reading/appearance_settings.h"
 #include "support/diagnostics.h"
@@ -11,6 +12,7 @@
 #include "storage/reader_storage.h"
 #include "interfaces/reader/settings/settings_panel.h"
 #include "font_registration.h"
+#include "assets/bundled_fonts.h"
 #include <QFontDatabase>
 
 namespace kobalt::reader {
@@ -280,8 +282,10 @@ QString Reader::bookFace() {
 }
 
 void Reader::registerPickerFonts(const QString &family) {
-    const auto registerFont = [this](const QString &path, bool copyForQt) {
-        registerPickerFont(path, copyForQt, registeredFontPaths, registeredFonts);
+    const auto registerFont = [this](const QString &path, bool copyForQt, const QString &family) {
+        const auto registration = ui::registerPrivateInterfaceFont(path, family);
+        if (registration == ui::PrivateFontRegistration::Native)
+            registerPickerFont(path, copyForQt, registeredFontPaths, registeredFonts);
     };
     // Match the engine's source precedence so duplicate sideloads cannot
     // replace a bundled face in Qt's font-name previews.
@@ -291,12 +295,19 @@ void Reader::registerPickerFonts(const QString &family) {
     for (const auto &font : model->fontCatalog()) {
         if (!family.isEmpty() && font.family != family)
             continue;
+        if (family.isEmpty() && font.origin == FontOrigin::Interface) {
+            const auto state = appearanceEdit.preview()->state();
+            if (font.family != supplementalFontFamily(state.value("language").toString()) &&
+                font.family != preferences.value("default_font_face").toString(kobalt::defaultFontFace) &&
+                font.family != state.value("font_face").toString())
+                continue;
+        }
         for (const auto &file : font.files)
             if (file.contains("Regular", Qt::CaseInsensitive))
-                registerFont(file, font.copyForQt);
+                registerFont(file, font.copyForQt, font.family);
         for (const auto &file : font.files)
             if (!file.contains("Regular", Qt::CaseInsensitive))
-                registerFont(file, font.copyForQt);
+                registerFont(file, font.copyForQt, font.family);
     }
 }
 

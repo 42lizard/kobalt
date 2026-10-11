@@ -10,6 +10,7 @@
 #include "interfaces/reader/ui/style/metrics.h"
 #include "interfaces/reader/ui/style/styles.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/private_text.h"
 #include <QFontMetrics>
 #include <QPainter>
 #include <QRawFont>
@@ -24,7 +25,7 @@ DictionaryPanel::DictionaryPanel(QWidget *parent) : ui::Panel(parent, Qt::TopEdg
     dictionary = new ui::CellButton(ui::ControlIcon::Down, this, c::selectorIcon);
     dictionary->setObjectName("rrDictionarySelect");
     dictionary->setRule(Qt::LeftEdge);
-    headword = new QLabel(this);
+    headword = new ui::PrivateTextLabel(this);
     headword->setObjectName("rrDictionaryWord");
     headword->setTextFormat(Qt::PlainText);
     headword->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -191,7 +192,7 @@ void DictionaryPanel::arrange() {
     close->setGeometry(width() - c::cellWidth, top, c::cellWidth, c::actionHeight);
     const int wordWidth = qMax(1, selectorLeft - 2 * c::inset);
     headword->setGeometry(c::inset, top, wordWidth, c::actionHeight);
-    headword->setText(QFontMetrics(headwordFont).elidedText(word, Qt::ElideRight, wordWidth));
+    headword->setText(ui::elideInterfaceText(word, headwordFont, wordWidth));
     const int textTop = top + c::actionHeight + m::control::border;
     // A single page needs no pager, so it can use the whole sheet. Measuring
     // without the pager can clamp the page; restore it afterwards.

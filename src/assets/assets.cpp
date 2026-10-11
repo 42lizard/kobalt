@@ -156,6 +156,10 @@ bool AssetBundle::available() const {
     return true;
 }
 QByteArray AssetBundle::fontData(const QString &name) const {
+    const auto read = deferredFontData(name);
+    return read ? read() : QByteArray();
+}
+std::function<QByteArray()> AssetBundle::deferredFontData(const QString &name) const {
     if (!available())
         return {};
     QMutexLocker lock(&data->mutex);
@@ -163,16 +167,18 @@ QByteArray AssetBundle::fontData(const QString &name) const {
     for (const auto &entry : data->checked) {
         if (entry.path != path || entry.digest.isEmpty())
             continue;
-        if (!regularMember(data->root, path))
-            return {};
-        QFile original(path);
-        if (!original.open(QIODevice::ReadOnly) || original.size() != entry.size)
-            return {};
-        const auto bytes = original.readAll();
-        return bytes.size() == entry.size &&
-                       QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex() == entry.digest
-                   ? bytes
-                   : QByteArray();
+        return [root = data->root, entry] {
+            if (!regularMember(root, entry.path))
+                return QByteArray();
+            QFile original(entry.path);
+            if (!original.open(QIODevice::ReadOnly) || original.size() != entry.size)
+                return QByteArray();
+            const auto bytes = original.readAll();
+            return bytes.size() == entry.size &&
+                           QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex() == entry.digest
+                       ? bytes
+                       : QByteArray();
+        };
     }
     return {};
 }

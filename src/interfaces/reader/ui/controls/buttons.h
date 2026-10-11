@@ -50,6 +50,7 @@ private:
 class ElidingButton : public Button {
 public:
     using Button::Button;
+    QSize sizeHint() const override;
 
 protected:
     void paintEvent(QPaintEvent *) override;

@@ -46,9 +46,11 @@
 #include <QtMath>
 #include <QKeyEvent>
 #include <QProgressBar>
+#include <QRawFont>
 #include <cstdio>
 #include <cstdlib>
 #include "check.h"
+#include "ui_private_text.h"
 
 // Geometry checks run without the device refresh backend.
 namespace kobalt::platform {
@@ -128,6 +130,7 @@ int main(int argc, char **argv) {
                 QFontInfo(kobalt::ui::chromeFont()).family() == "Kobalt UI Mono" &&
                 QFontInfo(kobalt::ui::brandFont(32)).family() == "Kobalt UI Serif",
             "Component font substitution");
+    checkPrivateInterfaceText(kobalt::test::readerAssets());
     {
         QWidget host;
         host.resize(1264, 1680);

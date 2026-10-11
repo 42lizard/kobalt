@@ -2,6 +2,7 @@
 #include "support/qt_font.h"
 #include "reading_page.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/private_text.h"
 #include "ui/input.h"
 #include "ui/image_damage.h"
 #include "model/page_refresh_regions.h"
@@ -365,8 +366,9 @@ void ReadingPage::paintHeader(QPainter &painter) const {
         const int sideWidth = qMax(clockWidth, qCeil(progressWidth(painter.fontMetrics(), chapterProgress)) +
                                                    m::reading::headerSide + m::reading::headerTextGap + ribbonSpace);
         const QRect titleBounds(sideWidth, 0, qMax(0, width() - 2 * sideWidth), m::reading::stripHeight(headerSize));
-        painter.drawText(titleBounds, Qt::AlignCenter,
-                         painter.fontMetrics().elidedText(chapterTitle.toUpper(), Qt::ElideRight, titleBounds.width()));
+        ui::drawInterfaceText(painter, titleBounds,
+                              ui::elideInterfaceText(chapterTitle.toUpper(), painter.font(), titleBounds.width()),
+                              Qt::AlignCenter);
         paintProgress(
             painter,
             QRect(m::reading::headerSide, 0, width() - 2 * m::reading::headerSide, m::reading::stripHeight(headerSize)),

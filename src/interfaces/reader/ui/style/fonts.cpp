@@ -1,5 +1,6 @@
 #include "fonts.h"
 #include "font_data.h"
+#include "private_text.h"
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
 #include <QCoreApplication>
@@ -124,6 +125,8 @@ QFont sizedFont(const QString &family, int pixels) {
 }
 }
 bool initializeInterfaceFonts(const AssetBundle &assets) {
+    if (!initializePrivateInterfaceText(assets))
+        return false;
     QMap<QString, QByteArray> sources;
     for (const auto &family : families())
         for (const auto &face : family.faces) {

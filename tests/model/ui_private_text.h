@@ -1,0 +1,153 @@
+#pragma once
+
+#include "check.h"
+#include "assets/assets.h"
+#include "interfaces/reader/ui/style/private_text.h"
+#include "interfaces/reader/ui/controls/rows.h"
+#include "interfaces/reader/ui/style/styles.h"
+#include "interfaces/reader/ui/style/theme.h"
+
+#include <QPainter>
+#include <QTextBoundaryFinder>
+#include <QFileInfo>
+
+inline void checkPrivateInterfaceText(const kobalt::AssetBundle &assets) {
+    using namespace kobalt::ui;
+    require(privateInterfaceFontBytes() == 0, "Private interface fonts were loaded eagerly");
+    QFont font(QStringLiteral("Kobalt UI Sans"));
+    font.setPixelSize(32);
+    require(!needsPrivateText(QStringLiteral("Chapter 4"), font), "Private renderer replaced covered Latin text");
+    QFont readingFont("Custom Reading Face");
+    require(!needsPrivateText(QStringLiteral("第四章 한국어 목차"), readingFont),
+            "Private interface renderer replaced a requested reading font");
+    require(needsPrivateText(QStringLiteral("第四章 한국어 목차"), font), "CJK text stayed on the native font backend");
+    const auto primaryBytes = QFileInfo(assets.file("fonts/IBMPlexSans-Regular.ttf")).size();
+    require(privateInterfaceFontBytes() == primaryBytes, "Latin text or fallback detection loaded fallback fonts");
+    const auto firstCjk = renderPrivateText(QStringLiteral("第一章 中文目录"), font);
+    require(firstCjk.missingGlyphs == 0 && !firstCjk.image.isNull(), "Lazy CJK font did not render on first use");
+    const auto cjkBytes = QFileInfo(assets.file("fonts/NotoSerifCJK-Regular.ttc")).size();
+    require(privateInterfaceFontBytes() == primaryBytes + cjkBytes, "CJK rendering loaded unrelated fallback fonts");
+    renderPrivateText(QStringLiteral("한국어 日本語 中文"), font);
+    require(privateInterfaceFontBytes() == primaryBytes + cjkBytes, "CJK regional faces duplicated font bytes");
+    for (const auto &sample :
+         {QStringLiteral("第一章 中文目录 简体汉字"), QStringLiteral("第二章 中文目錄 繁體漢字 龍"),
+          QStringLiteral("第三章 日本語の目次"), QStringLiteral("第四章 한국어 목차"),
+          QStringLiteral("Chapter 4 العربية الكتاب 123"), QStringLiteral("中文 English 한국어 हिन्दी"),
+          QStringLiteral("Ελληνικά Русские ∑∫√"), QStringLiteral("עברית Հայերեն ქართული"),
+          QStringLiteral("हिन्दी अध्याय বাংলা অধ্যায় தமிழ் அத்தியாயம் ไทย สารบัญ")}) {
+        const auto rendered = renderPrivateText(sample, font);
+        require(rendered.missingGlyphs == 0, "Private interface renderer produced a missing glyph");
+        require(rendered.advance > 0 && !rendered.image.isNull(), "Private interface renderer produced no text");
+        bool ink = false;
+        for (int y = 0; y < rendered.image.height() && !ink; ++y) {
+            for (int x = 0; x < rendered.image.width(); ++x) {
+                if (qAlpha(rendered.image.pixel(x, y))) {
+                    ink = true;
+                    break;
+                }
+            }
+        }
+        require(ink, "Private interface renderer produced an empty bitmap");
+        require(elidePrivateText(sample, font, rendered.advance) == sample, "Private text elided a fitting title");
+        const auto elided = elidePrivateText(sample, font, 100);
+        require(elided.endsWith(QChar(0x2026)), "Private text did not mark the omitted title");
+        require(renderPrivateText(elided, font).advance <= 100, "Private ellipsis overflowed the available width");
+        QTextBoundaryFinder boundary(QTextBoundaryFinder::Grapheme, sample);
+        boundary.setPosition(elided.size() - 1);
+        require(boundary.isAtBoundary(), "Private ellipsis split a grapheme");
+        require(elidePrivateText(sample, font, 0).isEmpty(), "Private text drew into zero available width");
+    }
+    require(registerPrivateInterfaceFont(assets.file("fonts/NotoSerifCJK-Regular.ttc"), "Noto Serif CJK SC") ==
+                PrivateFontRegistration::Private,
+            "CJK collection was allowed onto the native font backend");
+    QFont cjkFont("Noto Serif CJK SC");
+    cjkFont.setPixelSize(32);
+    require(needsPrivateText(QStringLiteral("Hox"), cjkFont), "CFF preview stayed on the native font backend");
+    const auto cjkPreview = renderPrivateText(QStringLiteral("第一章 한국어 Hox"), cjkFont);
+    require(!cjkPreview.image.isNull() && cjkPreview.missingGlyphs == 0, "Private CJK preview lost the selected face");
+    require(registerPrivateInterfaceFont(assets.file("fonts/IBMPlexSans-Regular.ttf"), "Reading Test Alias") ==
+                PrivateFontRegistration::Native,
+            "TrueType reading font could not retain native painting");
+    QFont readingAlias("Reading Test Alias");
+    readingAlias.setPixelSize(32);
+    require(!needsPrivateText(QStringLiteral("Hox"), readingAlias), "Covered TrueType reading text changed backend");
+    require(needsPrivateText(QStringLiteral("第一章"), readingAlias), "Reading font did not use private CJK fallback");
+    require(registerPrivateInterfaceFont(assets.root() + "/missing-font.ttf", "Missing") ==
+                PrivateFontRegistration::Failed,
+            "Missing reading font was accepted");
+    const QString clusterTitle = QStringLiteral("किं العربية 한국어");
+    const auto clusterEllipsis = elidePrivateText(clusterTitle, font, 100);
+    QTextBoundaryFinder clusterBoundary(QTextBoundaryFinder::Grapheme, clusterTitle);
+    clusterBoundary.setPosition(clusterEllipsis.size() - 1);
+    require(clusterBoundary.isAtBoundary(), "Ellipsis split combining marks in mixed RTL text");
+    const QString longTitle(10000, QChar(0x4e2d));
+    const auto shortened = elidePrivateText(longTitle, font, 100);
+    require(shortened.size() < 10 && measurePrivateText(shortened, font) <= 100,
+            "Long CJK title was not safely measured and elided");
+    QFont tracked = font;
+    tracked.setLetterSpacing(QFont::AbsoluteSpacing, 2);
+    const QString fourLetters = QStringLiteral("中文한국");
+    require(measurePrivateText(fourLetters, tracked) == measurePrivateText(fourLetters, font) + 6,
+            "Private interface renderer lost caption tracking");
+    QFont capitals = font;
+    capitals.setCapitalization(QFont::AllUppercase);
+    require(renderPrivateText(QStringLiteral("Ελληνικά"), capitals).image ==
+                renderPrivateText(QStringLiteral("ΕΛΛΗΝΙΚΆ"), font).image,
+            "Private caption capitalization changed");
+    const QString preview = QStringLiteral("Noto Serif CJK");
+    const auto ordinaryPreview = renderPrivateText(preview, cjkFont, 0);
+    const auto bionicPreview = renderPrivateText(preview, cjkFont, 0, {{0, 2}, {5, 3}, {11, 2}});
+    require(ordinaryPreview.image != bionicPreview.image, "Private font preview lost bold prefixes");
+    QWidget readerHost;
+    readerHost.resize(1200, 200);
+    readerStyle(&readerHost, styles::reader());
+    ListRow row(&readerHost);
+    row.setTitlePixels(32);
+    row.resize(1200, 100);
+    QImage emptyRow(row.size(), QImage::Format_ARGB32_Premultiplied);
+    emptyRow.fill(Qt::white);
+    row.render(&emptyRow);
+    const QString chineseTitle = QStringLiteral("第一章 中文目录 简体汉字");
+    row.setTitle(chineseTitle);
+    QImage chineseRow(row.size(), QImage::Format_ARGB32_Premultiplied);
+    chineseRow.fill(Qt::white);
+    row.render(&chineseRow);
+    require(dynamic_cast<PrivateTextLabel *>(row.titleLabel()), "Chapter row title did not use the private label");
+    require(needsPrivateText(row.titleLabel()->text(), row.titleLabel()->font()),
+            "Chinese chapter row stayed on the native text path");
+    require(row.titleLabel()->text() == chineseTitle && emptyRow != chineseRow,
+            "Chinese chapter row did not paint its title");
+    PrivateTextLabel label(&readerHost);
+    label.setFont(font);
+    label.resize(800, 80);
+    label.setText(QStringLiteral("第四章 한국어 목차"));
+    QImage pixels(label.size(), QImage::Format_ARGB32_Premultiplied);
+    pixels.fill(Qt::white);
+    label.render(&pixels);
+    require(label.text() == QStringLiteral("第四章 한국어 목차"), "Private label lost its accessible text");
+    auto firstInkColumn = [](const QImage &image) {
+        for (int x = 0; x < image.width(); ++x) {
+            for (int y = 0; y < image.height(); ++y) {
+                if (qGray(image.pixel(x, y)) < 128) {
+                    return x;
+                }
+            }
+        }
+        return image.width();
+    };
+    label.setStyleSheet("background:white;color:black;border:none;");
+    label.setLayoutDirection(Qt::LeftToRight);
+    for (const auto &rtl : {QStringLiteral("العربية فصول الكتاب"), QStringLiteral("עברית פרקי הספר")}) {
+        label.setText(rtl);
+        label.setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        pixels.fill(Qt::white);
+        label.render(&pixels);
+        const int logicalLeft = firstInkColumn(pixels);
+        label.setAlignment(Qt::AlignLeft | Qt::AlignAbsolute | Qt::AlignVCenter);
+        pixels.fill(Qt::white);
+        label.render(&pixels);
+        const int absoluteLeft = firstInkColumn(pixels);
+        require(logicalLeft > label.width() / 2 && absoluteLeft < 100,
+                "Private RTL label did not preserve QLabel visual alignment and absolute left alignment");
+    }
+}
