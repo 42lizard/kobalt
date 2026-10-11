@@ -17,7 +17,10 @@ Qt::ScreenOrientation shownOrientation(const QScreen *screen);
 
 class ReaderOrientation : public QObject, private QOrientationFilter {
 public:
-    ReaderOrientation(QOrientationSensor *sensor, std::function<void(Qt::ScreenOrientation)> turn);
+    // Ownership begins before the first turn and ends after restoring the native
+    // orientation. Repeated start/stop calls do not repeat ownership callbacks.
+    ReaderOrientation(QOrientationSensor *sensor, std::function<void(Qt::ScreenOrientation)> turn,
+                      std::function<void(bool)> rotationOwnership = {});
     ~ReaderOrientation() override;
     void configure(const QJsonObject &settings);
     // stop() restores nativeOrientation, unless it is PrimaryOrientation.
@@ -38,6 +41,7 @@ public:
     QJsonObject settings() const;
 
 private:
+    std::function<void(bool)> rotationOwnership;
     QPointer<QOrientationSensor> sensor;
     std::function<void(Qt::ScreenOrientation)> turn;
     QTimer debounce;

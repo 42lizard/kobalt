@@ -275,6 +275,31 @@ bool captureSearchMetrics(QWidget *result, const QString &query) {
 class NativeReaderTest : public QObject {
     Q_OBJECT
 private slots:
+    void rotationOwnership() {
+        QList<int> calls;
+        {
+            ReaderOrientation orientation(
+                nullptr,
+                [&](Qt::ScreenOrientation value) {
+                    calls.append(int(value));
+                },
+                [&](bool owned) {
+                    calls.append(owned ? -1 : -2);
+                });
+            orientation.configure(QJsonObject{{"orientation", int(Qt::LandscapeOrientation)}});
+            QVERIFY(calls.isEmpty());
+            orientation.start(Qt::PortraitOrientation);
+            QCOMPARE(calls, QList<int>({-1, int(Qt::LandscapeOrientation)}));
+            orientation.start(Qt::PortraitOrientation);
+            QCOMPARE(calls.size(), 2);
+            orientation.stop();
+            QCOMPARE(calls, QList<int>({-1, int(Qt::LandscapeOrientation), int(Qt::PortraitOrientation), -2}));
+            orientation.stop();
+            QCOMPARE(calls.size(), 4);
+            orientation.start(Qt::PortraitOrientation);
+        }
+        QCOMPARE(calls.mid(4), QList<int>({-1, int(Qt::LandscapeOrientation), int(Qt::PortraitOrientation), -2}));
+    }
     void initTestCase() {
         test::applyHostStyle();
         QVERIFY2(test::deviceFixture().isEmpty() || test::deviceFixture() == "libra-colour",

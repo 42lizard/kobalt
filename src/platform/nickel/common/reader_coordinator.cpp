@@ -224,8 +224,8 @@ bool ReaderCoordinator::begin(const RetainOpening &retainOpening) {
     watch();
     run.openingTimer.start();
     run.openingTimings = {};
-    run.orientation =
-        std::make_unique<kobalt::ReaderOrientation>(kobalt::nativeOrientationSensor(), kobalt::turnReaderScreen);
+    run.orientation = std::make_unique<kobalt::ReaderOrientation>(kobalt::nativeOrientationSensor(),
+                                                                  kobalt::turnReaderScreen, kobalt::ownReaderRotation);
     run.orientation->configure(readJson(environment_.paths.preferences()));
     run.statePath = environment_.paths.bookState(run.identity);
     status("loading");

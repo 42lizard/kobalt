@@ -97,6 +97,7 @@ function(kobalt_check name)
 endfunction()
 
 # Models, storage and publication code. No engine and no widgets.
+kobalt_check(touch-rotation SOURCES tests/model/touch_rotation.cpp src/platform/nickel/qt5/touch_rotation.cpp LIBRARIES Qt6::Gui)
 kobalt_check(usb-removal SOURCES tests/model/usb_removal.cpp LIBRARIES Qt6::Core)
 kobalt_check(nickel-session-calls SOURCES tests/model/nickel_session_calls.cpp LIBRARIES Qt6::Core)
 

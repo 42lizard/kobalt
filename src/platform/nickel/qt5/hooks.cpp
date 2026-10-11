@@ -1,5 +1,6 @@
 #include "private_functions.h"
 #include "hooks.h"
+#include "touch_rotation.h"
 #include "platform/nickel/common/book_menu.h"
 #include "refresh.h"
 #include "platform/nickel/display/page_animation.h"
@@ -24,6 +25,18 @@ bool firmwareSupported() {
 
 using namespace kobalt::nickel4;
 static nh_hook readerHooks[] = {
+    {.sym = "_ZNK21QEvdevTouchScreenData13mapFromDeviceERK6QPoint",
+     .sym_new = "kobalt_touch_map_from_device",
+     .lib = "/usr/local/Kobo/generic/libkevdevtouch.so",
+     .out = nh_symoutptr(kobalt::nickel4::nativeMapFromDevice),
+     .desc = "Scope the device touch orientation transform",
+     .optional = true},
+    {.sym = "_ZNK10QTransform3mapERK6QPoint",
+     .sym_new = "kobalt_touch_transform",
+     .lib = "/usr/local/Kobo/generic/libkevdevtouch.so",
+     .out = nh_symoutptr(kobalt::nickel4::nativeTouchTransform),
+     .desc = "Correct Clara touch rotation while Kobalt owns the screen",
+     .optional = true},
     {.sym =
          "_ZN16ActionProxyMixin17setupBookListMenuEP28AbstractNickelMenuControllerRK6VolumeP15NickelTouchMenuRK7QStringS9_RK3Tab",
      .sym_new = "kobalt_book_menu",

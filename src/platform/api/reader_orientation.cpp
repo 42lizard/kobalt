@@ -24,8 +24,9 @@ Qt::ScreenOrientation shownOrientation(const QScreen *screen) {
     return orientation == Qt::PrimaryOrientation ? screen->primaryOrientation() : orientation;
 }
 
-ReaderOrientation::ReaderOrientation(QOrientationSensor *sensor, std::function<void(Qt::ScreenOrientation)> turn)
-    : sensor(sensor), turn(std::move(turn)) {
+ReaderOrientation::ReaderOrientation(QOrientationSensor *sensor, std::function<void(Qt::ScreenOrientation)> turn,
+                                     std::function<void(bool)> rotationOwnership)
+    : rotationOwnership(std::move(rotationOwnership)), sensor(sensor), turn(std::move(turn)) {
     debounce.setSingleShot(true);
     debounce.setInterval(250);
     connect(&debounce, &QTimer::timeout, this, [this] {
@@ -46,6 +47,9 @@ void ReaderOrientation::start(Qt::ScreenOrientation orientation) {
         return;
     nativeOrientation = orientation;
     active = true;
+    if (rotationOwnership) {
+        rotationOwnership(true);
+    }
     if (sensor)
         sensor->addFilter(this);
     const bool automatic = automaticRotation;
@@ -67,6 +71,9 @@ void ReaderOrientation::stop() {
     // PrimaryOrientation is not the orientation Nickel showed; see shownOrientation().
     if (nativeOrientation != Qt::PrimaryOrientation)
         apply(nativeOrientation);
+    if (rotationOwnership) {
+        rotationOwnership(false);
+    }
 }
 void ReaderOrientation::rotate() {
     setAutomatic(false);

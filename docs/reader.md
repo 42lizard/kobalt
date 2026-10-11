@@ -190,6 +190,8 @@ Text and Layout settings are saved per book, including header and footer sizes, 
 
 Page layout has left/right and top/bottom margin sliders. Each slider changes both margins in its pair together. Top and bottom margins add space inside the reading area after the header and footer have reserved their space. Existing books keep their previous vertical insets until changed. Page layout also has header and footer sizes, the reading clock (on by default) and orientation. When the book progress line is shown, the footer text uses the same edge spacing as the header. Automatic rotation is available only on devices with an orientation sensor.
 
+On firmware 4, affected Clara models use NickelRotate’s final touch orientation transform while Kobalt owns rotation. Both landscape orientations use the corrected quarter-turn. Closing or suspending the reader restores native input mapping. Clara 2E and other models retain native mapping. The correction requires both touch driver hooks and the expected portrait panel geometry. Firmware 5 and 6 use Kobo’s Qt6 touch driver, which updates its mapping when the screen orientation changes, including on Clara devices.
+
 Other features:
 
 - Standard Ebooks Kobo link wrappers use their publisher border without a second default underline. Ordinary links retain their default underline. Publisher link colors and decorations remain available.
@@ -236,7 +238,7 @@ Power-off and reboot wait for Kobalt to save reading time and progress before Ni
 
 ## Hardware validation
 
-Device testing includes installation and reading on Clara Colour, Clara BW with firmware 4.45 and Libra 2 with firmware 4.38. Page animations with NickelDissolve installed were confirmed on Clara BW with firmware 4.45. Dark-mode refresh quality, sleep with a PIN, rotation, page buttons on Libra Colour and server sync still need hardware validation.
+Device testing includes installation and reading on Clara Colour, Clara BW with firmware 4.45 and Libra 2 with firmware 4.38. Manual rotation and touch targets were confirmed on Clara BW with firmware 4.45. Page animations with NickelDissolve installed were confirmed on Clara BW with firmware 4.45. Dark-mode refresh quality, sleep with a PIN, rotation on other models and firmware versions, page buttons on Libra Colour and server sync still need hardware validation.
 
 ## Android standalone reader
 

@@ -274,6 +274,17 @@
   },
   {
     "group": "author",
+    "name": "NickelRotate",
+    "version": "3efe2fa4ac33",
+    "description": "Firmware 4 Clara touch rotation correction by Nico Verbruggen, using NickelHook by Patrick Gaskin.",
+    "license": "MIT",
+    "url": "https://github.com/nicoverbruggen/NickelRotate",
+    "notices": [
+      "NickelRotate-MIT"
+    ]
+  },
+  {
+    "group": "author",
     "name": "NickelDissolve",
     "version": "Qt 6 port",
     "description": "Directional page-turn bands. Kobalt adapts its MTK submission and fallback behavior.",
