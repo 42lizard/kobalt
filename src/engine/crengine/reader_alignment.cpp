@@ -16,6 +16,11 @@ bool preserve(ldomNode *node, const QString &name) {
                                         "figure",  "figcaption", "caption", "table", "img",    "image",  "svg",
                                         "picture", "object",     "video",   "audio", "canvas", "iframe", "pre",
                                         "code",    "head",       "style",   "script"};
+    // Computed publisher styles cover arbitrary class names and inherited centering.
+    const auto style = node->getStyle();
+    if (!style.isNull() && style->text_align == css_ta_center) {
+        return true;
+    }
     if (elements.contains(name))
         return true;
     const auto role = text(node->getAttributeValue("role")).split(' ', kobalt::qt::skipEmptyParts);

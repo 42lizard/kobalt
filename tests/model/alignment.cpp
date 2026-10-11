@@ -24,14 +24,17 @@ int main(int argc, char **argv) {
     const QByteArray content =
         "<html xmlns='http://www.w3.org/1999/xhtml'><head><style>"
         "body{margin:0}h2{font-size:32px;text-align:center}p{margin:12px 0;text-indent:0}"
-        ".prose{text-align:center!important;color:blue}"
+        ".prose{text-align:right!important;color:blue}.CDL{text-align:center}"
         "</style></head><body><h2>Centered heading</h2>"
         "<p style='text-align:center'><span><img src='art.svg' width='120' height='40'/></span></p>"
+        "<p class='CDL'><span>SIX YEARS AGO</span></p>"
+        "<div style='text-align:center'><p>Inherited centered text</p></div>"
+        "<p style='text-align:center!important'>Inline centered text</p>"
         "<p class='chapter-title' style='text-align:center'>Paragraph title</p>"
         "<blockquote style='text-align:center'><h3>Nested heading</h3></blockquote>"
         "<p role='heading' style='text-align:center'>Accessible heading</p>"
         "<figure style='text-align:center'><figcaption>Figure caption</figcaption></figure>"
-        "<p class='prose'><span style='display:block;text-align:center!important'>Ordinary text.</span></p></body></html>";
+        "<p class='prose'><span style='display:block;text-align:right!important'>Ordinary text.</span></p></body></html>";
     const QMap<QString, QByteArray> data{
         {"mimetype", "application/epub+zip"},
         {"META-INF/container.xml",
@@ -70,16 +73,16 @@ int main(int argc, char **argv) {
                     bounds(aligned, 2).x());
         std::fflush(stdout);
         require(bounds(aligned, 0) == imageBounds, "Text alignment moved a centered image");
-        require(bounds(aligned, 2) == headingBounds, "Text alignment moved a heading");
+        require(bounds(aligned, 2) == headingBounds, "Text alignment moved publisher-centered text or a heading");
         for (int y = 0; y < aligned.height(); ++y)
             for (int x = 0; x < aligned.width(); ++x) {
                 const auto before = QColor::fromRgba(original.pixel(x, y)),
                            after = QColor::fromRgba(aligned.pixel(x, y));
                 const bool b = before.red() < 80 && before.green() < 80 && before.blue() < 80;
                 const bool a = after.red() < 80 && after.green() < 80 && after.blue() < 80;
-                require(a == b, "Alignment changed decorative text or a caption");
+                require(a == b, "Alignment changed publisher-centered text, decorative text or a caption");
             }
-        require(QString(mode) == "right" ? bounds(aligned, 1).x() > proseBounds.x()
+        require(QString(mode) == "right" ? bounds(aligned, 1).x() == proseBounds.x()
                                          : bounds(aligned, 1).x() < proseBounds.x(),
                 "Body text did not override publisher alignment");
         require(model.position() == anchor, "Alignment moved the reading anchor");
