@@ -16,7 +16,7 @@ For a binary release, provide the corresponding source and dependency sources wi
 
 ## Android
 
-Build the standalone app with `python3 android/build.py` from this public checkout. It uses the shared reader components and `src/platform/android/` host services. It does not link Nickel. [Android setup](../android/README.md) includes the complete toolchain environment, debug and release builds, signing with a PKCS#12 key, APK verification and installation. Run its environment exports in the same terminal as the build commands.
+Build the standalone app with `python3 android/build.py` from this public checkout. Debug builds use the repository's shared debug keystore and the `com.nicoverbruggen.kobalt.debug` app ID. Release builds keep `com.nicoverbruggen.kobalt` and require an external release key for signing. It uses the shared reader components and `src/platform/android/` host services. It does not link Nickel. [Android setup](../android/README.md) includes the complete toolchain environment, debug and release builds, signing with a PKCS#12 key, APK verification and installation. Run its environment exports in the same terminal as the build commands.
 
 ## macOS
 

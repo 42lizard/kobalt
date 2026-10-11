@@ -174,7 +174,10 @@ def main():
                          '-DLIBUNIBREAK=ON', '-DMATHML=ON', install=False)
     assets.fetch_fonts.fetch(ROOT, offline=args.offline)
     manifest = output / 'asset-manifest.json'
-    manifest.write_bytes(assets.manifest())
+    app_version = assets.release_version()
+    if not args.release and not app_version.endswith('-debug'):
+        app_version += '-debug'
+    manifest.write_bytes(assets.manifest(version=app_version))
     openssl = build_openssl(source['openssl'], output, ndk, args.abi, args.jobs)
     commit, modified = source_commit()
     run(qt / 'bin/qt-cmake', '-S', ROOT / 'android', '-B', output / 'app', '-G', 'Ninja',
@@ -182,7 +185,7 @@ def main():
         f'-DANDROID_SDK_ROOT={os.environ["ANDROID_HOME"]}', f'-DANDROID_NDK_ROOT={ndk}',
         '-DQT_ANDROID_SDK_BUILD_TOOLS_REVISION=36.0.0', '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON',
         f'-DCRENGINE_SOURCE={engine}', f'-DCRENGINE_BUILD={engine_build}', f'-DDEPENDENCY_PREFIX={prefix}',
-        f'-DANDROID_OPENSSL_DIR={openssl}', f'-DASSET_MANIFEST={manifest}', f'-DKOBALT_VERSION={assets.release_version()}',
+        f'-DANDROID_OPENSSL_DIR={openssl}', f'-DASSET_MANIFEST={manifest}', f'-DKOBALT_VERSION={app_version}',
         f'-DKOBALT_ANDROID_VERSION_CODE={args.version_code}',
         f'-DKOBALT_COMMIT={commit}', '-DKOBALT_COMMIT_MODIFIED=' + ('ON' if modified else 'OFF'))
     run('cmake', '--build', output / 'app', '--target', 'kobalt_android', '--parallel', args.jobs)

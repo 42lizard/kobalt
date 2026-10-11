@@ -46,7 +46,7 @@ export JAVA_HOME="$ANDROID_HOME/jdk/jdk-21.0.12.1+1/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
-Use the directory name of your installed JDK if its version differs. Keep the debug signing key from previous builds. If you previously set `ANDROID_USER_HOME`, retain that value; changing it can select a different `debug.keystore` and prevent an in-place update.
+Use the directory name of your installed JDK if its version differs. Debug builds use the shared `android/debug.keystore` in this repository, independently of `ANDROID_USER_HOME`. Keep this file unchanged so builds from different machines can update the same debug installation.
 
 On Linux, use the installed Linux Qt host kit and local SDK/JDK paths. For an x86_64 emulator, install the Qt Android x86_64 kit and set `QT_ANDROID_PATH` to it. Host platform support beyond the existing macOS setup needs validation.
 
@@ -67,7 +67,7 @@ Each `test` command succeeds silently. A nonzero exit status means the selected 
 
 ## Build
 
-The application ID is `com.nicoverbruggen.kobalt`.
+Debug builds use `com.nicoverbruggen.kobalt.debug` and appear as Kobalt on the home screen. Their displayed version ends in `-debug`. Release builds use `com.nicoverbruggen.kobalt`. Both apps can be installed together and keep separate books, settings and reading progress.
 
 Change to the root of your public Kobalt checkout before running any command below. For a debug build:
 
@@ -75,9 +75,9 @@ Change to the root of your public Kobalt checkout before running any command bel
 python3 android/build.py --jobs 2
 ```
 
-The debug APK is `build/android/arm64-v8a/app/android-build/kobalt_android.apk`. It is signed with the local Android debug key and is suitable for sideloaded testing. Android and Kobo apply the same CREngine patches from `dependencies/crengine-patches.txt`. Changes to those patches or the publication policy invalidate cached books and inspection results. The helper uses independent Android build directories, verifies dependency archives before extraction, and rejects unsupported resource-service symbols before packaging. `--offline` requires cached native dependency archives and font assets; it does not put Gradle into offline mode. `--native-only` compiles without packaging an APK. `--abi x86_64` selects the emulator ABI.
+The debug APK is `build/android/arm64-v8a/app/android-build/kobalt_android.apk`. It is signed with the shared `android/debug.keystore` and is suitable for sideloaded testing. The public debug key uses alias `androiddebugkey` and `android` for both passwords. Its certificate SHA-256 is `874630ab00cefbeb01d39d625b596db4e55e333563d7521478f682cad18466f5`. Anyone with this repository can sign a debug update. Never use this key for releases. Debug signing does not need a key from 1Password or `~/.android/`. Android and Kobo apply the same CREngine patches from `dependencies/crengine-patches.txt`. Changes to those patches or the publication policy invalidate cached books and inspection results. The helper uses independent Android build directories, verifies dependency archives before extraction, and rejects unsupported resource-service symbols before packaging. `--offline` requires cached native dependency archives and font assets; it does not put Gradle into offline mode. `--native-only` compiles without packaging an APK. `--abi x86_64` selects the emulator ABI.
 
-Install onto an explicitly selected test device:
+Use `--version-code NUMBER` with a number at least as large as the installed debug build. Install onto an explicitly selected test device with `install -r` to preserve its data:
 
 ```sh
 adb -s DEVICE_SERIAL install -r build/android/arm64-v8a/app/android-build/kobalt_android.apk
@@ -176,7 +176,7 @@ Replace `DEVICE_SERIAL` with the serial reported by `adb devices`. A signature m
 
 The application ID stays `com.nicoverbruggen.kobalt`. The displayed version comes from `KOBALT_RELEASE_VERSION`, an extracted source bundle, an exact Git version tag, or the root `VERSION` file, in that order. Android's numeric version code defaults to 1; changing the displayed version does not increment it. Pass `--version-code NUMBER` to `android/build.py` for each release. Use a number greater than every previously distributed release, between 1 and 2100000000. The helper sets the `QT_ANDROID_VERSION_CODE` target property through `KOBALT_ANDROID_VERSION_CODE` and does not increment it automatically. Confirm the packaged value with `aapt2 dump badging`.
 
-Never commit the keystore or passphrase. Use the same signing key for future updates and increase the version code for each release. Never publish an APK signed with a development debug key. Before distribution, validate the signed APK on target hardware and provide the corresponding source and dependency sources described in the root README.
+Never commit a release keystore or its passphrase. The shared debug keystore and its standard passwords are intentionally public. Use the same signing key for future updates and increase the version code for each release. Never publish an APK signed with a development debug key. Before distribution, validate the signed APK on target hardware and provide the corresponding source and dependency sources described in the root README.
 
 See Android's [app signing guide](https://developer.android.com/studio/publish/app-signing), [apksigner reference](https://developer.android.com/tools/apksigner) and [versioning guide](https://developer.android.com/studio/publish/versioning) for the platform requirements.
 

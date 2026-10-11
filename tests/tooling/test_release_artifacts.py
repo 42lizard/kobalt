@@ -10,9 +10,29 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools'))
 import draft_release as github
+import release_sources
 
 BETA = 'v1.0-beta.1'
 COMMIT = 'a' * 40
+
+
+class ReleaseSourceKeyTests(unittest.TestCase):
+    def test_shared_debug_key_is_allowed(self):
+        self.assertEqual(release_sources.safe_source(ROOT, 'android/debug.keystore'),
+                         ROOT / 'android/debug.keystore')
+
+    def test_other_keys_are_rejected(self):
+        for name in ('android/release.keystore', 'android/release.p12', 'android/debug.jks'):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                release_sources.safe_source(ROOT, name)
+
+    def test_replaced_debug_key_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / 'build') as temporary:
+            root = Path(temporary)
+            (root / 'android').mkdir()
+            (root / 'android/debug.keystore').write_bytes(b'other signing key')
+            with self.assertRaisesRegex(ValueError, 'Unexpected shared'):
+                release_sources.safe_source(root, 'android/debug.keystore')
 
 
 class ReleaseArtifactTests(unittest.TestCase):

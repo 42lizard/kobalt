@@ -61,14 +61,18 @@ def checkout(root, allow_dirty=False):
 
 def safe_source(root, name):
     path = PurePosixPath(name)
+    shared_debug_key = name == 'android/debug.keystore'
     if (not path.parts or path.is_absolute() or any(p in ('..', '.git') or p.startswith('.env') for p in path.parts)
             or '\\' in name or any(ord(c) < 32 for c in name)
             or path.parts[0] in ('build', 'tmp', 'state')
-            or path.suffix.lower() in ('.p12', '.pem', '.key', '.jks', '.keystore', '.epub', '.kepub', '.db', '.sqlite')):
+            or (path.suffix.lower() in ('.p12', '.pem', '.key', '.jks', '.keystore', '.epub', '.kepub', '.db', '.sqlite')
+                and not shared_debug_key)):
         raise ValueError('Unexpected release source path: ' + name)
     source = root / name
     if not source.is_file() or any(p.is_symlink() for p in (source, *source.parents) if p != root and p.is_relative_to(root)):
         raise ValueError('Release source must be a regular file: ' + name)
+    if shared_debug_key and digest(source) != 'e7b7893c7abd2ee65d0bc98645e3d5dd88e6c092da451fd1c1bfea548fd31912':
+        raise ValueError('Unexpected shared Android debug keystore')
     return source
 
 
