@@ -36,8 +36,7 @@ def release_version(root=ROOT):
                 return versions[0]
     except (OSError, subprocess.CalledProcessError):
         pass
-    match = re.search(r'^set\(KOBALT_VERSION "([^"\n]+)"(?: CACHE STRING "[^"]*")?\)$',
-                      (root / 'CMakeLists.txt').read_text(), re.MULTILINE)
-    if not match:
-        raise ValueError('Missing KOBALT_VERSION development fallback in CMakeLists.txt')
-    return validate(match[1])
+    fallback = root / 'VERSION'
+    if not fallback.is_file():
+        raise ValueError('Missing VERSION file at the source root')
+    return validate(fallback.read_text().strip())

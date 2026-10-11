@@ -36,8 +36,11 @@ add_test(NAME cpp-formatter-tool COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TE
 add_test(NAME release-version COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_version.py")
 add_test(NAME release-artifacts COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_release_artifacts.py")
 
-file(STRINGS "${KOBALT_ROOT}/CMakeLists.txt" version_line REGEX "^set\\(KOBALT_VERSION ")
-string(REGEX REPLACE "^set\\(KOBALT_VERSION \"([^\"]+)\".*$" "\\1" KOBALT_VERSION "${version_line}")
+execute_process(COMMAND "${Python3_EXECUTABLE}" -B -c
+    "import sys; sys.path.insert(0, sys.argv[1]); from version import release_version; print(release_version())"
+    "${KOBALT_ROOT}/tools"
+    OUTPUT_VARIABLE KOBALT_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY)
 
 # The reader and component tests read the same verified asset bundle as a
 # device installation.
