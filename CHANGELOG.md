@@ -26,14 +26,6 @@
 
 - Fixed Kobalt remaining inactive when Nickel's initialization callback was missed.
 
-### Technical changes
-
-- Invalidate build freshness checks when the release version changes.
-
-- Invalidate parsed document caches when the Kobalt release version changes. Remove older entries for the same book after saving a new cache.
-
-- Added startup diagnostics to identify missing hooks and initialization delays.
-
 ## v1.0-beta.1
 
 ### What's New
