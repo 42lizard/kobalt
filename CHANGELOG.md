@@ -1,8 +1,6 @@
 ## v1.0-beta.2
 
-### Fixed
-
-- Invalidate parsed document caches when the Kobalt release version changes. Remove older entries for the same book after saving a new cache.
+### What's changed
 
 - Fixed opening and appearance previews for EPUBs whose structural CSS selectors require styles to be recalculated after parsing. Publisher image spacing and centered text are preserved.
 
@@ -25,6 +23,14 @@
 - Fixed missing Chinese, Japanese, Korean and other bundled fallback characters in chapter titles and interface controls. CJK fallback text and CFF font previews use Kobalt’s font renderer to avoid crashes in the firmware font driver.
 
 - Load private interface fallback fonts when text first needs them, including the CJK collection. This is more memory efficient.
+
+- Fixed Kobalt remaining inactive when Nickel's initialization callback was missed.
+
+### Technical changes
+
+- Invalidate parsed document caches when the Kobalt release version changes. Remove older entries for the same book after saving a new cache.
+
+- Added startup diagnostics to identify missing hooks and initialization delays.
 
 ## v1.0-beta.1
 
