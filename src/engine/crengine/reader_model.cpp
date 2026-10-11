@@ -902,6 +902,13 @@ QVector<ChapterLink> ReaderModel::tocChapters() const {
 void ReaderModel::setChapters(QVector<ChapterLink> contents, QVector<ChapterLink> graph) {
     if (!engine_)
         return;
+    // An unresolved native list must not hide the publication's usable TOC.
+    // Keep partially resolved lists and the native word-count graph intact.
+    if (std::none_of(contents.cbegin(), contents.cend(), [](const ChapterLink &chapter) {
+            return !chapter.position.isEmpty();
+        })) {
+        contents.clear();
+    }
     contents_ = std::move(contents);
     graph_ = std::move(graph);
 }

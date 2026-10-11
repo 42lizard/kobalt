@@ -980,6 +980,44 @@ int main(int argc, char **argv) {
     for (const auto &name : names)
         if (name.endsWith("c2.xhtml"))
             chapter2 = name;
+    {
+        // CREngine normalizes heading whitespace. Native text-offset mapping
+        // rejects that change even at offset zero, but the EPUB TOC still works.
+        for (const auto &heading : {QByteArray("Chapter One"), QByteArray("Chapter\n   One")}) {
+            const auto book = storedEpub(
+                {{"mimetype", "application/epub+zip"},
+                 {"META-INF/container.xml",
+                  "<container xmlns='urn:oasis:names:tc:opendocument:xmlns:container' version='1.0'><rootfiles><rootfile full-path='book.opf' media-type='application/oebps-package+xml'/></rootfiles></container>"},
+                 {"book.opf",
+                  "<package xmlns='http://www.idpf.org/2007/opf' version='2.0'><metadata/><manifest><item id='c' href='c.xhtml' media-type='application/xhtml+xml'/><item id='toc' href='toc.ncx' media-type='application/x-dtbncx+xml'/></manifest><spine toc='toc'><itemref idref='c'/></spine></package>"},
+                 {"toc.ncx",
+                  "<ncx xmlns='http://www.daisy.org/z3986/2005/ncx/' version='2005-1'><head/><docTitle><text>Book</text></docTitle><navMap><navPoint id='n1' playOrder='1'><navLabel><text>EPUB chapter</text></navLabel><content src='c.xhtml#heading'/></navPoint></navMap></ncx>"},
+                 {"c.xhtml",
+                  "<html xmlns='http://www.w3.org/1999/xhtml'><head><title>Test</title></head><body><h1 id='heading'>" +
+                      heading + "</h1><p>Body text.</p></body></html>"}});
+            kobalt::ReaderModel fallback(kobalt::test::readerFonts());
+            require(fallback.open(book, QSize(1072, 1328), {}, &error), qPrintable(error));
+            const auto original = fallback.chapters();
+            require(original.size() == 1 && !original[0].position.isEmpty(), "Missing EPUB TOC destination");
+            const auto anchor = fallback.position();
+            for (const auto &location : {QString("c.xhtml#heading"), QString("c.xhtml#heading:0")}) {
+                auto resolved = kobalt::resolveChapterTargets(fallback, positions, {{"Native chapter", location}}, {});
+                const bool normalized = heading.contains('\n');
+                require(resolved.contents.size() == 1 && resolved.contents[0].position.isEmpty() == normalized,
+                        "Heading whitespace did not reproduce the native destination failure");
+                const QVector<kobalt::ChapterLink> graph{{"Native graph", original[0].position, -1, 0, 123}};
+                fallback.setChapters(std::move(resolved.contents), graph);
+                const auto chapters = fallback.chapters();
+                require(chapters.size() == 1 && chapters[0].title == (normalized ? "EPUB chapter" : "Native chapter") &&
+                            !chapters[0].position.isEmpty() && chapters[0].page >= 0 && fallback.position() == anchor,
+                        "Unresolved native chapters did not fall back without moving the reader");
+                require(fallback.chapterGraph().size() == 1 && fallback.chapterGraph()[0].words == 123,
+                        "TOC fallback replaced native word counts");
+                require(fallback.goTo(chapters[0].position), "Cannot navigate to the selected chapter destination");
+                require(fallback.goTo(anchor), "Cannot restore the position after chapter navigation");
+            }
+        }
+    }
     kobalt::ReaderModel native(kobalt::test::readerFonts());
     require(native.open(bytes, QSize(1072, 1328), legacySettings, &error), qPrintable(error));
     require(native.goToPlatform(positions, chapter2 + "#kobo.8.1:7", &error), qPrintable(error));
@@ -1027,6 +1065,8 @@ int main(int argc, char **argv) {
         auto mapped = kobalt::resolveChapterTargets(native, positions, targets, targets);
         native.setChapters(std::move(mapped.contents), std::move(mapped.graph));
         auto links = native.chapterGraph();
+        require(native.chapters().size() == targets.size() && native.chapters().last().position.isEmpty(),
+                "A partially resolved native chapter list was replaced by the publication TOC");
         require(native.position() == comparisonAnchor && native.page() == beforePage && native.pages() == beforePages,
                 "Mapping chapters changed the reading position or layout");
         require(links.size() == 5 && links[0].position == links[1].position && links[0].words == 300 &&
