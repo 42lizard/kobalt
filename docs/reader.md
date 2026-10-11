@@ -86,6 +86,8 @@ The event log records startup checks, opening stages, timings, memory and save r
 
 The default build opens unencrypted sideloaded EPUBs under `/mnt/onboard/` and `/mnt/sd/`, including KoboCloud books exposed under `/mnt/sd/kobocloud/`, and DRM-free Kobo purchases, including extensionless books stored by Nickel. Book previews, PDFs and protected books use Nickel's reader.
 
+EPUBs downloaded through Kobo's built-in Dropbox and Google Drive integrations can also open in Kobalt. These books live under `/mnt/onboard/.kobo/dropbox/` and `/mnt/onboard/.kobo/google_drive/`. Other hidden folders and hidden entries within these download folders remain excluded. Protected cloud books use Nickel's reader.
+
 On firmware 4, sideloaded filenames and saved chapter prefixes preserve literal `#`, `?` and percent sequences such as `%20`.
 
 Loading a local book does not require Wi-Fi or an internet connection. On Kobo, Kobalt checks the local loopback interface before opening its resource service. It brings that interface up if needed and preserves its existing IPv4 address. It does not enable Wi-Fi or change other network interfaces.

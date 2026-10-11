@@ -114,9 +114,14 @@ ReaderBookRoute readerBookRoute(const void *volume, QString *identity, QString *
 #endif
     // Nickel stores sideloaded ContentIDs as file:// followed by the literal
     // path. URL parsing would truncate #/? and decode literal percent sequences.
-    const QString storageRoot = id.startsWith("file:///mnt/onboard/") ? QStringLiteral("/mnt/onboard/")
-                                : id.startsWith("file:///mnt/sd/")    ? QStringLiteral("/mnt/sd/")
-                                                                      : QString();
+    // Nickel's built-in cloud downloads live inside .kobo. Only these two
+    // folders bypass the hidden parent check; hidden entries below them do not.
+    const QString storageRoot =
+        id.startsWith("file:///mnt/onboard/.kobo/dropbox/")        ? QStringLiteral("/mnt/onboard/.kobo/dropbox/")
+        : id.startsWith("file:///mnt/onboard/.kobo/google_drive/") ? QStringLiteral("/mnt/onboard/.kobo/google_drive/")
+        : id.startsWith("file:///mnt/onboard/")                    ? QStringLiteral("/mnt/onboard/")
+        : id.startsWith("file:///mnt/sd/")                         ? QStringLiteral("/mnt/sd/")
+                                                                   : QString();
     const bool sideloaded = !storageRoot.isEmpty();
     auto filename = sideloaded ? id.mid(7) : QString();
     const bool purchased =

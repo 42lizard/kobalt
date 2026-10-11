@@ -8,6 +8,8 @@
 
 - Fixed opening DRM-free EPUBs from SD storage, including KoboCloud books under `/mnt/sd/kobocloud/`.
 
+- Fixed opening DRM-free EPUBs downloaded through Kobo's built-in Dropbox and Google Drive integrations. Protected books still open in the built-in reader.
+
 ## v1.0-beta.1
 
 ### What's New
