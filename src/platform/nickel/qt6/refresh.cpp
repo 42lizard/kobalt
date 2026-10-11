@@ -131,8 +131,8 @@ void flushReader(QBackingStore *store, const QRegion &region, QWindow *target, c
         }
         const bool plainControls = !dark && readerWindow->property("reader_plain_controls").toBool();
         if ((pageTurn || plainControls) && !direction && compatible &&
-            refreshBackend(readerWindow) == RefreshBackend::Mtk &&
-            policies.size() == 1 && policies[0].second == ordinaryPolicy(dark)) {
+            refreshBackend(readerWindow) == RefreshBackend::Mtk && policies.size() == 1 &&
+            policies[0].second == ordinaryPolicy(dark)) {
             // Keep one submission while the driver compares pixels within the rectangle.
             const quint64 policy = (policies[0].second & ~(heuristic | full)) | partialMode;
             nativeFlush(store, damage, target, offset, {{policies[0].first, policy}});

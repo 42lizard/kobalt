@@ -167,7 +167,8 @@ int main(int argc, char **argv) {
     flush(first, {{first, lightText}});
     expectPolicy(bit(lightOrdinaryAttribute) | bit(partialAttribute), "Light reading bars did not use partial mode");
     flush(split, {{first, lightText}, {second, lightText}});
-    expectPolicy(bit(lightOrdinaryAttribute) | bit(partialAttribute), "Split reading bars did not use one partial policy");
+    expectPolicy(bit(lightOrdinaryAttribute) | bit(partialAttribute),
+                 "Split reading bars did not use one partial policy");
     reader.setProperty("reader_page_turn", true);
     reader.setProperty("reader_mono_repairs", QVariant::fromValue(QRegion(first)));
     flush(split, {{first, lightText}, {second, lightText}});
