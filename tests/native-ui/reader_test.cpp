@@ -2676,6 +2676,32 @@ private slots:
             for (const int y : {bottom - 1, bottom})
                 QVERIFY2(image.pixel(x, y) == ink, qPrintable(QString("%1,%2").arg(x).arg(y)));
     }
+    // With a panel open, the active tab's fill meets the panel's bottom rule.
+    // The bar's own rule band must not leave a paper gap above the tab.
+    void activeTabMeetsPanelRule() {
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(nativeSize + QSize(40, 40));
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        auto *stats = host.window()->findChild<QPushButton *>("rrNavStats");
+        QVERIFY(click(canvas, stats));
+        QTRY_VERIFY(host.window()->findChild<QWidget *>("rrChapterGraph")->isVisible());
+        QCoreApplication::processEvents();
+        const QImage image = canvas.capture();
+        auto *bar = host.window()->findChild<QWidget *>("rrBottomNavigation");
+        QVERIFY(bar);
+        const QRgb ink = stats->palette().color(QPalette::Text).rgb();
+        const int x = stats->mapTo(canvas.surface(), stats->rect().center()).x();
+        for (int y = bar->mapTo(canvas.surface(), QPoint()).y(); y <= stats->mapTo(canvas.surface(), QPoint()).y(); ++y)
+            QVERIFY2(image.pixel(x, y) == ink, qPrintable(QString::number(y)));
+    }
     void linkHighlightsPaintOnlyChangedOutlines() {
         ReadingPage page(nullptr, [] {});
         page.resize(400, 600);

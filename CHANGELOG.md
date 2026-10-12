@@ -6,6 +6,8 @@
 
 - Restore the heavy rule below the Settings panel.
 
+- Extend the active tab's fill to the rule above the navigation bar while a panel is open.
+
 - Show rotation labels beside the icons when they fit, and icons only on narrower screens. Use white unselected split buttons with thin borders and black selected buttons. Add space between rotation icons and labels.
 
 - Kobo devices with an orientation sensor now offer Portrait, Landscape and Both. Portrait lock is the default, and rejected orientations no longer trigger page layout changes. Devices without a sensor keep manual rotation.

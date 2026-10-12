@@ -153,8 +153,16 @@ BottomNavigation::BottomNavigation(QWidget *parent) : ui::Panel(parent, Qt::TopE
 void BottomNavigation::paintEvent(QPaintEvent *event) {
     ui::Panel::paintEvent(event);
     QPainter painter(this);
-    if (!panelOpen)
+    if (!panelOpen) {
         painter.fillRect(0, 0, width(), toolbarBorder, palette().color(QPalette::WindowText));
+        return;
+    }
+    // An open panel draws the rule above the bar and leaves this band empty.
+    // Extend the active tab's fill through it, so the fill meets that rule.
+    for (auto *tab : tabs)
+        if (tab->isChecked())
+            painter.fillRect(tab->mapTo(this, QPoint()).x(), 0, tab->width(), toolbarBorder,
+                             tab->palette().color(QPalette::Text));
 }
 void BottomNavigation::setPanelOpen(bool open) {
     if (panelOpen == open)
@@ -164,6 +172,8 @@ void BottomNavigation::setPanelOpen(bool open) {
 }
 void BottomNavigation::select(int destination, bool enabled, bool lightAvailable) {
     for (int i = 0; i < tabs.size(); ++i) {
+        if (panelOpen && tabs[i]->isChecked() != (i == destination))
+            update(QRect(tabs[i]->mapTo(this, QPoint()).x(), 0, tabs[i]->width(), toolbarBorder));
         tabs[i]->setChecked(i == destination);
         tabs[i]->setEnabled(enabled && (i != int(NavigationDestination::Light) || lightAvailable));
     }
