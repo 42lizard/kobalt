@@ -6,6 +6,10 @@ Read [README.md](README.md) before changing code. Follow [Building Kobalt](docs/
 
 The README must be edited manually.
 
+## Worktrees and branches
+
+Make changes in a separate Git worktree on a separate branch based on `main`. When the work is complete and verified, merge that branch back into `main`. This workflow does not authorize staging, committing or merging without the user's explicit instruction.
+
 ## Release version
 
 When preparing a release, update the root `VERSION` file to the release tag, such as `v1.0-beta.2`, in the same change as its `CHANGELOG.md` entry. Check that both match before tagging. Untagged builds use `VERSION`; tagged CI builds use the triggering tag.
