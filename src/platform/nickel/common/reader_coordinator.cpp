@@ -1,5 +1,6 @@
 #include "reading/appearance_settings.h"
 #include "reader_coordinator.h"
+#include "usb_transition.h"
 #include "support/qt_compat.h"
 #include "support/strings.h"
 #include "book_menu.h"
@@ -125,18 +126,16 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
         homeAfterClose = false;
         authorization->setBlocked(true);
         timer.stop();
-        auto release = [this, ready = std::move(ready)] {
-            kobalt::diagnostic("usb-release-start");
-            disposeForTransition([this, ready] {
+        prepareUsbTransition(
+            run.reader, cleanupCallbacks,
+            [this] {
+                kobalt::diagnostic("usb-release-start");
+                disposeForTransition([] {});
+            },
+            [this, ready = std::move(ready)] {
                 environment_.assets.invalidate();
                 ready();
             });
-        };
-        if (run.reader) {
-            run.reader->prepareUsb(std::move(release));
-        } else {
-            release();
-        }
     };
     lifecycle->prepareShutdown = [this](std::function<void()> ready) {
         homeAfterClose = false;
