@@ -147,7 +147,7 @@ inline constexpr Px graphHeight{rowHeight + chartHeight + cellHeight};
 inline constexpr int wideChapters = 30, mediumChapters = 60, sparseBars = 20, scaleCap = 3;
 inline constexpr Px gapWide{8}, gapMedium{6}, gapNarrow{4};
 inline constexpr Px minimumBarWidth{6}, maximumBarWidth{64}, narrowBarWidth{16};
-inline constexpr Px sparseGap{12}, capNotch{2}, capNotchTop{8};
+inline constexpr Px sparseGap{12};
 inline constexpr Px outline{2}, fillInset{4}, narrowFillInset{2};
 }
 namespace list {

@@ -10,6 +10,8 @@
 
 - Page buttons now page Chapters, Bookmarks, search results and licenses instead of being ignored.
 
+- Long chapters in the Stats chart fill the chart height without a notch.
+
 - Show rotation labels beside the icons when they fit, and icons only on narrower screens. Use white unselected split buttons with thin borders and black selected buttons. Add space between rotation icons and labels.
 
 - Kobo devices with an orientation sensor now offer Portrait, Landscape and Both. Portrait lock is the default, and rejected orientations no longer trigger page layout changes. Devices without a sensor keep manual rotation.

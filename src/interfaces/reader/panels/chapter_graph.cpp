@@ -74,9 +74,6 @@ protected:
                     }
                 }
             }
-            // A notch near the top marks a bar that is taller than the chart.
-            if (capped)
-                painter.fillRect(bar.left(), bar.top() + m::capNotchTop, bar.width(), m::capNotch, paper);
         }
         painter.setFont(ui::captionFont());
         const auto metrics = painter.fontMetrics();

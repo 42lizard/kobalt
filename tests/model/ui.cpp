@@ -1111,10 +1111,9 @@ int main(int argc, char **argv) {
         const int outlierLeft = evenLeft + 20 * (evenWidth + g::gapWide);
         require(qGray(capped.pixel(evenLeft, chartHeight - chartHeight / g::scaleCap + 2)) == 0,
                 "An outlier flattened the other chapters");
-        require(qGray(capped.pixel(outlierLeft, g::capNotchTop)) == 255 &&
-                    qGray(capped.pixel(outlierLeft, g::capNotchTop + g::capNotch + 1)) == 0 &&
-                    qGray(capped.pixel(outlierLeft, 0)) == 0,
-                "A capped chapter lacks its full height or its notch");
+        // A capped chapter reaches the top of the chart with an unbroken outline.
+        for (int y = 0; y < chartHeight; ++y)
+            require(qGray(capped.pixel(outlierLeft, y)) == 0, "A capped chapter lacks its full height or is marked");
         for (int i = 21; i < 80; ++i)
             even.append({QString::number(i), QString::number(i), i, 0, 1000});
         graph.setData(even, {}, true, {});
