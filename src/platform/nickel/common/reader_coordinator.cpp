@@ -33,6 +33,7 @@
 #include <NickelHook.h>
 #include <QApplication>
 #include <QFile>
+#include <QKeyEvent>
 #include <QScreen>
 #include <QThread>
 #include <utility>
@@ -41,15 +42,15 @@ namespace kobalt::nickel {
 using kobalt::storage::readJson;
 using kobalt::storage::writeJson;
 namespace {
-QPointer<ReaderCoordinator> benchmarkCoordinator;
+QPointer<ReaderCoordinator> activeCoordinator;
 bool benchmarkTypographyEnabled = false;
 }
 
 extern "C" __attribute__((visibility("default"))) int kobalt_benchmark_typography_v1(const char *contentId,
                                                                                      int enable) {
     if (!qApp || QThread::currentThread() != qApp->thread() || !contentId || (enable != 0 && enable != 1) ||
-        kobalt::appearance::benchmarkTypography(QString::fromUtf8(contentId)).isEmpty() || !benchmarkCoordinator ||
-        (enable && !benchmarkCoordinator->idleForBenchmark()))
+        kobalt::appearance::benchmarkTypography(QString::fromUtf8(contentId)).isEmpty() || !activeCoordinator ||
+        (enable && !activeCoordinator->idleForBenchmark()))
         return 0;
     benchmarkTypographyEnabled = enable != 0;
     return 1;
@@ -61,8 +62,9 @@ ReaderCoordinator::ReadingRun::~ReadingRun() = default;
 ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, CoordinatorBindings bindings, QObject *parent)
     : QObject(parent), environment_(environment), bindings_(bindings), lifecycle(new kobalt::NativeLifecycle(this)),
       authorization(new kobalt::NativeAuthorization(this)) {
-    benchmarkCoordinator = this;
+    activeCoordinator = this;
     authorization->revoked = [this](kobalt::NativeAuthorization::Reason) {
+        homeAfterClose = false;
         if (run.sourceLease)
             run.sourceLease->revoke();
         timer.stop();
@@ -75,6 +77,7 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
         });
     };
     lifecycle->sleep = [this] {
+        homeAfterClose = false;
         authorization->setBlocked(true);
         timer.stop();
         if (run.reader) {
@@ -119,6 +122,7 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
         }
     };
     lifecycle->prepareUsb = [this](std::function<void()> ready) {
+        homeAfterClose = false;
         authorization->setBlocked(true);
         timer.stop();
         auto release = [this, ready = std::move(ready)] {
@@ -135,6 +139,7 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
         }
     };
     lifecycle->prepareShutdown = [this](std::function<void()> ready) {
+        homeAfterClose = false;
         authorization->setBlocked(true);
         timer.stop();
         // Revocation can dispose the reader while its bookmark is being
@@ -155,6 +160,46 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
     timer.setInterval(250);
     if (!lifecycle->blocked())
         timer.start();
+}
+
+bool interceptHomeKey(QKeyEvent *event) {
+    return activeCoordinator && activeCoordinator->handleHomeKey(event);
+}
+
+bool ReaderCoordinator::handleHomeKey(QKeyEvent *event) {
+    if (!bindings_.goHome || (event->type() != QEvent::KeyPress && event->type() != QEvent::KeyRelease)) {
+        return false;
+    }
+    if (event->key() != Qt::Key_Home || event->modifiers() != Qt::NoModifier || lifecycle->blocked() ||
+        kobalt::NativeLifecycle::suspended()) {
+        return false;
+    }
+    const bool readerVisible = run.reader && run.reader->isVisible() && !BrowserHandoff::activeFor(run.reader);
+    const bool openingVisible = (run.loading && run.loading->window() && run.loading->window()->isVisible()) ||
+                                (run.fallbackAlert && run.fallbackAlert->isVisible());
+    if (!homeAfterClose && !readerVisible && !openingVisible) {
+        return false;
+    }
+    // Consume both edges. Nickel must navigate only after the normal close
+    // has saved progress and released the book, including any exit choices.
+    if (event->type() == QEvent::KeyPress && !event->isAutoRepeat() && !homeAfterClose) {
+        homeAfterClose = true;
+        if (readerVisible) {
+            run.reader->close();
+        } else {
+            disposeForTransition([this] {
+                finishHomeNavigation();
+            });
+        }
+    }
+    event->accept();
+    return true;
+}
+
+void ReaderCoordinator::finishHomeNavigation() {
+    if (std::exchange(homeAfterClose, false) && !lifecycle->blocked() && !kobalt::NativeLifecycle::suspended()) {
+        bindings_.goHome();
+    }
 }
 
 bool ReaderCoordinator::idleForBenchmark() const {
@@ -612,6 +657,7 @@ void ReaderCoordinator::showReader() {
                 lifecycle->draining = false;
                 QFile::remove(activePath);
                 status("closed");
+                finishHomeNavigation();
                 // USB or revocation may have arrived during the barrier.
                 if (!cleanupCallbacks.isEmpty()) {
                     disposeForTransition([] {});

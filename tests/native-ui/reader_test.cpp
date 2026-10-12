@@ -3300,8 +3300,11 @@ private slots:
 
     void finishChoiceSurvivesSleepAndRequiresActiveReader_data() {
         QTest::addColumn<bool>("markFinished");
-        QTest::newRow("still-reading") << false;
-        QTest::newRow("mark-finished") << true;
+        QTest::addColumn<bool>("exitRequested");
+        QTest::newRow("still-reading") << false << false;
+        QTest::newRow("mark-finished") << true << false;
+        QTest::newRow("exit-still-reading") << false << true;
+        QTest::newRow("exit-mark-finished") << true << true;
     }
     void nativeProgressAutosave_data() {
         QTest::addColumn<bool>("sleep");
@@ -3429,6 +3432,7 @@ private slots:
     }
     void finishChoiceSurvivesSleepAndRequiresActiveReader() {
         QFETCH(bool, markFinished);
+        QFETCH(bool, exitRequested);
         QTemporaryDir root;
         QVERIFY(root.isValid());
         auto paths = testPaths();
@@ -3460,6 +3464,15 @@ private slots:
         QTRY_VERIFY((dialog = host.window()->findChild<QWidget *>("rrFinishBook")) && dialog->isVisible());
         auto *choice = dialog->findChild<QPushButton *>(markFinished ? "rrMarkFinished" : "rrStillReading");
         QVERIFY(choice);
+        if (exitRequested) {
+            // Home can request close while a choice is already open.
+            // Repeated close requests must keep that choice unresolved.
+            QVERIFY(!host.window()->close());
+            QVERIFY(!host.window()->close());
+            QVERIFY(dialog && dialog->isVisible());
+            QVERIFY(!host.idle());
+            QCOMPARE(host.progress->current.status, 1);
+        }
         suspended = true;
         choice->click();
         QVERIFY(dialog && dialog->isVisible());
@@ -3472,9 +3485,9 @@ private slots:
         QTRY_VERIFY(dialog && dialog->isVisible());
         choice->click();
         QTRY_VERIFY(!dialog);
-        if (markFinished) {
+        if (markFinished || exitRequested) {
             QTRY_VERIFY_WITH_TIMEOUT(host.idle(), 10000);
-            QCOMPARE(host.progress->current.status, 2);
+            QCOMPARE(host.progress->current.status, markFinished ? 2 : 1);
         } else {
             QVERIFY(!host.idle());
             QCOMPARE(host.progress->current.status, 1);

@@ -10,6 +10,8 @@
 #include <functional>
 #include <memory>
 
+class QKeyEvent;
+
 namespace kobalt {
 class NativeOpening;
 class NativePublication;
@@ -24,9 +26,13 @@ struct ReaderEnvironment;
 struct CoordinatorBindings {
     bool (*enabled)();
     void (*installInput)(QObject *) = nullptr;
+    void (*goHome)() = nullptr;
     const void *(*publicationKeys)(const NativeOpening &) = nullptr;
     void (*publicationMismatch)(const NativePublication &, const QString &, const QString &) = nullptr;
 };
+// Called by Nickel's Home key filter before it clears native navigation.
+bool interceptHomeKey(QKeyEvent *event);
+
 // The retain callback runs synchronously after the coordinator's opening
 // checks. Neither the callback nor borrowed firmware arguments are retained.
 using RetainOpening = std::function<std::unique_ptr<NativeOpening>()>;
@@ -37,6 +43,7 @@ public:
     bool available() const;
     bool idleForBenchmark() const;
     bool begin(const RetainOpening &retainOpening);
+    bool handleHomeKey(QKeyEvent *event);
 
 private:
     ReaderEnvironment &environment_;
@@ -76,6 +83,8 @@ private:
     void updateOpening(kobalt::OpeningStage stage, int percent);
     unsigned generation = 0;
     bool busy = false;
+    bool homeAfterClose = false;
+    void finishHomeNavigation();
 
     void status(const QString &value, const QString &reason = {});
     void hideLoading();

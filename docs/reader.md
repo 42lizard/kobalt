@@ -86,6 +86,8 @@ All files are in `.adds/kobalt/`.
 
 The event log records startup checks, opening stages, timings, memory and save results. The startup event includes the firmware version and hardware UUID when available. The hardware UUID identifies the model, not an individual device. Startup events also record hook availability, entry and return of Nickel initialization, periodic wait state and book-opening retries. Archive inspection failures include the specific `error_code` in the `native-resource-failed` event with stage `publication-inspection`. It does not record book text, titles, file paths, serials or account data. A position fallback records the name of the chapter file inside the book. `state.json` and `session.json` can contain book identifiers, so keep them private. The log shows the last recorded operation, not a crash stack trace.
 
+On Kobo models with a physical Home button, pressing it closes Kobalt and returns to Nickel's Home screen. Kobalt saves reading progress before leaving. Any progress or finished-book choice shown during a normal exit still applies. Sleep cancels a pending return to Home and restores any exit choice after wake. In sideload mode, Nickel returns to My Books.
+
 ## Opening books
 
 The default build opens unencrypted local EPUBs selected through Nickel, regardless of their folder. This includes onboard and SD storage, hidden folders, Kobo's built-in Dropbox and Google Drive downloads, and folders used by third-party sync services. Local files can have any filename or use a symlink; Nickel's EPUB MIME type and Kobalt's archive inspection determine whether they are supported. DRM-free Kobo purchases also open, including extensionless books stored by Nickel. Embedded TrueType and OpenType fonts using standard IDPF font obfuscation are supported. This font embedding method is not DRM. Other resource encryption and unsupported font obfuscation still use Nickel. Book previews, PDFs and protected books use Nickel's reader.
@@ -246,7 +248,7 @@ Kobalt tolerates repeated manifest items when every attribute matches. Conflicti
 
 ## Hardware validation
 
-Device testing includes installation and reading on Clara Colour, Clara BW with firmware 4.45 and Libra 2 with firmware 4.38. Manual rotation and touch targets were confirmed on Clara BW with firmware 4.45. Page animations with NickelDissolve installed were confirmed on Clara BW with firmware 4.45. Dark-mode refresh quality, sleep with a PIN, rotation on other models and firmware versions, page buttons on Libra Colour and server sync still need hardware validation.
+Device testing includes installation and reading on Clara Colour, Clara BW with firmware 4.45 and Libra 2 with firmware 4.38. Manual rotation and touch targets were confirmed on Clara BW with firmware 4.45. Page animations with NickelDissolve installed were confirmed on Clara BW with firmware 4.45. Dark-mode refresh quality, sleep with a PIN, rotation on other models and firmware versions, page buttons on Libra Colour, the Home button on Touch models and server sync still need hardware validation.
 
 ## Android standalone reader
 
