@@ -192,6 +192,28 @@ void flushReader(QBackingStore *store, const QRegion &region, QWindow *target, c
             nativeFlush(store, damage, target, offset, partial);
             return;
         }
+        // Edits inside an open appearance panel change a slider row or a
+        // font sample. Partial mode updates only their changed pixels instead
+        // of flashing the whole rectangle. Showing or hiding the whole panel,
+        // and the page beside it, keep their policy.
+        const QRect controls = readerWindow->property("reader_partial_controls").toRect();
+        if (!dark && !pageTurn && !direction && compatible && !controls.isEmpty() &&
+            refreshBackend(readerWindow) == RefreshBackend::Mtk) {
+            FlushFlags partial = policies;
+            bool changed = false;
+            for (auto &entry : partial) {
+                const bool text = entry.second == ordinaryPolicy(false) ||
+                                  entry.second == ((ordinaryPolicy(false) & ~full) | heuristic);
+                if (text && controls.contains(entry.first) && entry.first != controls) {
+                    entry.second = (entry.second & ~(heuristic | full)) | partialMode;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                nativeFlush(store, damage, target, offset, partial);
+                return;
+            }
+        }
         if (pageTurn && !direction && compatible && refreshBackend(readerWindow) != RefreshBackend::Mtk &&
             policies.size() == 1 && policies[0].second == ordinaryPolicy(dark)) {
             // Older and unknown backends keep their reading policy over the whole screen.

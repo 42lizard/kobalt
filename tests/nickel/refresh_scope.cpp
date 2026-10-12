@@ -328,6 +328,25 @@ int main(int argc, char **argv) {
                 "Text and panel damage were merged or split");
         require(!submittedRegion.intersects(QRect(0, 200, reader.width(), 100)),
                 "Panel damage refreshed unchanged text above the panel");
+        // In an open appearance panel, a slider row or font sample updates
+        // its changed pixels without flashing. The page and the whole panel
+        // keep their policy.
+        const quint64 panelPartial = (lightText & ~(bit(fullAttribute))) | bit(partialAttribute);
+        reader.setProperty("reader_partial_controls", panel.geometry());
+        flush(QRegion(handle), {{handle, lightText}});
+        require(submittedFlags == FlushFlags({{handle, panelPartial}}), "A slider row inside the panel flashed");
+        flush(QRegion(text) | QRegion(handle), {{text, lightText}, {handle, lightText}});
+        require(submittedFlags.contains({text, lightText}) && submittedFlags.contains({handle, panelPartial}),
+                "The page beside a panel edit changed policy, or the edit flashed");
+        flush(QRegion(panel.geometry()), {{panel.geometry(), lightText}});
+        require(submittedFlags == FlushFlags({{panel.geometry(), lightText}}),
+                "Showing the whole panel lost its policy");
+        reader.setProperty("reader_dark", true);
+        flush(QRegion(handle), {{handle, darkOrdinary}}); // Entering dark mode cleans the screen once.
+        flush(QRegion(handle), {{handle, darkOrdinary}});
+        require(submittedFlags == FlushFlags({{handle, darkOrdinary}}), "A dark panel edit changed policy");
+        reader.setProperty("reader_dark", false);
+        reader.setProperty("reader_partial_controls", QRect());
     }
 
     // Adjacent widget rectangles can become one QRegion rectangle while the

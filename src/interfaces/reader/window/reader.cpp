@@ -254,6 +254,12 @@ bool Reader::event(QEvent *event) {
                         !acknowledgments->isVisible() && !bookmarkList->isVisible() && !lightPopup->isVisible() &&
                         !busyNotice->isVisible() && !syncDialog && !finishDialog && !bookmarkErrorDialog &&
                         !services.suspended() && page->image.text("kobalt.animation_text_only") == "true");
+        // Text and Layout hold only text and line controls. Changes inside
+        // them can use a partial refresh; see the display flush.
+        setProperty("reader_partial_controls",
+                    appearanceEdit.panelOpen() && menu->isVisible() && !busyNotice->isVisible() && !choices->isVisible()
+                        ? QRect(menu->mapTo(this, QPoint()), menu->size())
+                        : QRect());
     }
     return QWidget::event(event);
 }
