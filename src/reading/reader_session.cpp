@@ -572,10 +572,14 @@ void ReaderSession::openPreview(const ReaderSession &source, QSize size, std::fu
     QPointer<ReaderSession> guard(this);
     const auto positions = positions_;
     auto engine = model, book = source.model;
+    const auto latest = newest;
     kobalt::qt::invoke(
         engineWorker(),
-        [guard, engine, book, size, finished, lease, job, positions] {
+        [guard, engine, book, size, finished, lease, job, positions, latest] {
             EngineJob activity;
+            if (latest->load() != job) {
+                return;
+            }
             QElapsedTimer timer;
             timer.start();
             diagnostic("preview-start");
@@ -585,7 +589,9 @@ void ReaderSession::openPreview(const ReaderSession &source, QSize size, std::fu
                 result.error = strings::get("error.opening_interrupted");
             else if (!engine->openPreview(*book, size, &error))
                 result.error = error;
-            else
+            else if (latest->load() != job) {
+                return;
+            } else
                 result = capture(*engine, positions, false);
             diagnostic("preview-end", {{"elapsed_ms", double(timer.elapsed())}, {"failed", !result.error.isEmpty()}});
             kobalt::qt::invoke(
@@ -1238,9 +1244,23 @@ void ReaderSession::dispatch(bool pageTurn) {
     QPointer<ReaderSession> guard(this);
     const auto lease = lease_;
     const auto latest = newest;
-    const auto progress = [guard, job, lease, latest](OpeningStage stage, int percent) {
+    const auto progress = [guard, job, lease, latest, painted = QElapsedTimer(), previousStage = OpeningStage::Styles,
+                           previousPercent = -1](OpeningStage stage, int percent) mutable {
         if (latest->load() != job || !lease || lease->revoked())
             return;
+        percent = qBound(0, percent, 100);
+        const bool changedStage = stage != previousStage;
+        if (int(stage) < int(previousStage) || (!changedStage && percent <= previousPercent)) {
+            return;
+        }
+        // Throttle on the worker before queuing GUI work. Phase boundaries and
+        // completion stay immediate, as they do while opening a book.
+        if (!changedStage && percent != 100 && painted.isValid() && painted.elapsed() < 200) {
+            return;
+        }
+        previousStage = stage;
+        previousPercent = percent;
+        painted.start();
         kobalt::qt::invoke(
             qApp,
             [guard, job, lease, stage, percent] {

@@ -49,6 +49,7 @@ private:
     QString error;
     QLabel *message, *chapterCaption, *chapterPage, *chapterTitle;
     QString title;
+    int progressWeight = -1;
     ui::PagerBar *pager;
     ChapterBars *bars;
     StatsCell *chapterCell, *bookCell, *sessionCell;
@@ -57,6 +58,6 @@ private:
     bool paged() const;
     int chartTop() const;
     void arrange();
-    void redraw();
+    void redraw(bool paging = false);
 };
 }

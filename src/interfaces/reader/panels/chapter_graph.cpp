@@ -230,13 +230,13 @@ ChapterGraph::ChapterGraph(QWidget *parent) : Panel(parent, Qt::BottomEdge) {
     pager->next->setAccessibleName(strings::get("chapter_contents.next_chapters"));
     connect(pager->previous, &QPushButton::clicked, this, [this] {
         first = qMax(0, first - capacity());
-        redraw();
+        redraw(true);
         if (changed)
             changed();
     });
     connect(pager->next, &QPushButton::clicked, this, [this] {
         first += capacity();
-        redraw();
+        redraw(true);
         if (changed)
             changed();
     });
@@ -249,7 +249,12 @@ ChapterGraph::ChapterGraph(QWidget *parent) : Panel(parent, Qt::BottomEdge) {
 }
 void ChapterGraph::setProgress(const QString &title, int chapterPage, int chapterPages, int nextChapterPages, int page,
                                int pages) {
+    if (this->title == title && progress.chapterPage == chapterPage && progress.chapterPages == chapterPages &&
+        progress.nextChapterPages == nextChapterPages && progress.page == page && progress.pages == pages &&
+        progressWeight == ui::interfaceWeight())
+        return;
     this->title = title;
+    progressWeight = ui::interfaceWeight();
     progress = {chapterPage, chapterPages, nextChapterPages, page, pages};
     chapterTitle->setAccessibleName(strings::get("chapter_graph.current_chapter").arg(title));
     this->chapterPage->setText(
@@ -348,6 +353,17 @@ int ChapterGraph::graphPages() const {
 }
 void ChapterGraph::setData(QVector<ChapterLink> chapters, ChapterSelection selection, bool ready,
                            const QString &error) {
+    const bool sameChapters = chapters.size() == this->chapters.size() &&
+                              std::equal(chapters.cbegin(), chapters.cend(), this->chapters.cbegin(),
+                                         [](const ChapterLink &left, const ChapterLink &right) {
+                                             return left.title == right.title && left.position == right.position &&
+                                                    left.page == right.page && left.depth == right.depth &&
+                                                    left.words == right.words;
+                                         });
+    if (sameChapters && selection.current == this->selection.current && selection.next == this->selection.next &&
+        selection.page == this->selection.page && selection.pages == this->selection.pages && ready == this->ready &&
+        error == this->error)
+        return;
     const bool moved = selection.current != this->selection.current || chapters.size() != this->chapters.size();
     this->chapters = std::move(chapters);
     this->selection = selection;
@@ -406,7 +422,7 @@ void ChapterGraph::arrange() {
     }
 }
 
-void ChapterGraph::redraw() {
+void ChapterGraph::redraw(bool paging) {
     first = qBound(0, first / capacity(), graphPages() - 1) * capacity();
     const bool available = ready && error.isEmpty() && !chapters.isEmpty();
     bars->setVisible(available);
@@ -430,6 +446,7 @@ void ChapterGraph::redraw() {
                                 .arg(qMin(first + capacity(), int(chapters.size())))
                                 .arg(chapters.size()));
     bars->update();
-    update();
+    if (!paging)
+        update();
 }
 }

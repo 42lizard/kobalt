@@ -67,8 +67,10 @@ void Reader::openSettings() {
     resetDefaults->setEnabled(true);
     // Keep the typography draft until Settings is applied.
     menu->hide();
+    const bool showingTopControls = !topControls->isVisible();
     topControls->show();
-    topControls->raise();
+    if (showingTopControls)
+        topControls->raise();
     bottomControls->hide();
     choices->hide();
     settingsError->clear();
@@ -114,6 +116,12 @@ void Reader::applySettings() {
         return;
     // Leaving an unanswered confirmation must not select or save defaults.
     static_cast<SettingsPanel *>(general)->dismissRestore();
+    // Edits made before the preview opened have no session yet. Apply them
+    // together with these settings once the preview holds them.
+    if (appearanceEdit.queued() && appearanceEdit.previewState() == AppearanceEditSession::PreviewState::Opening) {
+        appearanceEdit.deferApply();
+        return;
+    }
     auto next = preferences;
     next["show_clock"] = clockOption->isChecked();
     next["bionic_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
@@ -168,7 +176,8 @@ void Reader::applySettings() {
     chapterGraph->setDense(preferences.value("dense_stats_chart").toBool(false));
     pinStats = preferences.value("pin_stats").toBool(false);
     page->clockText = services.clock();
-    auto settings = appearanceEdit.ready() ? appearanceEdit.preview()->state() : model->state();
+    auto settings =
+        appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview()->requestedState() : model->state();
     settings["dark_mode"] = darkOption->isChecked();
     settings["smooth_images"] = smoothOption->isChecked();
     settings["bionic_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
@@ -181,7 +190,7 @@ void Reader::applySettings() {
     applyingText = model->busy();
     if (appearanceEdit.destination() == AppearanceDestination::None)
         appearanceEdit.request(AppearanceDestination::Controls);
-    appearanceEdit.beginApply(!model->busy() && appearanceEdit.ready()
+    appearanceEdit.beginApply(!model->busy() && appearanceEdit.edited() && appearanceEdit.ready()
                                   ? kobalt::reader::AppearanceEditSession::Retention::Reuse
                                   : kobalt::reader::AppearanceEditSession::Retention::Release);
     header->setGeometry(0, 0, width(), page->topHeight());
@@ -296,7 +305,9 @@ void Reader::registerPickerFonts(const QString &family) {
         if (!family.isEmpty() && font.family != family)
             continue;
         if (family.isEmpty() && font.origin == FontOrigin::Interface) {
-            const auto state = appearanceEdit.preview()->state();
+            const auto state = appearanceEdit.edited() && appearanceEdit.ready()
+                                   ? appearanceEdit.preview()->requestedState()
+                                   : model->state();
             if (font.family != supplementalFontFamily(state.value("language").toString()) &&
                 font.family != preferences.value("default_font_face").toString(kobalt::defaultFontFace) &&
                 font.family != state.value("font_face").toString())
@@ -326,12 +337,19 @@ void Reader::resizeText() {
                        false);
     // The chapter preview is the visible page while editing. Reflow the
     // whole book once when applying the final size and appearance.
-    if (appearanceEdit.preview())
-        appearanceEdit.preview()->resize(viewport);
-    else
+    bool resizedPreview = false;
+    if (appearanceEdit.panelOpen()) {
+        if (viewport != appearanceViewport) {
+            mutateAppearance([viewport](ReaderSession &preview) {
+                preview.resize(viewport);
+            });
+            resizedPreview = true;
+        }
+    } else
         model->resize(viewport);
     applyingText = model->busy();
-    refresh();
+    if (!resizedPreview)
+        refresh();
     kobalt::diagnostic("reader-resize-refresh-return",
                        {{"viewport_width", viewport.width()},
                         {"viewport_height", viewport.height()},
@@ -352,7 +370,6 @@ void Reader::selectPanel(int index) {
         applySettings();
     } else if (menu->isVisible() && panels->currentIndex() == index) {
         finishPreview();
-        refresh();
     } else
         openPanel(index);
 }
@@ -369,49 +386,97 @@ void Reader::openPanel(int index) {
     if (index == 0 && !model->fontFace().isEmpty())
         registerPickerFonts(model->fontFace());
     panels->setCurrentIndex(index);
-    if (!appearanceEdit.preview()) {
+    if (!menu->isVisible() && !appearanceEdit.preview()) {
+        warmAttemptGeneration = 0;
+    }
+    appearanceEdit.setPanelOpen(true);
+    appearanceViewport = QSize(width(), height() - page->topHeight() - page->bottomHeight());
+    appearanceEdit.cancelNavigation();
+    general->hide();
+    choices->hide();
+    bottomControls->hide();
+    topControls->show();
+    // Finish layout while hidden so showing the panel does not invalidate
+    // its previous position in the reading area. Include variable-font rows.
+    syncAppearanceControls(false);
+    if (navigation)
+        menu->setGeometry(navigation->panelBounds(size(), menu->height()));
+    menu->show();
+    if (navigation)
+        navigation->stackPanel(menu);
+    else
+        menu->raise();
+    menu->layout()->activate();
+    refresh();
+}
+
+void Reader::schedulePreviewWarm() {
+    if (!appearanceEdit.panelOpen() || !menu->isVisible() || general->isVisible() || appearanceEdit.preview() ||
+        model->busy() || lifecycleHidden || exitPending)
+        return;
+    const quint64 panelGeneration = appearanceEdit.panelGeneration();
+    if (warmAttemptGeneration == panelGeneration || warmScheduledGeneration == panelGeneration)
+        return;
+    warmScheduledGeneration = panelGeneration;
+    QTimer::singleShot(0, this, [this, panelGeneration] {
+        if (warmScheduledGeneration == panelGeneration)
+            warmScheduledGeneration = 0;
+        if (appearanceEdit.panelGeneration() != panelGeneration || !appearanceEdit.panelOpen() || !menu->isVisible() ||
+            general->isVisible() || appearanceEdit.preview() || model->busy() || lifecycleHidden || exitPending)
+            return;
+        warmAttemptGeneration = panelGeneration;
         appearanceEdit.open(
             *model, QSize(width(), height() - page->topHeight() - page->bottomHeight()),
             [this] {
                 refresh();
             },
             [this] {
+                if (!appearanceEdit.edited() && !appearanceEdit.ready()) {
+                    appearanceEdit.resetPreview();
+                    appearanceEdit.clearError();
+                    return;
+                }
                 if (exitPending || appearanceEdit.finishPending() || appearanceEdit.externalDestination())
-                    finishPreview();
+                    resumeAppearanceApply();
                 else
-                    openPanel(appearanceEdit.appearanceDestination() ? appearanceEdit.panelIndex()
-                                                                     : panels->currentIndex());
+                    refresh();
             });
-        return;
-    }
-    if (!appearanceEdit.ready() && appearanceEdit.preview()->busy())
-        return;
-    // Present the controls once their preview is ready. Painting disabled
-    // controls first would immediately require another colour refresh.
-    appearanceEdit.cancelNavigation();
-    general->hide();
-    choices->hide();
-    bottomControls->hide();
-    topControls->show();
-    topControls->raise();
-    menu->setGeometry(m::panel::appearance(size(), index == 1));
-    menu->show();
-    menu->raise();
-    menu->layout()->activate();
+    });
+}
+
+void Reader::mutateAppearance(std::function<void(ReaderSession &)> operation) {
+    appearanceViewport = QSize(width(), height() - page->topHeight() - page->bottomHeight());
+    appearanceEdit.mutate(
+        *model, QSize(width(), height() - page->topHeight() - page->bottomHeight()),
+        [this] {
+            refresh();
+        },
+        [this] {
+            if (exitPending || appearanceEdit.finishPending() || appearanceEdit.externalDestination())
+                resumeAppearanceApply();
+            else
+                refresh();
+        },
+        std::move(operation));
     refresh();
 }
 
 void Reader::finishPreview() {
     if (model->temporaryTypography())
         return;
-    if (!appearanceEdit.preview())
+    if (!appearanceEdit.panelOpen())
         return;
-    if (!appearanceEdit.ready() && !appearanceEdit.error().isEmpty()) {
+    if (appearanceEdit.preview() && !appearanceEdit.edited()) {
+        appearanceEdit.resetPreview();
+        appearanceEdit.clearError();
+    }
+    if (appearanceEdit.preview() && !appearanceEdit.ready() && !appearanceEdit.error().isEmpty()) {
         // A failed preview has no settings to apply. Dismiss it without
         // trapping the reader now that panels have no Cancel action.
         orientation->configure(preferences);
         (page->showClock ? clockOption : clockHideOption)->setChecked(true);
         appearanceEdit.resetPreview();
+        appearanceEdit.setPanelOpen(false);
         appearanceEdit.cancelDeferredApply();
         choices->hide();
         menu->hide();
@@ -425,7 +490,9 @@ void Reader::finishPreview() {
         refresh();
         return;
     }
-    if (!appearanceEdit.ready() || appearanceEdit.preview()->busy()) {
+    // A rendering preview already holds the newest request. Only edits made
+    // before it opened must wait for it.
+    if (appearanceEdit.preview() && !appearanceEdit.ready()) {
         appearanceEdit.deferApply();
         return;
     }
@@ -444,8 +511,11 @@ void Reader::finishPreview() {
     preferences = next;
     appearanceEdit.clearError();
     page->showClock = clockOption->isChecked();
-    model->apply(appearanceEdit.preview()->state(),
-                 QSize(width(), height() - page->topHeight() - page->bottomHeight()));
+    const QSize viewport(width(), height() - page->topHeight() - page->bottomHeight());
+    if (appearanceEdit.ready())
+        model->apply(appearanceEdit.preview()->requestedState(), viewport);
+    else if (model->image().size() != viewport)
+        model->apply(model->state(), viewport);
     header->setGeometry(0, 0, width(), page->topHeight());
     header->setVisible(page->topHeight() > 0);
     if (appearanceEdit.destination() == AppearanceDestination::None)
@@ -453,6 +523,14 @@ void Reader::finishPreview() {
     applyingText = model->busy();
     appearanceEdit.beginApply();
     refresh();
+}
+
+// Continues a Settings or panel apply that waited for the preview to open.
+void Reader::resumeAppearanceApply() {
+    if (general->isVisible())
+        applySettings();
+    else
+        finishPreview();
 }
 
 // Both edges follow one setting. The right edge needs adjustable warmth.

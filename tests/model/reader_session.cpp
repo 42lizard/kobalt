@@ -357,11 +357,15 @@ int run(int argc, char **argv) {
         renderReports.clear();
         rendered.exec();
         bool formatted = false;
+        int overall = 0;
         for (const auto &report : renderReports) {
             if (!report.active)
                 continue;
             require(report.revision == latestRender.revision && report.percent >= 0 && report.percent <= 100,
                     "Stale relayout progress reached the replacement job");
+            require(report.overallPercent() >= overall && report.overallPercent() <= 100,
+                    "Relayout progress moved backwards at a phase boundary");
+            overall = report.overallPercent();
             formatted |= report.stage == OpeningStage::Pages;
         }
         require(formatted && !session->renderProgress().active,

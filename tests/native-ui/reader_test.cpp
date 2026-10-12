@@ -6,6 +6,12 @@
 #include "interfaces/reader/ui/controls/paged_text.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "reader_host.h"
+#include "host_presentation.h"
+#include "interfaces/reader/views/opening.h"
+#include "interfaces/reader/panels/chapter_graph.h"
+#include "interfaces/reader/panels/bookmark_list.h"
+#include "interfaces/reader/panels/choice_screen.h"
+#include "interfaces/reader/settings/acknowledgments.h"
 #include "reader_inputs.h"
 #include "host_fixture.h"
 #include "host_style.h"
@@ -31,6 +37,7 @@
 #include "storage/reader_storage.h"
 #include "storage/bookmark_store.h"
 #include "reading/reading_density.h"
+#include "engine/crengine/engine_activity.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include <QApplication>
 #include <QKeyEvent>
@@ -52,6 +59,7 @@
 #include <QLabel>
 #include <QAbstractSlider>
 #include <QSlider>
+#include <QStyle>
 #include <QCryptographicHash>
 #include <QContextMenuEvent>
 #include <QTextDocument>
@@ -184,11 +192,35 @@ struct CloseHost {
 class PaintRegions final : public QObject {
 public:
     QRegion painted;
+    int count = 0;
+    QStringList widgets;
+    QWidget *coordinateRoot = nullptr;
 
 protected:
-    bool eventFilter(QObject *, QEvent *event) override {
-        if (event->type() == QEvent::Paint)
-            painted += static_cast<QPaintEvent *>(event)->region();
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() == QEvent::Paint) {
+            ++count;
+            const auto region = static_cast<QPaintEvent *>(event)->region();
+            painted += coordinateRoot
+                           ? region.translated(static_cast<QWidget *>(object)->mapTo(coordinateRoot, QPoint()))
+                           : region;
+            widgets.append(object->objectName());
+        }
+        return false;
+    }
+};
+class PanelPlacement final : public QObject {
+public:
+    QRect shown;
+    int visibleMoves = 0;
+
+protected:
+    bool eventFilter(QObject *object, QEvent *event) override {
+        auto *widget = static_cast<QWidget *>(object);
+        if (event->type() == QEvent::Show)
+            shown = widget->geometry();
+        if (event->type() == QEvent::Move && widget->isVisible())
+            ++visibleMoves;
         return false;
     }
 };
@@ -244,6 +276,54 @@ bool click(test::ReaderCanvas &canvas, QWidget *widget) {
     if (receiver != widget && (!receiver || !widget->isAncestorOf(receiver)))
         return false;
     return clickAt(canvas, point);
+}
+int sliderX(const QSlider *slider, int value) {
+    const int inset = ui::metrics::control::sliderInset;
+    return inset + QStyle::sliderPositionFromValue(slider->minimum(), slider->maximum(), value,
+                                                   qMax(1, slider->width() - 2 * inset));
+}
+// One continuous press, move and release through the window, as a finger
+// drag arrives on the device. Events go through Qt's grab and enabled checks.
+void drag(test::ReaderCanvas &canvas, QSlider *slider, int from, int to, const std::function<void()> &moved = {}) {
+    const QPoint start = slider->mapTo(canvas.surface(), QPoint(sliderX(slider, from), slider->height() / 2));
+    canvas.ensureVisible(start.x(), start.y(), 30, 30);
+    QCoreApplication::processEvents();
+    const auto at = [&](int value) {
+        return canvas.surface()->mapTo(
+            &canvas, slider->mapTo(canvas.surface(), QPoint(sliderX(slider, value), slider->height() / 2)));
+    };
+    QTest::mousePress(canvas.windowHandle(), Qt::LeftButton, Qt::NoModifier, at(from));
+    QCoreApplication::processEvents();
+    const int direction = to >= from ? 1 : -1;
+    for (int value = from; value != to + direction; value += direction) {
+        QTest::mouseMove(canvas.windowHandle(), at(value));
+        QCoreApplication::processEvents();
+        if (moved)
+            moved();
+    }
+    QTest::mouseRelease(canvas.windowHandle(), Qt::LeftButton, Qt::NoModifier, at(to));
+}
+// The same gesture by track position, for sliders whose stops are evenly
+// spaced rather than proportional to their values.
+void dragAcross(test::ReaderCanvas &canvas, QSlider *slider, qreal from, qreal to,
+                const std::function<void()> &moved = {}) {
+    const int inset = ui::metrics::control::sliderInset;
+    const auto at = [&](qreal fraction) {
+        const QPoint local(inset + qRound(fraction * (slider->width() - 2 * inset)), slider->height() / 2);
+        return canvas.surface()->mapTo(&canvas, slider->mapTo(canvas.surface(), local));
+    };
+    const QPoint start = slider->mapTo(canvas.surface(), QPoint(slider->width() / 2, slider->height() / 2));
+    canvas.ensureVisible(start.x(), start.y(), slider->width() / 2 + 30, 30);
+    QCoreApplication::processEvents();
+    QTest::mousePress(canvas.windowHandle(), Qt::LeftButton, Qt::NoModifier, at(from));
+    QCoreApplication::processEvents();
+    for (int step = 1; step <= 10; ++step) {
+        QTest::mouseMove(canvas.windowHandle(), at(from + (to - from) * step / 10));
+        QCoreApplication::processEvents();
+        if (moved)
+            moved();
+    }
+    QTest::mouseRelease(canvas.windowHandle(), Qt::LeftButton, Qt::NoModifier, at(to));
 }
 bool captureSearchMetrics(QWidget *result, const QString &query) {
     for (auto *label : result->findChildren<QLabel *>()) {
@@ -352,6 +432,169 @@ private slots:
         }
 #endif
     }
+    void navigationCompositionAndRelease() {
+        QWidget owner;
+        auto *toolbar = new ui::Panel(&owner, Qt::BottomEdge);
+        auto *rows = new QVBoxLayout(toolbar);
+        auto *exit = new QPushButton(toolbar);
+        auto *settings = new ui::Button(toolbar), *bookmarks = new ui::Button(toolbar);
+        settings->setPaintMode(ui::ButtonPaintMode::ToolbarSquare);
+        bookmarks->setPaintMode(ui::ButtonPaintMode::OutlinedAction);
+        auto *clock = new QLabel(toolbar), *session = new QLabel(toolbar), *battery = new QLabel(toolbar);
+        rows->addWidget(exit);
+        rows->addWidget(settings);
+        rows->addWidget(bookmarks);
+        settings->setStyleSheet("color:red;");
+        bookmarks->setStyleSheet("color:blue;");
+        session->setStyleSheet("color:green;");
+        const QString settingsStyle = settings->styleSheet(), bookmarksStyle = bookmarks->styleSheet(),
+                      sessionStyle = session->styleSheet();
+        ToolbarComposition controls{toolbar, rows, exit, settings, bookmarks, clock, session, battery};
+        QPointer<QWidget> retainedSettings(settings);
+        {
+            ::kobalt::reader::Navigation navigation(&owner, controls);
+            QVERIFY(!rows->isEnabled());
+            QCOMPARE(settings->paintMode(), ui::ButtonPaintMode::ToolbarCell);
+            QCOMPARE(bookmarks->paintMode(), ui::ButtonPaintMode::ToolbarCell);
+        }
+        QVERIFY(retainedSettings);
+        QVERIFY(rows->isEnabled());
+        QCOMPARE(settings->paintMode(), ui::ButtonPaintMode::ToolbarSquare);
+        QCOMPARE(bookmarks->paintMode(), ui::ButtonPaintMode::OutlinedAction);
+        QCOMPARE(settings->styleSheet(), settingsStyle);
+        QCOMPARE(bookmarks->styleSheet(), bookmarksStyle);
+        QCOMPARE(session->styleSheet(), sessionStyle);
+        QCOMPARE(settings->size(),
+                 QSize(ui::metrics::control::toolbarButtonSize, ui::metrics::control::toolbarButtonSize));
+    }
+    void delayedProgressPaintsAfterTheEventLoop() {
+        QWidget owner;
+        owner.resize(600, 800);
+        owner.show();
+        ui::ModalOverlay loading(&owner);
+        loading.card()->message("Applying appearance changes", "rrUpdatingText");
+        loading.fitCard();
+        QVERIFY(loading.progressUpdateRect(35, "Applying appearance changes").isEmpty());
+        loading.setDelayedProgress(true, 1100, 20, "Applying appearance changes");
+        QCoreApplication::processEvents();
+        auto *bar = loading.findChild<QProgressBar *>("rrApplyingProgress");
+        QVERIFY(bar);
+        QVERIFY(bar->isVisible());
+        QCOMPARE(loading.progressUpdateRect(35, "Applying appearance changes"),
+                 QRect(bar->mapTo(loading.window(), QPoint()), bar->size()));
+        QVERIFY(loading.progressUpdateRect(20, "Applying appearance changes").isEmpty());
+        QVERIFY(loading.progressUpdateRect(35, "Updating page layout").isEmpty());
+        PaintRegions paints;
+        bar->installEventFilter(&paints);
+        PaintRegions ownerPaints;
+        owner.installEventFilter(&ownerPaints);
+
+        loading.setDelayedProgress(true, 1100, 35, "Applying appearance changes");
+        QCOMPARE(bar->value(), 35);
+        QCOMPARE(paints.count, 0);
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 1);
+        QVERIFY((ownerPaints.painted - QRegion(QRect(bar->mapTo(&owner, QPoint()), bar->size()))).isEmpty());
+
+        paints.count = 0;
+        paints.painted = {};
+        loading.setDelayedProgress(true, 1100, 35, "Applying appearance changes");
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 0);
+
+        loading.setDelayedProgress(true, 1100, 50, "Applying appearance changes");
+        loading.setDelayedProgress(true, 1100, 65, "Applying appearance changes");
+        QCOMPARE(bar->value(), 65);
+        QCOMPARE(paints.count, 0);
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 1);
+
+        owner.setUpdatesEnabled(false);
+        loading.setDelayedProgress(true, 1100, 80, "Applying appearance changes");
+        owner.setUpdatesEnabled(true);
+        QVERIFY(bar->updatesEnabled());
+        QCoreApplication::processEvents();
+
+        paints.count = 0;
+        loading.setDelayedProgress(false, 1100, 100);
+        QCOMPARE(bar->value(), 0);
+        QVERIFY(!bar->isVisible());
+        QCOMPARE(paints.count, 0);
+        QVERIFY(loading.progressUpdateRect(35, "Applying appearance changes").isEmpty());
+    }
+    void unchangedLightNoticeDoesNotRepaint() {
+        QWidget owner;
+        owner.resize(600, 800);
+        ui::LightSwipeNotice notice(&owner);
+        notice.centerIn(owner.size());
+        notice.setLevel(false, 100);
+        owner.show();
+        notice.show();
+        QCoreApplication::processEvents();
+        PaintRegions paints;
+        notice.installEventFilter(&paints);
+        for (auto *widget : notice.findChildren<QWidget *>())
+            widget->installEventFilter(&paints);
+        notice.setLevel(false, 101);
+        notice.setLevel(false, 100);
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 0);
+        notice.setLevel(true, 100);
+        QCoreApplication::processEvents();
+        QVERIFY(paints.count > 0);
+        paints.count = 0;
+        notice.setLevel(true, -1);
+        QCoreApplication::processEvents();
+        QVERIFY(paints.count > 0);
+        paints.count = 0;
+        notice.setLevel(true, 0);
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 0);
+        owner.setProperty("reader_dark", true);
+        notice.setLevel(true, 0);
+        auto *caption = notice.findChild<QLabel *>("rrLightSwipeCaption");
+        QVERIFY(caption);
+        QVERIFY(caption->property("reader_style").toString().contains("#aaaaaa"));
+    }
+    void appearanceOpeningDoesNotRepaintToolbar_data() {
+        QTest::addColumn<QString>("buttonName");
+        QTest::newRow("text") << "rrNavText";
+        QTest::newRow("layout") << "rrNavLayout";
+        QTest::newRow("stats") << "rrNavStats";
+        QTest::newRow("font-picker-back") << "rrFontClose";
+    }
+    void appearanceOpeningDoesNotRepaintToolbar() {
+        QFETCH(QString, buttonName);
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(nativeSize + QSize(40, 40));
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        if (buttonName == "rrFontClose") {
+            host.window()->findChild<QPushButton *>("rrNavText")->click();
+            host.window()->findChild<QPushButton *>("rrFont")->click();
+        }
+        auto *toolbar = host.window()->findChild<QWidget *>("rrControlsTop");
+        auto *button = host.window()->findChild<QPushButton *>(buttonName);
+        QVERIFY(toolbar);
+        QVERIFY(button);
+        QCoreApplication::processEvents();
+        PaintRegions paints;
+        toolbar->installEventFilter(&paints);
+        for (auto *widget : toolbar->findChildren<QWidget *>())
+            widget->installEventFilter(&paints);
+        // Measure the view transition without button press/release feedback.
+        button->click();
+        QVERIFY(!host.session()->busy());
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 0);
+    }
     void openingProgressPaintsAfterTheEventLoop() {
         QWidget owner;
         owner.resize(600, 800);
@@ -410,42 +653,110 @@ private slots:
         QCoreApplication::processEvents();
         QCOMPARE(calls, 1);
     }
-    void navigationCompositionAndRelease() {
+    void panelPaginationKeepsStaticLabelsUnpainted_data() {
+        QTest::addColumn<QString>("kind");
+        QTest::newRow("stats") << "stats";
+        QTest::newRow("chapters") << "chapters";
+        QTest::newRow("bookmarks") << "bookmarks";
+        QTest::newRow("acknowledgments") << "acknowledgments";
+        QTest::newRow("license") << "license";
+    }
+    void panelPaginationKeepsStaticLabelsUnpainted() {
+        QFETCH(QString, kind);
         QWidget owner;
-        auto *toolbar = new ui::Panel(&owner, Qt::BottomEdge);
-        auto *rows = new QVBoxLayout(toolbar);
-        auto *exit = new QPushButton(toolbar);
-        auto *settings = new ui::Button(toolbar), *bookmarks = new ui::Button(toolbar);
-        settings->setPaintMode(ui::ButtonPaintMode::ToolbarSquare);
-        bookmarks->setPaintMode(ui::ButtonPaintMode::OutlinedAction);
-        auto *clock = new QLabel(toolbar), *session = new QLabel(toolbar), *battery = new QLabel(toolbar);
-        rows->addWidget(exit);
-        rows->addWidget(settings);
-        rows->addWidget(bookmarks);
-        settings->setStyleSheet("color:red;");
-        bookmarks->setStyleSheet("color:blue;");
-        session->setStyleSheet("color:green;");
-        const QString settingsStyle = settings->styleSheet(), bookmarksStyle = bookmarks->styleSheet(),
-                      sessionStyle = session->styleSheet();
-        ToolbarComposition controls{toolbar, rows, exit, settings, bookmarks, clock, session, battery};
-        QPointer<QWidget> retainedSettings(settings);
-        {
-            ::kobalt::reader::Navigation navigation(&owner, controls);
-            QVERIFY(!rows->isEnabled());
-            QCOMPARE(settings->paintMode(), ui::ButtonPaintMode::ToolbarCell);
-            QCOMPARE(bookmarks->paintMode(), ui::ButtonPaintMode::ToolbarCell);
+        owner.resize(nativeSize);
+        QWidget *panel = nullptr;
+        QString prefix, titleName;
+        if (kind == "stats") {
+            auto *graph = new ChapterGraph(&owner);
+            graph->resize(1072, ui::metrics::chapters::graphHeight);
+            graph->setDense(false);
+            QVector<ChapterLink> chapters;
+            for (int i = 0; i < 25; ++i)
+                chapters.append({QString::number(i), QString::number(i), i, 0, 100 * (i + 1)});
+            graph->setData(chapters, {}, true, {});
+            graph->setProgress("A chapter", 1, 10, 20, 0, 100);
+            graph->open();
+            panel = graph;
+            prefix = "rrGraph";
+            titleName = "rrGraphChapterTitle";
+        } else if (kind == "chapters") {
+            auto *contents = new ChapterContents(&owner);
+            contents->resize(1072, 900);
+            QVector<Choice> choices;
+            for (int i = 0; i < 25; ++i)
+                choices.append({QString::number(i), QString::number(i), QString("choice%1").arg(i)});
+            contents->showChapters("Book", choices, {});
+            panel = contents;
+            prefix = "rrContents";
+            titleName = "rrContentsTitle";
+        } else if (kind == "acknowledgments" || kind == "license") {
+            auto *acknowledgments = new Acknowledgments(&owner);
+            acknowledgments->resize(1072, 900);
+            acknowledgments->open();
+            if (kind == "license") {
+                auto *entry = acknowledgments->findChild<QPushButton *>("rrAcknowledgment0");
+                QVERIFY(entry);
+                entry->click();
+            }
+            panel = acknowledgments;
+            prefix = "rrAcknowledgments";
+            titleName = "rrAcknowledgmentsTitle";
+        } else {
+            auto *bookmarks = new BookmarkList(&owner);
+            bookmarks->resize(1072, 900);
+            QVector<BookmarkRow> rows;
+            for (int i = 0; i < 25; ++i)
+                rows.append({QString::number(i), QString("Chapter %1").arg(i), "An excerpt", {}, i, false});
+            bookmarks->showBookmarks(rows, {});
+            panel = bookmarks;
+            prefix = "rrBookmarkList";
+            titleName = "rrBookmarkListTitle";
         }
-        QVERIFY(retainedSettings);
-        QVERIFY(rows->isEnabled());
-        QCOMPARE(settings->paintMode(), ui::ButtonPaintMode::ToolbarSquare);
-        QCOMPARE(bookmarks->paintMode(), ui::ButtonPaintMode::OutlinedAction);
-        QCOMPARE(settings->styleSheet(), settingsStyle);
-        QCOMPARE(bookmarks->styleSheet(), bookmarksStyle);
-        QCOMPARE(session->styleSheet(), sessionStyle);
-        QCOMPARE(settings->size(),
-                 QSize(ui::metrics::control::toolbarButtonSize, ui::metrics::control::toolbarButtonSize));
+        owner.show();
+        QCoreApplication::processEvents();
+        auto *title = panel->findChild<QWidget *>(titleName);
+        auto *next = panel->findChild<QPushButton *>(prefix + "Next");
+        QVERIFY(title);
+        QVERIFY(next);
+        QVERIFY(next->isEnabled());
+        PaintRegions paints;
+        title->installEventFilter(&paints);
+        if (kind == "stats")
+            for (const auto *name : {"rrGraphChapterCell", "rrGraphBookCell", "rrGraphSessionCell"}) {
+                auto *cell = panel->findChild<QWidget *>(name);
+                QVERIFY(cell);
+                cell->installEventFilter(&paints);
+            }
+        PaintRegions damage;
+        damage.coordinateRoot = panel;
+        panel->installEventFilter(&damage);
+        for (auto *widget : panel->findChildren<QWidget *>())
+            widget->installEventFilter(&damage);
+        auto before = panel->grab().toImage();
+        do {
+            paints.count = 0;
+            damage.painted = {};
+            next->click();
+            QCoreApplication::processEvents();
+            QCOMPARE(paints.count, 0);
+            const auto changed = damage.painted;
+            const auto after = panel->grab().toImage();
+            QVERIFY(before != after);
+            for (int y = 0; y < after.height(); ++y)
+                for (int x = 0; x < after.width(); ++x)
+                    if (before.pixel(x, y) != after.pixel(x, y))
+                        QVERIFY(changed.contains(QPoint(x, y)));
+            before = after;
+        } while (next->isEnabled());
+    }
+    void navigationReplayDoesNotInvalidateRules_data() {
+        QTest::addColumn<bool>("bluetoothActive");
+        QTest::newRow("plain") << false;
+        QTest::newRow("bluetooth") << true;
     }
     void navigationReplayDoesNotInvalidateRules() {
+        QFETCH(bool, bluetoothActive);
         QWidget owner;
         owner.resize(600, 900);
         auto *toolbar = new ui::Panel(&owner);
@@ -454,7 +765,11 @@ private slots:
         auto *settings = new ui::Button(toolbar), *bookmarks = new ui::Button(toolbar);
         auto *clock = new QLabel(toolbar), *session = new QLabel(toolbar);
         auto *battery = new ui::BatteryIndicator(toolbar);
-        reader::Navigation navigation(&owner, {toolbar, rows, exit, settings, bookmarks, clock, session, battery});
+        auto *bluetooth = new ui::BluetoothIndicator(toolbar);
+        bluetooth->setActive(bluetoothActive);
+        session->setText("Reading for 10 minutes");
+        reader::Navigation navigation(&owner,
+                                      {toolbar, rows, exit, settings, bookmarks, clock, session, battery, bluetooth});
         NavigationState state{};
         state.footer = new QWidget(&owner);
         state.appearance = new QWidget(&owner);
@@ -472,7 +787,8 @@ private slots:
         owner.show();
         navigation.update(owner.size(), state);
         QCoreApplication::processEvents();
-        PaintRegions upper, lower, bottom;
+        PaintRegions upper, lower, bottom, sessionPaints;
+        session->installEventFilter(&sessionPaints);
         auto *upperRule = owner.findChild<QWidget *>("rrNavigationUpperEdge");
         auto *lowerRule = owner.findChild<QWidget *>("rrNavigationLowerEdge");
         auto *bar = owner.findChild<QWidget *>("rrBottomNavigation");
@@ -486,8 +802,10 @@ private slots:
         upper.painted = {};
         lower.painted = {};
         bottom.painted = {};
+        sessionPaints.painted = {};
         navigation.update(owner.size(), state);
         QCoreApplication::processEvents();
+        QVERIFY(sessionPaints.painted.isEmpty());
         QVERIFY(upper.painted.isEmpty());
         QVERIFY(lower.painted.isEmpty());
         QVERIFY(bottom.painted.isEmpty());
@@ -1257,17 +1575,180 @@ private slots:
         QVERIFY(!loading->isVisible());
         QVERIFY(reader->readyForPresentation());
     }
+    void unchangedReaderStateDoesNotRepaint_data() {
+        QTest::addColumn<QString>("panel");
+        QTest::newRow("reading") << QString();
+        QTest::newRow("controls") << QStringLiteral("controls");
+        QTest::newRow("stats") << QStringLiteral("rrNavStats");
+        QTest::newRow("appearance") << QStringLiteral("rrNavText");
+        QTest::newRow("layout") << QStringLiteral("rrNavLayout");
+        QTest::newRow("settings") << QStringLiteral("rrSettings");
+        QTest::newRow("chapters") << QStringLiteral("rrNavChapters");
+        QTest::newRow("font-picker") << QStringLiteral("font-picker");
+    }
+    void unchangedReaderStateDoesNotRepaint() {
+        QFETCH(QString, panel);
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        auto *readingPage = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *appearancePanel = host.window()->findChild<QWidget *>("rrMenu");
+        QVERIFY(readingPage);
+        QVERIFY(appearancePanel);
+        const auto before = readingPage->image.cacheKey();
+        PanelPlacement placement;
+        appearancePanel->installEventFilter(&placement);
+        auto *graphPanel = host.window()->findChild<QWidget *>("rrChapterGraph");
+        QVERIFY(graphPanel);
+        PanelPlacement graphPlacement;
+        graphPanel->installEventFilter(&graphPlacement);
+        if (!panel.isEmpty()) {
+            QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+            if (panel != "controls") {
+                auto *button = host.window()->findChild<QPushButton *>(panel == "font-picker" ? "rrNavText" : panel);
+                QVERIFY(button);
+                QVERIFY(click(canvas, button));
+            }
+            QVERIFY(!host.session()->busy());
+            if (panel == "font-picker") {
+                auto *button = host.window()->findChild<QPushButton *>("rrFont");
+                QVERIFY(button);
+                QVERIFY(click(canvas, button));
+            }
+        }
+        QCoreApplication::processEvents();
+        if (panel == "rrNavText" || panel == "rrNavLayout") {
+            QCOMPARE(placement.shown, appearancePanel->geometry());
+            QCOMPARE(placement.visibleMoves, 0);
+            QCOMPARE(readingPage->image.cacheKey(), before);
+        }
+        if (panel == "rrNavStats") {
+            QCOMPARE(graphPlacement.shown, graphPanel->geometry());
+            QCOMPARE(graphPlacement.visibleMoves, 0);
+        }
+        PaintRegions paints;
+        for (auto *widget : host.window()->findChildren<QWidget *>()) {
+            widget->installEventFilter(&paints);
+        }
+        host.window()->installEventFilter(&paints);
+        QCoreApplication::processEvents();
+        paints.count = 0;
+        paints.widgets.clear();
+        QVERIFY(bool(host.session()->updated));
+        host.session()->updated();
+        QCoreApplication::processEvents();
+        if (paints.count) {
+            qWarning() << paints.widgets;
+        }
+        QCOMPARE(paints.count, 0);
+    }
+    void uneditedPanelTransitions_data() {
+        QTest::addColumn<QString>("start");
+        QTest::newRow("text") << "rrNavText";
+        QTest::newRow("layout") << "rrNavLayout";
+        QTest::newRow("light") << "rrNavLight";
+        QTest::newRow("stats") << "rrNavStats";
+        QTest::newRow("chapters") << "rrNavChapters";
+    }
+    void uneditedPanelTransitions() {
+        QFETCH(QString, start);
+        if (start == "rrNavLight" && !test::fixtureDeviceControls())
+            QSKIP("Frontlight requires the device fixture");
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *toolbar = host.window()->findChild<QWidget *>("rrControlsTop");
+        QVERIFY(page);
+        QVERIFY(toolbar);
+        const auto image = page->image.cacheKey();
+        auto state = host.session()->state();
+        state.remove("cached_pages");
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QTRY_VERIFY(toolbar->isVisible());
+
+        const QStringList tabs = {"rrNavText", "rrNavLayout", "rrNavLight", "rrNavStats", "rrNavChapters"};
+        const QStringList panels = {"rrMenu", "rrMenu", "rrLightPanel", "rrChapterGraph", "rrChoices"};
+        auto *startButton = host.window()->findChild<QPushButton *>(start);
+        QVERIFY(startButton);
+        QVERIFY(click(canvas, startButton));
+        const int startIndex = tabs.indexOf(start);
+        QVERIFY(startIndex >= 0);
+        auto *startPanel = host.window()->findChild<QWidget *>(panels[startIndex]);
+        QVERIFY(startPanel);
+        QTRY_VERIFY(startPanel->isVisible());
+        for (int index = 0; index < tabs.size(); ++index) {
+            if (tabs[index] == "rrNavLight" && !test::fixtureDeviceControls())
+                continue;
+            auto *button = host.window()->findChild<QPushButton *>(tabs[index]);
+            auto *destination = host.window()->findChild<QWidget *>(panels[index]);
+            QVERIFY(button);
+            QVERIFY(destination);
+            QVERIFY2(button->isVisible() && button->isEnabled(), qPrintable(tabs[index]));
+            QVERIFY(click(canvas, button));
+            QVERIFY2(!host.session()->busy(), qPrintable(tabs[index]));
+            if (tabs[index] == start) {
+                QTRY_VERIFY(!startPanel->isVisible());
+            } else {
+                QTRY_VERIFY(destination->isVisible());
+                if (tabs[index] != "rrNavText" && tabs[index] != "rrNavLayout")
+                    QVERIFY(!startPanel->isVisible());
+            }
+            QTRY_VERIFY(!host.session()->busy());
+            auto current = host.session()->state();
+            current.remove("cached_pages");
+            QCOMPARE(current, state);
+            QCOMPARE(page->image.cacheKey(), image);
+            QVERIFY(toolbar->isVisible());
+            QVERIFY2(startButton->isVisible() && startButton->isEnabled(), qPrintable(start));
+            QVERIFY(click(canvas, startButton));
+            QVERIFY2(!host.session()->busy(), qPrintable(start));
+            QTRY_VERIFY(startPanel->isVisible());
+            QVERIFY(!host.session()->busy());
+            QCOMPARE(page->image.cacheKey(), image);
+            QVERIFY(toolbar->isVisible());
+        }
+        if (start == "rrNavText") {
+            auto *font = host.window()->findChild<QPushButton *>("rrFont");
+            auto *choices = host.window()->findChild<QWidget *>("rrChoices");
+            QVERIFY(font);
+            QVERIFY(choices);
+            QVERIFY(click(canvas, font));
+            QTRY_VERIFY(choices->isVisible());
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFontClose")));
+            QTRY_VERIFY(startPanel->isVisible() && !choices->isVisible());
+            QCOMPARE(page->image.cacheKey(), image);
+            QVERIFY(toolbar->isVisible());
+        }
+    }
     void appearanceApplyOnNavigation_data() {
         QTest::addColumn<QString>("action");
         QTest::addColumn<QString>("panel");
         QTest::newRow("stats") << "rrNavStats" << "rrChapterGraph";
         QTest::newRow("chapters") << "rrNavChapters" << "rrChoices";
+        QTest::newRow("light") << "rrNavLight" << "rrLightPanel";
         QTest::newRow("search") << "rrNavSearch" << "rrSearch";
         QTest::newRow("bookmarks") << "rrBookmarks" << "rrBookmarkList";
     }
     void appearanceApplyOnNavigation() {
         QFETCH(QString, action);
         QFETCH(QString, panel);
+        if (action == "rrNavLight" && !test::fixtureDeviceControls())
+            QSKIP("Frontlight requires the device fixture");
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
         CloseHost cleanup{host};
         QSignalSpy opened(&host, &test::ReaderHost::opened);
@@ -1283,12 +1764,12 @@ private slots:
         auto *text = host.window()->findChild<QPushButton *>("rrNavText");
         QVERIFY(text);
         QVERIFY(click(canvas, text));
-        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
+        QVERIFY(!host.session()->busy());
         auto *larger = sizeStep(host);
         QVERIFY(larger);
         QTRY_VERIFY(larger->isVisible() && larger->isEnabled());
         QVERIFY(click(canvas, larger));
-        QTRY_VERIFY(!inspectReader(host)["preview_busy"].toBool());
+        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
         const auto textDraft = inspectReader(host)["preview_settings"].toObject();
         QVERIFY(textDraft["font_pixels"] != original["font_pixels"]);
         QCOMPARE(host.session()->state()["font_pixels"], original["font_pixels"]);
@@ -1415,7 +1896,7 @@ private slots:
         const auto openText = [&] {
             menu();
             QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavText")));
-            QTRY_VERIFY_WITH_TIMEOUT(inspect()["preview_ready"].toBool() && !inspect()["preview_busy"].toBool(), 30000);
+            QVERIFY(!host.session()->busy());
         };
         const auto apply = [&] {
             QTRY_VERIFY_WITH_TIMEOUT(!inspect()["preview_busy"].toBool(), 30000);
@@ -1468,7 +1949,7 @@ private slots:
         QVERIFY(host.session()->state().value("weight_steps") != oldWeight);
         menu();
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavLayout")));
-        QTRY_VERIFY(inspect()["preview_ready"].toBool() && !inspect()["preview_busy"].toBool());
+        QVERIFY(!host.session()->busy());
         auto *margin = host.window()->findChild<QSlider *>("rrMargins");
         QVERIFY(margin);
         const auto oldMargin = host.session()->state().value("margin_pixels");
@@ -1509,8 +1990,8 @@ private slots:
         QTRY_VERIFY(!host.session()->busy());
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavText")));
-        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
-        const QJsonValue selected = inspectReader(host)["preview_settings"].toObject().value("font_face");
+        QVERIFY(!host.session()->busy());
+        const QJsonValue selected = host.session()->state().value("font_face");
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFont")));
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFontDefaultSlot")));
         auto *ok = host.window()->findChild<QPushButton *>("rrFontDefaultConfirm");
@@ -1530,7 +2011,7 @@ private slots:
         QTest::mousePress(canvas.windowHandle(), Qt::LeftButton, Qt::NoModifier, point);
         QTRY_VERIFY(host.window()->findChild<QWidget *>("rrFontDefaultDialog"));
         QTest::mouseRelease(canvas.windowHandle(), Qt::LeftButton, Qt::NoModifier, point);
-        QCOMPARE(inspectReader(host)["preview_settings"].toObject()["font_face"], selected);
+        QCOMPARE(host.session()->state()["font_face"], selected);
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFontDefaultCancel")));
         QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrFontDefaultDialog"));
         QVERIFY(!storage::readJson(testPaths().preferences()).contains("default_font_face"));
@@ -1543,15 +2024,17 @@ private slots:
             auto *message = host.window()->findChild<QLabel *>("rrFontDefaultMessage");
             QVERIFY(message);
             QCOMPARE(message->text(), strings::get("reader.could_not_save_reader_settings"));
-            QCOMPARE(inspectReader(host)["preview_settings"].toObject()["default_font_face"].toString(),
-                     QString("Libron"));
+            const auto current = inspectReader(host)["preview_ready"].toBool()
+                                     ? inspectReader(host)["preview_settings"].toObject()
+                                     : host.session()->state();
+            QCOMPARE(current["default_font_face"].toString(), QString("Libron"));
             QVERIFY(blocked.restore());
         }
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFontDefaultConfirm")));
-        QTRY_VERIFY(!inspectReader(host)["preview_busy"].toBool());
+        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
         QCOMPARE(storage::readJson(testPaths().preferences())["default_font_face"].toString(),
                  kobalt::test::alternateReadingFace());
-        QCOMPARE(inspectReader(host)["preview_settings"].toObject()["font_face"], selected);
+        QCOMPARE(host.session()->state()["font_face"], selected);
         auto *help = host.window()->findChild<QPushButton *>("rrFontDefaultSlot");
         QVERIFY(help);
         QVERIFY(help->isVisible());
@@ -1626,8 +2109,7 @@ private slots:
                             : target == "stats" ? "rrNavStats"
                                                 : "rrNavText";
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>(action)));
-        if (target == "text" || target == "text-after-fonts" || target == "fonts" || target == "layout")
-            QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
+        QVERIFY(!host.session()->busy());
         if (target == "fonts" || target == "text-after-fonts") {
             QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFont")));
             QTRY_VERIFY(host.window()->findChild<QWidget *>("rrChoices")->isVisible());
@@ -1661,12 +2143,12 @@ private slots:
         auto *text = host.window()->findChild<QPushButton *>("rrNavText");
         QVERIFY(text);
         QVERIFY(click(canvas, text));
-        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
+        QVERIFY(!host.session()->busy());
         auto *larger = sizeStep(host);
         QVERIFY(larger);
         QTRY_VERIFY(larger->isEnabled());
         QVERIFY(click(canvas, larger));
-        QTRY_VERIFY(!inspectReader(host)["preview_busy"].toBool());
+        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
         const auto draft = inspectReader(host)["preview_settings"].toObject();
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFont")));
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFontClose")));
@@ -1682,7 +2164,6 @@ private slots:
         QVERIFY(click(canvas, text));
         QTRY_VERIFY_WITH_TIMEOUT(larger->isVisible() && larger->isEnabled() && !host.session()->busy(), 10000);
         QCOMPARE(host.session()->state()["font_pixels"], draft["font_pixels"]);
-        QCOMPARE(inspectReader(host)["preview_settings"].toObject()["font_pixels"], draft["font_pixels"]);
     }
     void appearanceWriteFailureRetainsDraft_data() {
         QTest::addColumn<bool>("exit");
@@ -1710,7 +2191,7 @@ private slots:
         QVERIFY(wider);
         QTRY_VERIFY(wider->isEnabled());
         QVERIFY(click(canvas, wider));
-        QTRY_VERIFY(!inspectReader(host)["preview_busy"].toBool());
+        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
         const auto draft = inspectReader(host)["preview_settings"].toObject();
         auto *clockOff = host.window()->findChild<QPushButton *>("rrHideClock");
         auto *clockOn = host.window()->findChild<QPushButton *>("rrShowClock");
@@ -1789,12 +2270,12 @@ private slots:
         auto *text = host.window()->findChild<QPushButton *>("rrNavText");
         QVERIFY(text);
         QVERIFY(click(canvas, text));
-        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
+        QVERIFY(!host.session()->busy());
         auto *larger = sizeStep(host);
         QVERIFY(larger);
         QTRY_VERIFY(larger->isEnabled());
         QVERIFY(click(canvas, larger));
-        QTRY_VERIFY(!inspectReader(host)["preview_busy"].toBool());
+        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
         const auto draft = inspectReader(host)["preview_settings"].toObject();
         host.window()->sleepReader();
         host.window()->sleepViewReady();
@@ -1833,6 +2314,9 @@ private slots:
         auto *text = host.window()->findChild<QPushButton *>("rrNavText");
         QVERIFY(text);
         QVERIFY(click(canvas, text));
+        auto *step = sizeStep(host);
+        QVERIFY(step);
+        QVERIFY(click(canvas, step));
         auto *error = host.window()->findChild<QLabel *>("rrPreviewLabel");
         QVERIFY(error);
         QTRY_VERIFY_WITH_TIMEOUT(error->isVisible() && !error->text().isEmpty(), 10000);
@@ -1864,12 +2348,12 @@ private slots:
         auto *text = host.window()->findChild<QPushButton *>("rrNavText");
         QVERIFY(text);
         QVERIFY(click(canvas, text));
-        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
+        QVERIFY(!host.session()->busy());
         auto *step = sizeStep(host);
         QVERIFY(step);
         QTRY_VERIFY(step->isEnabled());
         QVERIFY(click(canvas, step));
-        QTRY_VERIFY(!inspectReader(host)["preview_busy"].toBool());
+        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
         // Reject a real engine update before Reader observes apply completion.
         // Revoking a source alone cannot fail a reflow of an already cached document.
         const auto productionUpdated = host.session()->updated;
@@ -1903,9 +2387,9 @@ private slots:
     void appearanceCloseDuringPreview_data() {
         QTest::addColumn<bool>("edit");
         QTest::addColumn<bool>("shutdown");
-        QTest::newRow("exit-opening") << false << false;
+        QTest::newRow("exit-unedited") << false << false;
         QTest::newRow("exit-reflow") << true << false;
-        QTest::newRow("shutdown-opening") << false << true;
+        QTest::newRow("shutdown-unedited") << false << true;
         QTest::newRow("shutdown-reflow") << true << true;
     }
     void appearanceCloseDuringPreview() {
@@ -1928,7 +2412,6 @@ private slots:
         int expectedPixels = original["font_pixels"].toInt();
         if (edit) {
             QVERIFY(click(canvas, text));
-            QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
             auto *larger = sizeStep(host);
             auto *size = host.window()->findChild<QSlider *>("rrTextSize");
             QVERIFY(larger);
@@ -1939,8 +2422,8 @@ private slots:
                 expectedPixels = halfPointPixels(size->value());
         } else
             text->click();
-        // Keep the completion queued so termination runs in the same GUI turn.
-        QVERIFY(inspectReader(host)["preview_busy"].toBool());
+        if (edit)
+            QVERIFY(inspectReader(host)["preview_busy"].toBool());
         if (shutdown)
             host.shutdown();
         else
@@ -1951,7 +2434,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
         QCOMPARE(host.session()->state()["font_pixels"].toInt(), expectedPixels);
     }
-    void appearanceSleepDuringOpening() {
+    void appearanceSleepDuringFirstEdit() {
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
         CloseHost cleanup{host};
         QSignalSpy opened(&host, &test::ReaderHost::opened);
@@ -1967,6 +2450,10 @@ private slots:
         auto *text = host.window()->findChild<QPushButton *>("rrNavText");
         QVERIFY(text);
         text->click();
+        QVERIFY(!host.session()->busy());
+        auto *step = sizeStep(host);
+        QVERIFY(step);
+        step->click();
         QVERIFY(inspectReader(host)["preview_busy"].toBool());
         host.window()->sleepReader();
         host.window()->sleepViewReady();
@@ -1977,6 +2464,254 @@ private slots:
         QVERIFY(font);
         QTRY_VERIFY(font->isVisible() && font->isEnabled());
         QCOMPARE(host.session()->state()["font_pixels"], original["font_pixels"]);
+    }
+    // Physical Clara BW reports: a second drag right after the first did
+    // nothing, and Overflow ignored taps while the preview rendered.
+    void appearanceDragsDuringPreview_data() {
+        QTest::addColumn<bool>("slow");
+        QTest::newRow("preview-ready") << false;
+        // A held engine worker stands in for the Clara BW, where the preview
+        // is still opening and rendering while the finger moves.
+        QTest::newRow("preview-rendering") << true;
+    }
+    void appearanceDragsDuringPreview() {
+        QFETCH(bool, slow);
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        const auto original = host.session()->state();
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavText")));
+        auto *weight = host.window()->findChild<QSlider *>("rrFontWeight");
+        auto *size = host.window()->findChild<QSlider *>("rrTextSize");
+        auto *overflow = host.window()->findChild<QPushButton *>("rrSettings");
+        QVERIFY(weight && size && overflow);
+        QTRY_VERIFY(weight->isVisible());
+        struct Release {
+            ~Release() {
+                engineActivity().pause(false);
+            }
+        } release;
+        if (slow)
+            engineActivity().pause(true);
+        // Drag before the preview has opened, then drag again at once.
+        QStringList disabled;
+        const auto watch = [&] {
+            for (auto *widget :
+                 {static_cast<QWidget *>(weight), static_cast<QWidget *>(size), static_cast<QWidget *>(overflow)})
+                if (!widget->isEnabled() && !disabled.contains(widget->objectName()))
+                    disabled.append(widget->objectName());
+        };
+        const int thickness = weight->value();
+        drag(canvas, weight, thickness, thickness + 3, watch);
+        watch();
+        QCOMPARE(weight->value(), thickness + 3);
+        drag(canvas, weight, thickness + 3, thickness + 1, watch);
+        watch();
+        QCOMPARE(weight->value(), thickness + 1);
+        // Text size snaps to stops, so keep the value the finger lands on.
+        const int halfPoints = size->value();
+        // An earlier row may have saved a large size for this book.
+        const bool smaller = halfPoints > (size->minimum() + size->maximum()) / 2;
+        dragAcross(canvas, size, smaller ? .8 : .3, smaller ? .2 : .8, watch);
+        watch();
+        const int landed = size->value();
+        QVERIFY(landed != halfPoints);
+        QVERIFY2(disabled.isEmpty(), qPrintable(disabled.join(',')));
+        // The latest values stay on the controls while the preview renders.
+        QCoreApplication::processEvents();
+        QCOMPARE(weight->value(), thickness + 1);
+        QCOMPARE(size->value(), landed);
+        // Overflow opens at once and keeps the pending edits.
+        QVERIFY(click(canvas, overflow));
+        auto *general = host.window()->findChild<QWidget *>("rrGeneralSettings");
+        QVERIFY(general);
+        QTRY_VERIFY(general->isVisible());
+        if (slow) {
+            // The edits are still queued: closing Settings waits for the
+            // preview instead of applying the unedited book settings.
+            QVERIFY(!inspectReader(host)["preview_ready"].toBool());
+            QVERIFY(click(canvas, overflow));
+            QCoreApplication::processEvents();
+            QVERIFY(general->isVisible());
+            QVERIFY(!host.session()->busy());
+            engineActivity().pause(false);
+        } else
+            QVERIFY(click(canvas, overflow));
+        QTRY_VERIFY_WITH_TIMEOUT(!general->isVisible() && !host.session()->busy() &&
+                                     !inspectReader(host)["appearance_panel_open"].toBool(),
+                                 15000);
+        QCOMPARE(host.session()->state()["weight_steps"].toInt(), thickness + 1);
+        QCOMPARE(host.session()->state()["font_pixels"].toInt(), kobalt::halfPointPixels(landed));
+        QVERIFY(host.session()->state()["font_pixels"] != original["font_pixels"]);
+    }
+    // A thickness drag repaints only its slider row while the finger moves.
+    // After release, the new page and the font sample share one paint pass,
+    // so the display shows them in one update.
+    void thicknessDragPaints() {
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        // Kobo buttons and the reader window take no click focus, so a press
+        // elsewhere does not repaint the last tapped button.
+        canvas.setFocusPolicy(Qt::NoFocus);
+        for (auto *button : host.window()->findChildren<QPushButton *>())
+            button->setFocusPolicy(Qt::NoFocus);
+        // Scrolling the canvas would repaint the panel. Show the whole screen.
+        canvas.resize(nativeSize + QSize(40, 40));
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        const auto pages = host.session()->pages();
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavText")));
+        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool());
+        QTest::qWait(100);
+        const int previewPages = inspectReader(host)["preview_settings"].toObject()["pages"].toInt();
+        QVERIFY(previewPages > 0);
+        auto *weight = host.window()->findChild<QSlider *>("rrFontWeight");
+        auto *menu = host.window()->findChild<QWidget *>("rrMenu");
+        auto *row = weight->parentWidget();
+        QVERIFY(weight && menu && row);
+        PaintRegions paints;
+        paints.coordinateRoot = host.window();
+        for (auto *widget : host.window()->findChildren<QWidget *>())
+            widget->installEventFilter(&paints);
+        const auto take = [&] {
+            auto widgets = paints.widgets;
+            widgets.removeDuplicates();
+            const auto region = paints.painted;
+            paints.count = 0;
+            paints.painted = {};
+            paints.widgets.clear();
+            return std::make_pair(widgets, region);
+        };
+        const QRect rowRect(row->mapTo(host.window(), QPoint()), row->size());
+        const int thickness = weight->value();
+        take();
+        int moves = 0;
+        drag(canvas, weight, thickness, thickness + 2, [&] {
+            const auto [widgets, region] = take();
+            if (region.isEmpty())
+                return;
+            ++moves;
+            QVERIFY2((region - rowRect).isEmpty(), qPrintable(widgets.join(' ')));
+        });
+        QVERIFY(moves > 0);
+        QStringList passes;
+        bool pageAndSample = false;
+        for (int i = 0; i < 60 && !pageAndSample; ++i) {
+            QCoreApplication::processEvents();
+            const auto [widgets, region] = take();
+            if (!region.isEmpty())
+                passes.append(widgets.join(' '));
+            QVERIFY2(!widgets.contains("rrControlsTop"), qPrintable(passes.join(" | ")));
+            QVERIFY2(!widgets.contains("rrFont") || widgets.contains("rrPage"), qPrintable(passes.join(" | ")));
+            pageAndSample = widgets.contains("rrFont") && widgets.contains("rrPage");
+            QTest::qWait(25);
+        }
+        QVERIFY2(pageAndSample, qPrintable(passes.join(" | ")));
+        QTRY_VERIFY(!inspectReader(host)["preview_busy"].toBool());
+        QCOMPARE(inspectReader(host)["preview_settings"].toObject()["weight_steps"].toInt(), thickness + 2);
+        // Thickness redraws glyphs without changing the preview's pagination.
+        QCOMPARE(inspectReader(host)["preview_settings"].toObject()["pages"].toInt(), previewPages);
+        QCOMPARE(host.session()->pages(), pages);
+        // Closing the panel applies the change without repaginating the book.
+        // A held engine keeps the apply running while the panel is visible:
+        // the panel keeps its pixels and ignores taps until it closes.
+        struct Release {
+            ~Release() {
+                engineActivity().pause(false);
+            }
+        } release;
+        engineActivity().pause(true);
+        take();
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavText")));
+        QTRY_VERIFY(host.session()->busy());
+        QVERIFY(menu->isVisible());
+        auto *heavier = host.window()->findChild<QPushButton *>("rrHeavier");
+        QVERIFY(click(canvas, heavier));
+        QCoreApplication::processEvents();
+        QCOMPARE(weight->value(), thickness + 2);
+        const auto [applying, applyingRegion] = take();
+        const QRect panelRect(menu->mapTo(host.window(), QPoint()), menu->size());
+        QVERIFY2(!applyingRegion.intersects(panelRect), qPrintable(applying.join(' ')));
+        engineActivity().pause(false);
+        QTRY_VERIFY(!host.session()->busy() && !menu->isVisible());
+        QCOMPARE(host.session()->state()["weight_steps"].toInt(), thickness + 2);
+        QCOMPARE(host.session()->pages(), pages);
+    }
+    void linkHighlightsPaintOnlyChangedOutlines() {
+        ReadingPage page(nullptr, [] {});
+        page.resize(400, 600);
+        page.image = QImage(400, 480, QImage::Format_RGB32);
+        page.image.fill(Qt::white);
+        page.refreshContent();
+        page.show();
+        QCoreApplication::processEvents();
+        PaintRegions paints;
+        page.installEventFilter(&paints);
+        QImage before = page.grab().toImage();
+        const QVector<QRect> upper{QRect(40, 40, 120, 24), QRect(40, 68, 120, 24)};
+        const QVector<QRect> lower{QRect(220, 340, 100, 24)};
+        QVector<QRect> previous;
+        for (const auto &next : {upper, lower, lower, QVector<QRect>{}}) {
+            QRegion allowed;
+            const int pad = ui::metrics::links::revealPadding;
+            for (const auto &rect : previous + next)
+                allowed += rect.adjusted(-pad, -pad, pad, pad).translated(0, page.topHeight());
+            paints.painted = {};
+            page.revealLinks(next);
+            QCoreApplication::processEvents();
+            const auto damage = paints.painted;
+            QVERIFY((damage - allowed).isEmpty());
+            if (previous == next)
+                QVERIFY(damage.isEmpty());
+            else
+                QVERIFY(!damage.isEmpty());
+            const auto after = page.grab().toImage();
+            for (int y = 0; y < after.height(); ++y)
+                for (int x = 0; x < after.width(); ++x)
+                    if (before.pixel(x, y) != after.pixel(x, y))
+                        QVERIFY(damage.contains(QPoint(x, y)));
+            before = after;
+            previous = next;
+        }
+    }
+    void readingStripChangesLeaveBodyUnpainted() {
+        ReadingPage page(nullptr, [] {});
+        page.resize(400, 600);
+        page.image = QImage(400, 480, QImage::Format_RGB32);
+        page.image.fill(Qt::white);
+        page.clockText = "09:00";
+        page.progress = "1 / 10";
+        page.refreshContent();
+        page.show();
+        QCoreApplication::processEvents();
+        PaintRegions paints;
+        page.installEventFilter(&paints);
+        page.clockText = "09:01";
+        page.progress = "2 / 10";
+        page.refreshContent();
+        QCoreApplication::processEvents();
+        QVERIFY(!paints.painted.isEmpty());
+        QVERIFY(!paints.painted.intersects(
+            QRect(0, page.topHeight(), page.width(), page.height() - page.topHeight() - page.bottomHeight())));
+        QVERIFY(!page.property("reader_page_turn").toBool());
+        paints.painted = {};
+        page.refreshContent();
+        QCoreApplication::processEvents();
+        QVERIFY(paints.painted.isEmpty());
     }
     void refreshRegionsIncludeOutgoingAndIncomingImages() {
         ReadingPage page(nullptr, [] {});
@@ -2150,7 +2885,7 @@ private slots:
         QTRY_VERIFY(!host.session()->busy());
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavLayout")));
-        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
+        QVERIFY(!host.session()->busy());
         for (const auto *name : {"rrHeaderTextSize", "rrFooterTextSize"}) {
             QVERIFY(click(canvas, host.window()->findChild<QPushButton *>(name)));
             auto *choices = host.window()->findChild<QWidget *>("rrChoices");
@@ -2166,11 +2901,19 @@ private slots:
             auto *above = host.window()->childAt(point);
             QVERIFY(above);
             QVERIFY(above == choices || choices->isAncestorOf(above));
-            auto *off = choices->findChild<QPushButton *>(QString::fromLatin1(name) + "_off");
-            QVERIFY(off);
-            QVERIFY(click(canvas, off));
+            const QString visibility = QString::fromLatin1(name) == "rrHeaderTextSize" ? "show_header" : "show_footer";
+            const bool wasVisible = originalPreferences.value(visibility).toBool(true);
+            auto *choice =
+                choices->findChild<QPushButton *>(QString::fromLatin1(name) + (wasVisible ? "_off" : "_small"));
+            QVERIFY(choice);
+            QVERIFY(click(canvas, choice));
             QTRY_VERIFY(!choices->isVisible());
+            QTRY_COMPARE(storage::readJson(testPaths().preferences()).value(visibility).toBool(), !wasVisible);
+            QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
         }
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavStats")));
+        QTRY_VERIFY(host.window()->findChild<QWidget *>("rrChapterGraph")->isVisible() && !host.session()->busy());
+        QVERIFY(!inspectReader(host)["preview_ready"].toBool());
         QVERIFY(storage::writeJson(testPaths().preferences(), originalPreferences));
     }
     void bookLayoutAndGlobalBionicReopen() {

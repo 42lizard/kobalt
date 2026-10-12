@@ -26,9 +26,9 @@ using ReaderOption = kobalt::ui::DescribedOption;
 void Reader::showFontDefaultDialog(const QString &face) {
     if (model->temporaryTypography())
         return;
-    if (fontDefaultDialog || !appearanceEdit.ready() || !appearanceEdit.preview())
+    if (fontDefaultDialog || !appearanceEdit.panelOpen())
         return;
-    const auto current = appearanceEdit.preview()->state().value("default_font_face").toString(defaultFontFace);
+    const auto current = preferences.value("default_font_face").toString(defaultFontFace);
     const bool instructions = face.isEmpty(), alreadyDefault = face == current;
     const ui::ModalContent content{
         instructions     ? strings::get("reader.default_font_instructions")
@@ -79,8 +79,7 @@ void Reader::showFontDefaultDialog(const QString &face) {
                     dismiss();
                     return;
                 }
-                auto *preview = appearanceEdit.preview();
-                if (!preview || preview->busy())
+                if (appearanceEdit.preview() && appearanceEdit.preview()->busy())
                     return;
                 auto next = preferences;
                 next["default_font_face"] = face;
@@ -91,10 +90,12 @@ void Reader::showFontDefaultDialog(const QString &face) {
                     return;
                 }
                 preferences = next;
-                auto settings = preview->state();
-                settings["default_font_face"] = face;
-                preview->apply(settings);
                 dismiss();
+                mutateAppearance([face](ReaderSession &preview) {
+                    auto settings = preview.state();
+                    settings["default_font_face"] = face;
+                    preview.apply(settings);
+                });
                 showFontPicker();
             });
     for (auto *button : card->findChildren<QPushButton *>()) {
@@ -113,7 +114,7 @@ bool Reader::progressBlocked() const {
     return bool(debugDialog) || bool(finishDialog) || bool(bookmarkErrorDialog) || book->deviceTransition() ||
            services.suspended() || !isVisible() || lightPopup->isVisible() || model->busy() ||
            (chapterGraph->isVisible() && !statsPinned()) || dictionaryPanel->isVisible() || searchPanel->isVisible() ||
-           linksActive() || lookupPending || appearanceEdit.preview() || appearanceEdit.applying() ||
+           linksActive() || lookupPending || appearanceEdit.panelOpen() || appearanceEdit.applying() ||
            general->isVisible() || choices->isVisible() || acknowledgments->isVisible();
 }
 
@@ -436,7 +437,7 @@ void Reader::openBookmarks() {
         return;
     }
     model->cancelPendingTurn();
-    if (general->isVisible() || appearanceEdit.preview()) {
+    if (general->isVisible() || appearanceEdit.panelOpen()) {
         appearanceEdit.request(AppearanceDestination::Bookmarks);
         if (general->isVisible())
             applySettings();

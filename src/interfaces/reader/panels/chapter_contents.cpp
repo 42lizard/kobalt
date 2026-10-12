@@ -166,7 +166,6 @@ void ChapterContents::redraw() {
         itemRow->trailingLabel()->setObjectName(item.name + "Page");
         button->setAccessibleName(strings::get("common.numbered_title").arg(index + 1).arg(item.label));
     }
-    update();
     if (changed && isVisible())
         changed();
 }

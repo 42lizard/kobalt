@@ -175,6 +175,9 @@ private:
     kobalt::ui::SettingSlider *sizeSlider, *opticalSizeSlider, *weightSlider, *variableWeightSlider, *spacingSlider,
         *marginSlider, *verticalMarginSlider, *bookSlider;
     kobalt::reader::AppearanceEditSession appearanceEdit;
+    QSize appearanceViewport;
+    quint64 warmScheduledGeneration = 0;
+    quint64 warmAttemptGeneration = 0;
     using AppearanceDestination = kobalt::reader::AppearanceEditSession::Destination;
     QVector<int> registeredFonts;
     QStringList pickerNativeFamilies;
@@ -256,7 +259,10 @@ private:
     bool writePreferences(const QJsonObject &next);
     void selectPanel(int index);
     void openPanel(int index);
+    void schedulePreviewWarm();
+    void mutateAppearance(std::function<void(ReaderSession &)> operation);
     void finishPreview();
+    void resumeAppearanceApply();
     void showChapters();
     void toggleGraph();
     void openGraph();

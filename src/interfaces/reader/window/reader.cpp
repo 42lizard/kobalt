@@ -177,7 +177,7 @@ void Reader::wakeReader() {
 }
 
 void Reader::saveNativeProgress() {
-    if (!book->canWriteNative() || model->image().isNull() || !model->error().isEmpty() || appearanceEdit.preview() ||
+    if (!book->canWriteNative() || model->image().isNull() || !model->error().isEmpty() || appearanceEdit.panelOpen() ||
         importingProgress || syncDialog) {
         return;
     }
@@ -248,7 +248,7 @@ bool Reader::event(QEvent *event) {
         // Only the plain reading bars can cross an unchanged text page
         // with a partial refresh. Other panels may contain color.
         setProperty("reader_plain_controls",
-                    !appearanceEdit.preview() && !general->isVisible() && !choices->isVisible() &&
+                    !appearanceEdit.panelOpen() && !general->isVisible() && !choices->isVisible() &&
                         !chapterGraph->isVisible() && !linkReturn->isVisible() && !dictionaryPanel->isVisible() &&
                         !searchPanel->isVisible() && !linksActive() && !lookupPending &&
                         !acknowledgments->isVisible() && !bookmarkList->isVisible() && !lightPopup->isVisible() &&
@@ -260,6 +260,32 @@ bool Reader::event(QEvent *event) {
 
 bool Reader::eventFilter(QObject *watched, QEvent *event) {
     const auto type = event->type();
+    // Kobo screens have no hover. Qt still sends hover events when a touch
+    // moves between widgets, and repaints any widget that tracks hover, which
+    // refreshes unchanged pixels. No reader widget draws a hover state.
+    if (ui::isHoverEvent(event)) {
+        auto *target = qobject_cast<QWidget *>(watched);
+        if (target && (target == this || isAncestorOf(target)))
+            return true;
+    }
+    // While a panel's changes apply, its controls ignore input. Disabling
+    // them instead would repaint the whole visible panel in disabled colors,
+    // one more screen update before it closes.
+    if (appearanceEdit.applying() &&
+        (type == QEvent::MouseButtonPress || type == QEvent::MouseButtonRelease ||
+         type == QEvent::MouseButtonDblClick || type == QEvent::MouseMove || type == QEvent::TouchBegin ||
+         type == QEvent::TouchUpdate || type == QEvent::TouchEnd || type == QEvent::KeyPress ||
+         type == QEvent::KeyRelease)) {
+        auto *target = qobject_cast<QWidget *>(watched);
+        if (target &&
+            (target == menu || target == general || menu->isAncestorOf(target) || general->isAncestorOf(target))) {
+            event->accept();
+            return true;
+        }
+    }
+    if (watched == menu && type == QEvent::Paint) {
+        schedulePreviewWarm();
+    }
     // Panels declare their placement through geometry. The reading status strip
     // owns its separator, including when an existing panel moves or closes.
     if (watched->parent() == this && dynamic_cast<ui::Panel *>(watched) &&
@@ -429,8 +455,8 @@ void Reader::resizeEvent(QResizeEvent *) {
     header->setVisible(page->topHeight() > 0);
     topControls->setGeometry(0, 0, width(), navigation ? navigation->toolbarHeight() : m::panel::toolbarHeight);
     bottomControls->setGeometry(m::panel::footer(size()));
-    menu->setGeometry(m::panel::appearance(size(), panels->currentIndex() == 1));
-    chapterGraph->setGeometry(0, m::panel::toolbarHeight, width(), m::chapters::graphHeight);
+    menu->resize(m::panel::appearance(size(), panels->currentIndex() == 1).size());
+    chapterGraph->resize(width(), chapterGraph->height());
     choices->setGeometry(rect());
     fitSettings();
     acknowledgments->setGeometry(rect());
@@ -462,7 +488,7 @@ void Reader::closeEvent(QCloseEvent *event) {
         event->ignore();
         exitPending = true;
         save(true);
-        if (appearanceEdit.preview() || general->isVisible())
+        if (appearanceEdit.panelOpen() || general->isVisible())
             dismissControls();
         finishExit();
         return;
@@ -488,7 +514,7 @@ void Reader::closeEvent(QCloseEvent *event) {
 void Reader::updateOrientationBlock() {
     if (orientation)
         orientation->setBlocked(lifecycleHidden || services.suspended() || topControls->isVisible() || model->busy() ||
-                                bool(appearanceEdit.preview()) || bool(syncDialog) || bool(finishDialog) ||
+                                appearanceEdit.panelOpen() || bool(syncDialog) || bool(finishDialog) ||
                                 bool(bookmarkErrorDialog) || dictionaryPanel->isVisible() || searchPanel->isVisible() ||
                                 linksActive() || lookupPending);
 }
@@ -507,7 +533,7 @@ void Reader::closeSearch() {
 
 void Reader::openSearch() {
     model->cancelPendingTurn();
-    if (model->busy() || appearanceEdit.preview() || appearanceEdit.applying())
+    if (model->busy() || appearanceEdit.panelOpen() || appearanceEdit.applying())
         return;
     dismissLookup();
     dismissControls();
@@ -707,7 +733,7 @@ void Reader::dismissLookup(bool keepGesture) {
 }
 
 void Reader::lookupWord(QPoint point, bool checkLink) {
-    if (closing || lifecycleHidden || services.suspended() || model->busy() || appearanceEdit.preview() ||
+    if (closing || lifecycleHidden || services.suspended() || model->busy() || appearanceEdit.panelOpen() ||
         topControls->isVisible() || choices->isVisible() || acknowledgments->isVisible() || syncDialog ||
         finishDialog || dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive())
         return;
@@ -790,7 +816,7 @@ void Reader::configureNavigation() {
             if (target == AppearanceDestination::Chapters && choices->isVisible() && !choosingTypography) {
                 choices->hide();
                 showControls();
-            } else if (appearanceEdit.preview() || general->isVisible()) {
+            } else if (appearanceEdit.panelOpen() || general->isVisible()) {
                 appearanceEdit.request(target);
                 if (general->isVisible())
                     applySettings();
@@ -857,7 +883,7 @@ void Reader::syncLinkDiscovery() {
     if (!linkDiscovery)
         return;
     const bool blocked = model->busy() || lifecycleHidden || closing || services.suspended() ||
-                         appearanceEdit.preview() || general->isVisible() || menu->isVisible() ||
+                         appearanceEdit.panelOpen() || general->isVisible() || menu->isVisible() ||
                          choices->isVisible() || chapterGraph->isVisible() || lightPopup->isVisible() ||
                          bookmarkList->isVisible() || acknowledgments->isVisible() || searchPanel->isVisible() ||
                          dictionaryPanel->isVisible() || linksActive() || lookupPending || syncDialog || finishDialog;
@@ -987,7 +1013,7 @@ void Reader::syncNavigation() {
     if (!navigation)
         return;
     if (topControls->isVisible()) {
-        auto *settings = appearanceEdit.preview() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+        auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
         QString face = settings->fontFace();
         if (face.isEmpty())
             face = settings->state().value("text_font_face").toString();
@@ -1044,7 +1070,9 @@ void Reader::syncNavigation() {
                 chapterGraph->hide();
             else {
                 updateGraph();
+                chapterGraph->setGeometry(navigation->panelBounds(size(), chapterGraph->height()));
                 chapterGraph->open();
+                navigation->stackPanel(chapterGraph);
             }
             update();
         }
@@ -1067,10 +1095,15 @@ void Reader::syncNavigation() {
 }
 
 void Reader::showControls() {
+    const bool topVisible = topControls->isVisible();
+    const bool opening = !topVisible && !bottomControls->isVisible();
     model->cancelPendingTurn();
-    flashAfterMenu = property("reader_dark").toBool();
-    if (flashAfterMenu)
-        requestFlash("menu-open");
+    if (opening) {
+        flashAfterMenu = property("reader_dark").toBool();
+        if (flashAfterMenu) {
+            requestFlash("menu-open");
+        }
+    }
     dismissLinks();
     linkReturn->hide();
     updateMenuStatus();
@@ -1079,10 +1112,20 @@ void Reader::showControls() {
     page->cleanRefresh(false);
     topControls->show();
     bottomControls->show();
-    topControls->raise();
-    bottomControls->raise();
+    if (!topVisible) {
+        topControls->raise();
+    }
+    if (!navigation) {
+        bottomControls->raise();
+    }
     updateLinkReturn();
     syncNavigation();
+    if (opening) {
+        // The display submits disjoint bars separately. Paint their completed
+        // frame together so they appear in one screen update.
+        setProperty("reader_controls_opening", true);
+        update();
+    }
 }
 
 void Reader::dismissControls() {
@@ -1091,7 +1134,7 @@ void Reader::dismissControls() {
     chapterGraph->hide();
     if (appearanceEdit.applying())
         return;
-    if (general->isVisible() || appearanceEdit.preview()) {
+    if (general->isVisible() || appearanceEdit.panelOpen()) {
         appearanceEdit.request(AppearanceDestination::Reading);
         if (general->isVisible())
             applySettings();
@@ -1120,7 +1163,7 @@ void Reader::toggleLight() {
     choices->hide();
     if (general->isVisible())
         applySettings();
-    else if (appearanceEdit.preview())
+    else if (appearanceEdit.panelOpen())
         finishPreview();
     else {
         appearanceEdit.clearDestination();
@@ -1171,7 +1214,7 @@ void Reader::toggleGraph() {
     choices->hide();
     if (general->isVisible())
         applySettings();
-    else if (appearanceEdit.preview())
+    else if (appearanceEdit.panelOpen())
         finishPreview();
     else {
         appearanceEdit.clearDestination();
@@ -1185,15 +1228,19 @@ void Reader::openGraph() {
     general->hide();
     choices->hide();
     topControls->show();
-    topControls->raise();
     bottomControls->hide();
+    updateGraph();
+    if (navigation)
+        chapterGraph->setGeometry(navigation->panelBounds(size(), chapterGraph->height()));
     chapterGraph->open();
+    if (navigation)
+        navigation->stackPanel(chapterGraph);
     refresh();
 }
 
 void Reader::pageButton(int direction) {
     if ((direction != -1 && direction != 1) || !isEnabled() || !isVisible() || lifecycleHidden ||
-        services.suspended() || closing || !model->canTurn() || appearanceEdit.preview() || general->isVisible() ||
+        services.suspended() || closing || !model->canTurn() || appearanceEdit.panelOpen() || general->isVisible() ||
         choices->isVisible() || (chapterGraph->isVisible() && !statsPinned()) || revealingLinks ||
         dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() || lookupPending ||
         acknowledgments->isVisible() || bookmarkList->isVisible() || lightPopup->isVisible())
@@ -1210,7 +1257,7 @@ void Reader::pageButton(int direction) {
 void Reader::turnPage(int direction) {
     turnStarted.start();
     if (finishDialog || syncDialog || bookmarkErrorDialog || !model->canTurn() || closing || exitPending ||
-        lifecycleHidden || services.suspended() || book->deviceTransition() || appearanceEdit.preview() ||
+        lifecycleHidden || services.suspended() || book->deviceTransition() || appearanceEdit.panelOpen() ||
         appearanceEdit.applying())
         return;
     if (!model->busy() && direction > 0 && model->nextPage() == model->page() && book->offerFinish()) {
@@ -1257,7 +1304,7 @@ void Reader::recordOpening() {
 }
 
 void Reader::finishExit() {
-    if (!exitPending || closing || exportRunning || model->busy() || appearanceEdit.preview() ||
+    if (!exitPending || closing || exportRunning || model->busy() || appearanceEdit.panelOpen() ||
         appearanceEdit.applying() || appearanceEdit.finishPending() || lifecycleHidden)
         return;
     if (finishDialog)
@@ -1405,10 +1452,11 @@ void Reader::save(bool snapshot) {
     state["graph_page"] = chapterGraph->graphPage();
     state["graph_pages"] = chapterGraph->graphPages();
     state["active_panel"] =
-        QString::fromLatin1(chapterGraph->isVisible()  ? "chapters"
-                            : general->isVisible()     ? "settings"
-                            : appearanceEdit.preview() ? panels->currentIndex() == 0 ? "typography" : "layout"
-                                                       : "");
+        QString::fromLatin1(chapterGraph->isVisible()    ? "chapters"
+                            : general->isVisible()       ? "settings"
+                            : appearanceEdit.panelOpen() ? panels->currentIndex() == 0 ? "typography" : "layout"
+                                                         : "");
+    state["appearance_panel_open"] = appearanceEdit.panelOpen();
     state["preview_ready"] = appearanceEdit.ready();
     state["preview_busy"] = appearanceEdit.preview() && appearanceEdit.preview()->busy();
     state["preview_settings"] = appearanceEdit.ready() ? appearanceEdit.preview()->state() : QJsonObject();

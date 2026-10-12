@@ -6,6 +6,8 @@
 
 - Kobo devices with an orientation sensor now offer Portrait, Landscape and Both. Portrait lock is the default, and rejected orientations no longer trigger page layout changes. Devices without a sensor keep manual rotation.
 
+- Reduce unnecessary layout-progress and Stats redraws. Layout progress advances across phases and updates at most once per 200 ms between phase boundaries. On MediaTek, an isolated progress-bar update uses partial mode in light mode over a text-only page. Avoid repainting unchanged appearance panels, Chapters and the font picker. Merge adjacent widget updates with the same refresh policy. Keep separated panel damage regions separate. Open the main reading bars together in one screen-spanning update. Keep existing waveforms, update modes and closing cleanup. Position Text, Layout and Stats before showing them. Keep the current book frame until an appearance setting or viewport changes. Localize link highlights, header and footer changes, and panel pagination. Batch opening progress within the current event-loop pass. Keep toolbar rules in place when panels open, and skip unchanged brightness notices.
+
 - Save changed reading progress to Nickel every 30 seconds while reading and before sleep, so the sleep screen can show the current progress.
 
 - Save reading progress before USB export, while preserving newer synced progress and allowing USB to continue if saving fails.
@@ -15,6 +17,10 @@
 - Use whole-screen coverage for ordinary page turns on older and unknown hardware, keeping the existing update mode and waveform.
 
 - Show the book-loading screen at 0% in Kobalt's interface fonts, before publication inspection and full asset validation.
+
+- Open appearance panels immediately over the current page, prepare their preview after painting, and preserve the top bar when switching panels. Load only visible font picker samples and avoid layout work for outline thickness. Keep the Text and Layout controls and Overflow usable while the preview opens or renders, so repeated drags and drafts opened in Overflow keep their latest values. Show a thickness change and its font sample in the same screen update.
+
+- Show both reading bars together in one screen-spanning text update on MediaTek. Combine compatible search keyboard key damage into one rectangle and keep an already visible keyboard in place. Refresh a slider and its value as one rectangle.
 
 - Avoid cleanup flashes when opening reading controls over text-only pages in light mode. Closing the controls by tapping the page or title retains cleanup. Dark-mode controls use cleanup when opening and closing.
 

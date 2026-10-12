@@ -1893,7 +1893,15 @@ int main(int argc, char **argv) {
     auto bold = fontMan->GetFont(32, 700, false, css_ff_serif, lString8("NV Bitter"));
     const auto regularWidth = regular->getTextWidth(U"Regular words", 13);
     const auto boldWidth = bold->getTextWidth(U"Bold words", 10);
-    require(css.setWeight(3), "Weight adjustment failed");
+    int thicknessLayoutCallbacks = 0;
+    require(css.applyAppearance(kobalt::qt::object({{"weight_steps", 3}}), {},
+                                [&](kobalt::OpeningStage stage, int) {
+                                    if (stage == kobalt::OpeningStage::Styles || stage == kobalt::OpeningStage::Pages) {
+                                        ++thicknessLayoutCallbacks;
+                                    }
+                                }),
+            "Weight adjustment failed");
+    require(thicknessLayoutCallbacks == 0, "Outline thickness recalculated styles or pagination");
     const auto weightedPage = hash(css.image(0));
     require(weightedPage != hash(styledPage) && css.weight() == 3, "Weight adjustment did not change pixels");
     require(reopened.open(styledBytes, QSize(1072, 1328), css.state(), &error), qPrintable(error));

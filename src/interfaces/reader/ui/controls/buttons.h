@@ -4,10 +4,15 @@
 #include "../style/theme.h"
 #include "../style/metrics.h"
 #include <QBoxLayout>
+#include <QEvent>
 #include <QPushButton>
 #include <functional>
 
 namespace kobalt::ui {
+inline bool isHoverEvent(const QEvent *event) {
+    return event->type() == QEvent::HoverEnter || event->type() == QEvent::HoverLeave ||
+           event->type() == QEvent::HoverMove;
+}
 class Button : public QPushButton {
 public:
     using QPushButton::QPushButton;
@@ -29,6 +34,7 @@ public:
     }
 
 protected:
+    bool event(QEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
 

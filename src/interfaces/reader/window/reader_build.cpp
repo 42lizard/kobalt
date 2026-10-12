@@ -383,6 +383,10 @@ void Reader::buildToolbar() {
     toolbarComposition.bookmarks->setEnabled(bookmarks->available());
     toolbarComposition.settings =
         iconButton(topControls, top, "rrSettings", strings::get("reader.reader_settings"), ControlIcon::More, [this] {
+            // The button stays enabled while a panel's changes apply, so the
+            // visible top bar does not repaint twice. Ignore taps then.
+            if (appearanceEdit.applying())
+                return;
             if (general->isVisible())
                 applySettings();
             else
@@ -555,7 +559,10 @@ void Reader::buildOverlays() {
         choices->hide();
         if (choosingTypography) {
             menu->show();
-            menu->raise();
+            if (navigation)
+                navigation->stackPanel(menu);
+            else
+                menu->raise();
         } else {
             guardExit();
             showControls();
@@ -606,61 +613,86 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
         showFontPicker();
     });
     sizeSlider->committed = [this](int value) {
-        this->appearanceEdit.preview()->style(kobalt::halfPointPixels(value),
-                                              this->appearanceEdit.preview()->spacing());
-        refresh();
+        const int pixels = kobalt::halfPointPixels(value);
+        const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+        if (appearanceEdit.queued() || pixels != settings->fontSize())
+            mutateAppearance([pixels](ReaderSession &preview) {
+                preview.style(pixels, preview.spacing());
+            });
     };
     connect(sizeSlider, &QSlider::valueChanged, this, [this](int value) {
         findChild<QLabel *>("rrTextSizeValue")
             ->setText(strings::get("reader.text_size_value").arg(QString::number(value / 2.0, 'f', value % 2)));
     });
     opticalSizeSlider->committed = [this](int value) {
-        appearanceEdit.preview()->setOpticalSize(value);
-        refresh();
+        const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+        if (appearanceEdit.queued() || value != settings->opticalSize())
+            mutateAppearance([value](ReaderSession &preview) {
+                preview.setOpticalSize(value);
+            });
     };
     connect(opticalSizeSlider, &QSlider::valueChanged, this, [this](int value) {
         findChild<QLabel *>("rrOpticalSizeValue")
             ->setText(strings::get("reader.text_size_value").arg(QString::number(value)));
     });
     weightSlider->committed = [this](int value) {
-        this->appearanceEdit.preview()->setThickness(value);
-        refresh();
+        const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+        if (appearanceEdit.queued() || value != settings->thickness())
+            mutateAppearance([value](ReaderSession &preview) {
+                preview.setThickness(value);
+            });
     };
     variableWeightSlider->committed = [this](int value) {
-        appearanceEdit.preview()->setWeight(value);
-        refresh();
+        const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+        if (appearanceEdit.queued() || value != settings->weight())
+            mutateAppearance([value](ReaderSession &preview) {
+                preview.setWeight(value);
+            });
     };
     connect(variableWeightSlider, &QSlider::valueChanged, this, [this](int value) {
         findChild<QLabel *>("rrVariableFontWeightValue")->setText(QString::number(value));
     });
     spacingSlider->committed = [this](int value) {
-        this->appearanceEdit.preview()->style(this->appearanceEdit.preview()->fontSize(), value);
-        refresh();
+        const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+        if (appearanceEdit.queued() || value != settings->spacing())
+            mutateAppearance([value](ReaderSession &preview) {
+                preview.style(preview.fontSize(), value);
+            });
     };
     marginSlider->committed = [this](int value) {
-        this->appearanceEdit.preview()->style(this->appearanceEdit.preview()->fontSize(),
-                                              this->appearanceEdit.preview()->spacing(),
-                                              this->appearanceEdit.preview()->fontFace(), kobalt::readingPixels(value));
-        refresh();
+        const int pixels = kobalt::readingPixels(value);
+        const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+        if (appearanceEdit.queued() || pixels != settings->margin())
+            mutateAppearance([pixels](ReaderSession &preview) {
+                preview.style(preview.fontSize(), preview.spacing(), preview.fontFace(), pixels);
+            });
     };
     verticalMarginSlider->committed = [this](int value) {
-        appearanceEdit.preview()->setVerticalMargins(kobalt::readingPixels(value));
-        refresh();
+        const int pixels = kobalt::readingPixels(value);
+        const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+        if (appearanceEdit.queued() || pixels != settings->topMargin() || pixels != settings->bottomMargin())
+            mutateAppearance([pixels](ReaderSession &preview) {
+                preview.setVerticalMargins(pixels);
+            });
     };
     for (auto *button : alignmentButtons) {
         const QString value = button->property("alignment").toString();
         connect(button, &QPushButton::clicked, this, [this, value] {
-            this->appearanceEdit.preview()->style(
-                this->appearanceEdit.preview()->fontSize(), this->appearanceEdit.preview()->spacing(),
-                this->appearanceEdit.preview()->fontFace(), this->appearanceEdit.preview()->margin(), value);
-            refresh();
+            const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+            if (appearanceEdit.queued() || value != settings->alignment())
+                mutateAppearance([value](ReaderSession &preview) {
+                    preview.style(preview.fontSize(), preview.spacing(), preview.fontFace(), preview.margin(), value);
+                });
         });
     }
     for (auto *button : hyphenButtons) {
         const QString value = button->property("hyphenation").toString();
         connect(button, &QPushButton::clicked, this, [this, value] {
-            this->appearanceEdit.preview()->setHyphenation(value);
-            refresh();
+            const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+            if (appearanceEdit.queued() || value != settings->hyphenation())
+                mutateAppearance([value](ReaderSession &preview) {
+                    preview.setHyphenation(value);
+                });
         });
     }
     for (auto *button : rotationButtons) {
@@ -712,6 +744,7 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
                 next[visibility] = value != "off";
                 if (value != "off")
                     next[key] = value;
+                const bool changed = next != preferences;
                 if (!writePreferences(next)) {
                     appearanceEdit.setError(strings::get("reader.could_not_save_reader_settings"));
                     refresh();
@@ -728,8 +761,10 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
                     page->headerTextPixels = m::reading::textPixels(page->headerSize, false);
                 }
                 const QSize viewport(width(), height() - page->topHeight() - page->bottomHeight());
-                if (appearanceEdit.preview())
-                    appearanceEdit.preview()->resize(viewport);
+                if (changed)
+                    mutateAppearance([viewport](ReaderSession &preview) {
+                        preview.resize(viewport);
+                    });
                 header->setGeometry(0, 0, width(), page->topHeight());
                 header->setVisible(page->topHeight() > 0);
                 button->setText(sizeLabel(value));
@@ -895,6 +930,8 @@ void Reader::buildNotices() {
     acknowledgments->hide();
     busyNotice = new kobalt::ui::ModalOverlay(this);
     busyNotice->card()->message(strings::get("reader.applying_appearance_changes"), "rrUpdatingText");
+    // Create the bar before the initial refresh attributes are assigned.
+    busyNotice->setDelayedProgress(false, 0, 0);
     renderNoticeTimer.setSingleShot(true);
     renderNoticeTimer.setTimerType(Qt::PreciseTimer);
     connect(&renderNoticeTimer, &QTimer::timeout, this, [this] {
@@ -1028,16 +1065,20 @@ void Reader::connectPageInput() {
 }
 
 void Reader::showFontPicker() {
-    if (!appearanceEdit.ready() || !appearanceEdit.preview())
+    if (!appearanceEdit.panelOpen() || panels->currentIndex() != 0)
         return;
-    registerPickerFonts();
+    const auto *settings = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+    choices->fontPageRequested = [this](const QStringList &families) {
+        for (const auto &family : families)
+            registerPickerFonts(family);
+    };
     QVector<Choice> items{
         {strings::get("reader.publisher_fonts"), QString(), "rrFontChoice0", strings::get("reader.recommended_fonts")}};
     pickerNativeFamilies = services.fontFamilies();
-    const auto state = appearanceEdit.preview()->state();
+    const auto state = settings->state();
     const auto supplemental = supplementalFontFamily(state.value("language").toString());
     const auto requestedDefault = preferences.value("default_font_face").toString(kobalt::defaultFontFace);
-    for (const auto &font : this->appearanceEdit.preview()->fontCatalog()) {
+    for (const auto &font : settings->fontCatalog()) {
         QString section;
         switch (font.origin) {
         case kobalt::FontOrigin::Recommended:
@@ -1073,7 +1114,7 @@ void Reader::showFontPicker() {
             defaultIndex = i;
     if (defaultIndex < 0)
         defaultFace = kobalt::defaultFontFace;
-    const int embedded = appearanceEdit.preview()->state().value("embedded_font_count").toInt();
+    const int embedded = state.value("embedded_font_count").toInt();
     items[0].detail = embedded > 0 ? (embedded == 1 ? strings::get("reader.one_embedded_font")
                                                     : strings::get("reader.embedded_fonts").arg(embedded))
                                    : strings::get("reader.no_embedded_fonts") + '\n' +
@@ -1090,18 +1131,19 @@ void Reader::showFontPicker() {
         showFontDefaultDialog(face);
     };
     choices->selected = [this](const QString &face) {
-        if (this->appearanceEdit.preview()->style(this->appearanceEdit.preview()->fontSize(),
-                                                  this->appearanceEdit.preview()->spacing(), face,
-                                                  this->appearanceEdit.preview()->margin())) {
-            choices->selectValue(face);
-            refresh();
-        }
+        const auto *current = appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview() : model;
+        if (!appearanceEdit.queued() && face == current->fontFace())
+            return;
+        mutateAppearance([this, face](ReaderSession &preview) {
+            if (preview.style(preview.fontSize(), preview.spacing(), face, preview.margin()))
+                choices->selectValue(face);
+        });
     };
     choosingTypography = true;
     const int bottom = navigation ? navigation->contentBottom(size()) : height();
     const int pickerHeight = qMin(choices->fontPanelHeight(), bottom - (navigation ? navigation->toolbarHeight() : 0));
     choices->setDropdownGeometry(QRect(0, bottom - pickerHeight, width(), pickerHeight));
-    choices->showChoices(strings::get("reader.font"), std::move(items), this->appearanceEdit.preview()->fontFace(),
+    choices->showChoices(strings::get("reader.font"), std::move(items), settings->fontFace(),
                          ChoiceScreen::Mode::Fonts);
     refresh();
 }

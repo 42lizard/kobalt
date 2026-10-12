@@ -35,6 +35,11 @@ struct RenderProgress {
     OpeningStage stage = OpeningStage::Styles;
     int percent = 0;
     qint64 elapsedMilliseconds = 0;
+    // Reflow styles and pagination share one bar; a phase change never empties it.
+    int overallPercent() const {
+        const int phase = qBound(0, int(stage) - int(OpeningStage::Styles), 2);
+        return qMin(100, (phase * 100 + qBound(0, percent, 100)) / 2);
+    }
 };
 
 // Where a platform position lies relative to the current page.
@@ -143,6 +148,10 @@ public:
     }
     QJsonObject state() const {
         return frame.state;
+    }
+    // The newest requested settings, including any whose frame is still rendering.
+    QJsonObject requestedState() const {
+        return desired;
     }
     bool temporaryTypography() const {
         return !temporaryAppearance.isEmpty();

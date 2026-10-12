@@ -43,6 +43,14 @@ void Button::setPaintMode(ButtonPaintMode value) {
     update();
 }
 
+bool Button::event(QEvent *event) {
+    // Qt repaints a hover-tracking widget when a pointer enters or leaves it.
+    // Reader buttons draw no hover state, so that repaint would only refresh
+    // unchanged pixels, for example a toolbar button when a drag starts.
+    if (isHoverEvent(event))
+        return true;
+    return QPushButton::event(event);
+}
 void Button::paintEvent(QPaintEvent *event) {
     if (mode == ButtonPaintMode::Native) {
         if (iconLabelGap) {

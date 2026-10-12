@@ -257,6 +257,11 @@ Navigation::~Navigation() {
 QRect Navigation::panelBounds(QSize size, int height) const {
     return QRect(0, size.height() - BottomNavigation::barHeight - height, size.width(), height);
 }
+void Navigation::stackPanel(QWidget *panel) const {
+    // Keep the header rule in place when a bottom panel opens. Raising the
+    // rule again would repaint unchanged toolbar pixels beneath it.
+    panel->stackUnder(upperEdge);
+}
 void Navigation::update(QSize size, const NavigationState &state) {
     state.footer->hide();
     toolbar->setGeometry(0, 0, size.width(), toolbarHeight());
@@ -268,17 +273,17 @@ void Navigation::update(QSize size, const NavigationState &state) {
     rules->show();
     rules->raise();
     clock->setGeometry(c::inset, ui::px(10), ui::px(160), ui::px(40));
-    session->setGeometry(ui::px(196), ui::px(10), qMax(0, size.width() - ui::px(392)), ui::px(40));
+    int sessionInset = ui::px(196);
     battery->move(size.width() - c::inset - battery->width(), ui::px(10));
     if (bluetooth) {
         bluetooth->setVisible(statusVisible && bluetooth->active());
         bluetooth->move(battery->x() - int(ui::metrics::panel::bluetoothGap) - bluetooth->width(), ui::px(10));
         if (bluetooth->active()) {
             const int rightInset = size.width() - bluetooth->x() + int(c::inset);
-            const int inset = qMax(ui::px(196), rightInset);
-            session->setGeometry(inset, ui::px(10), qMax(0, size.width() - 2 * inset), ui::px(40));
+            sessionInset = qMax(sessionInset, rightInset);
         }
     }
+    session->setGeometry(sessionInset, ui::px(10), qMax(0, size.width() - 2 * sessionInset), ui::px(40));
     exitAction->setGeometry(ui::px(24), statusHeight(), exitAction->sizeHint().width(), c::actionHeight);
     settings->setGeometry(size.width() - c::cellWidth, statusHeight(), c::cellWidth, c::actionHeight);
     bookmarks->setGeometry(size.width() - 2 * c::cellWidth, statusHeight(), c::cellWidth, c::actionHeight);
@@ -305,7 +310,6 @@ void Navigation::update(QSize size, const NavigationState &state) {
     // Chapters covers the header's action row with its own bar; the status strip stays.
     if (state.chaptersOpen) {
         state.chapters->setGeometry(0, statusHeight(), size.width(), size.height() - height - statusHeight());
-        state.chapters->raise();
     }
     bar->select(state.active, state.enabled, state.lightAvailable);
     int top = toolbarHeight(), bottom = bar->y();
@@ -324,11 +328,20 @@ void Navigation::update(QSize size, const NavigationState &state) {
         upperEdge->hide();
         lowerEdge->hide();
     }
-    bar->raise();
+    // Keep the bar below the font picker even while the picker is hidden.
+    // Opening or closing it then leaves the header rule's order unchanged.
+    if (!state.chaptersOpen) {
+        bar->stackUnder(state.chapters);
+    } else {
+        bar->raise();
+    }
     // Keep the same stacking order on replay. Raising each rule in turn
     // invalidates its pixels even when no panel or rule has changed.
     lowerEdge->stackUnder(bar);
     upperEdge->stackUnder(lowerEdge);
+    if (state.chaptersOpen) {
+        state.chapters->stackUnder(upperEdge);
+    }
 }
 bool Navigation::contains(QPoint global) const {
     return bar->isVisible() && QRect(bar->mapToGlobal(QPoint()), bar->size()).contains(global);

@@ -615,12 +615,11 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     if (size.width() < 320 || size.height() < 240)
         size = size_;
     const bool bionicChanged = bionic != bionic_;
-    // Rebuild italic overhangs from plain glyphs so live edits and reopening agree.
+    // Outline thickness changes pixels only. Keep the formatted page and its anchors.
     const bool thicknessChanged = weight != weight_;
-    const bool styled = thicknessChanged || bionicChanged || axisChanged || opticalChanged || pixels != pixels_ ||
-                        spacing != spacing_ || face != face_ || defaultFace != defaultFace_ || margin != margin_ ||
-                        topMargin != topMargin_ || bottomMargin != bottomMargin_ || alignment != alignment_ ||
-                        hyphenation != hyphenation_;
+    const bool styled = bionicChanged || axisChanged || opticalChanged || pixels != pixels_ || spacing != spacing_ ||
+                        face != face_ || defaultFace != defaultFace_ || margin != margin_ || topMargin != topMargin_ ||
+                        bottomMargin != bottomMargin_ || alignment != alignment_ || hyphenation != hyphenation_;
     const bool resized = size != size_;
     if (!styled && !resized && weight == weight_ && dark == darkMode_ && smooth == smoothImages_)
         return true;
@@ -669,6 +668,11 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     cache_.clear();
     spareImage_ = {};
     damage_.clear();
+    if (thicknessChanged) {
+        engine_->clearImageCache();
+        // Rebuild drawn paragraphs without repaginating or changing anchors.
+        engine_->getDocument()->clearRendBlockCache();
+    }
     if (!styled && !resized)
         return true;
     // Applying a panel can change typography, hyphenation and the viewport together.

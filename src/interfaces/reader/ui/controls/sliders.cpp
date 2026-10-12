@@ -68,6 +68,9 @@ void SettingSlider::paintEvent(QPaintEvent *) {
     painter.drawEllipse(QPoint(x, height() / 2), m::control::sliderInnerRadius, m::control::sliderInnerRadius);
 }
 bool SettingSlider::event(QEvent *event) {
+    // The slider draws no hover state. See Button::event.
+    if (isHoverEvent(event))
+        return true;
     if (event->type() == QEvent::TouchBegin || event->type() == QEvent::TouchUpdate ||
         event->type() == QEvent::TouchEnd) {
         const auto points = touchPositions(static_cast<QTouchEvent *>(event));

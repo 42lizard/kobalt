@@ -98,6 +98,7 @@ public:
         return Qt::TopEdge;
     }
     QRect panelBounds(QSize size, int height) const;
+    void stackPanel(QWidget *panel) const;
     void update(QSize size, const NavigationState &state);
     int navigationTop() const {
         return bar->y();

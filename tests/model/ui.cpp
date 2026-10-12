@@ -112,6 +112,17 @@ protected:
         return false;
     }
 };
+class PaintCountingObserver : public QObject {
+public:
+    int paints = 0;
+
+protected:
+    bool eventFilter(QObject *, QEvent *event) override {
+        if (event->type() == QEvent::Paint)
+            ++paints;
+        return false;
+    }
+};
 class PaintCountingPanel : public kobalt::ui::Panel {
 public:
     QRegion painted;
@@ -1152,6 +1163,21 @@ int main(int argc, char **argv) {
                 "A long chapter title did not elide on one line");
         graph.setProgress("The Second Voyage", 4, 10, 12, 25, 100);
         QApplication::processEvents();
+        PaintCountingObserver graphPaints, barPaints, titlePaints;
+        graph.installEventFilter(&graphPaints);
+        bars->installEventFilter(&barPaints);
+        title->installEventFilter(&titlePaints);
+        graph.setData(chapters, {20, -1, 1, 1}, true, {});
+        graph.setProgress("The Second Voyage", 4, 10, 12, 25, 100);
+        QApplication::processEvents();
+        require(graphPaints.paints == 0 && barPaints.paints == 0 && titlePaints.paints == 0,
+                "Repeated Stats data and progress repainted the graph");
+        auto changedChapters = chapters;
+        ++changedChapters[20].words;
+        graph.setData(changedChapters, {20, -1, 1, 1}, true, {});
+        QApplication::processEvents();
+        require(barPaints.paints > 0, "Changed chapter word count did not repaint the bars");
+        graph.setData(chapters, {20, -1, 1, 1}, true, {});
         require(title->text() == "The Second Voyage", "The chapter title is missing");
         require(text("rrGraphChapterPercent") == get("common.percent").arg(30) && text("rrGraphChapterFigure") == "7" &&
                     text("rrGraphChapterUnit") == get("stats.pages_left"),
@@ -1271,14 +1297,24 @@ int main(int argc, char **argv) {
         ChoiceScreen picker(&host);
         QVector<Choice> choices;
         for (int i = 0; i < 25; ++i)
-            choices.append({QString("Font %1").arg(i), QString(), QString("font%1").arg(i)});
+            choices.append({QString("Font %1").arg(i), QString("Family %1").arg(i), QString("font%1").arg(i)});
+        QVector<QStringList> requestedPages;
+        picker.fontPageRequested = [&](const QStringList &families) {
+            requestedPages.append(families);
+        };
         picker.setDropdownGeometry(QRect(0, 200, 1072, picker.fontPanelHeight()));
         picker.showChoices("Font", choices, {}, ChoiceScreen::Mode::Fonts);
+        require(requestedPages.size() == 1, "Opening the font picker did not request its visible page once");
         auto *next = picker.findChild<QPushButton *>("rrFontPagerNext");
         auto *previous = picker.findChild<QPushButton *>("rrFontPagerPrevious");
         require(next && previous, "Font picker lacks paging controls");
         for (int page = 0; page < 3; ++page) {
             app.processEvents();
+            QStringList expectedFamilies;
+            for (int i = page * 12; i < qMin((page + 1) * 12, int(choices.size())); ++i)
+                expectedFamilies.append(choices[i].value);
+            require(requestedPages.size() == page + 1 && requestedPages.last() == expectedFamilies,
+                    "Font picker requested families outside the visible page");
             int visible = 0;
             QVector<QRect> rectangles;
             for (int i = 0; i < choices.size(); ++i) {
@@ -1299,6 +1335,9 @@ int main(int argc, char **argv) {
         }
         while (previous->isEnabled())
             previous->click();
+        require(requestedPages.size() == 5 && requestedPages[3] == requestedPages[1] &&
+                    requestedPages[4] == requestedPages[0],
+                "Returning to a font page requested different families");
         for (const QSize size : {QSize(1072, picker.fontPanelHeight()), QSize(600, 450)}) {
             picker.setFontGeometry(QRect(QPoint(), size));
             app.processEvents();
@@ -1308,6 +1347,8 @@ int main(int argc, char **argv) {
                         "Grid clips a cell after resize");
             }
         }
+        require(requestedPages.size() == 5, "Resizing the font picker requested a hidden font page");
+        picker.fontPageRequested = {};
         require(picker.findChild<QPushButton *>("font0")->width() == picker.width() / 3 &&
                     picker.findChild<QPushButton *>("font1")->width() == picker.width() / 3,
                 "Default slots must each occupy a third of a row");
@@ -1560,11 +1601,19 @@ int main(int argc, char **argv) {
                 "Turning the option off kept heavier text");
         require(interfaceWeightSteps(kobalt::qt::object({{"heavier_interface_text", true}})) == heavierTextSteps,
                 "The option does not select heavier text");
+        kobalt::ChapterGraph graph(&host);
+        graph.resize(900, kobalt::ui::metrics::chapters::graphHeight);
+        graph.setProgress("A chapter with a title that needs layout", 4, 10, 12, 25, 100);
+        auto *graphTitle = graph.findChild<QLabel *>("rrGraphChapterTitle");
         for (int round = 0; round < 2; ++round) {
             require(setInterfaceWeight(heavierTextSteps), "Heavier text did not replace the faces");
             require(!setInterfaceWeight(heavierTextSteps), "The same weight replaced the faces again");
             refreshInterfaceText(&host);
             app.processEvents();
+            graphTitle->setGeometry(0, 0, 1, 1);
+            graph.setProgress("A chapter with a title that needs layout", 4, 10, 12, 25, 100);
+            require(graphTitle->width() == graph.width() - 2 * int(metrics::chrome::inset),
+                    "Heavier interface text did not lay out unchanged Stats progress");
             require(interfaceWeight() == heavierTextSteps && QFontInfo(interfaceFont()).family() == nativeFamily &&
                         QFontInfo(chromeFont()).family() == chromeFamily,
                     "Heavier text changed the family");
@@ -1594,6 +1643,10 @@ int main(int argc, char **argv) {
             require(setInterfaceWeight(0), "Regular text did not replace the faces");
             refreshInterfaceText(&host);
             app.processEvents();
+            graphTitle->setGeometry(0, 0, 1, 1);
+            graph.setProgress("A chapter with a title that needs layout", 4, 10, 12, 25, 100);
+            require(graphTitle->width() == graph.width() - 2 * int(metrics::chrome::inset),
+                    "Regular interface text did not lay out unchanged Stats progress");
             require(plain->grab().toImage() == regularPixels && measure() == regular,
                     "Regular text did not return to its pixels");
         }

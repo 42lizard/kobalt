@@ -172,6 +172,5 @@ void BookmarkList::redraw() {
         itemRow->setAccessory(
             ui::ListRow::Caption{item.page >= 0 ? QString::number(item.page + 1) : QString(), numberWidth});
     }
-    update();
 }
 }

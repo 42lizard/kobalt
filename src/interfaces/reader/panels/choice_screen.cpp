@@ -174,12 +174,14 @@ ChoiceScreen::ChoiceScreen(QWidget *parent) : kobalt::ui::Panel(parent), navigat
     connect(fontPager->previous, &QPushButton::clicked, this, [this] {
         if (page > 0) {
             --page;
+            requestFontPage();
             redraw();
         }
     });
     connect(fontPager->next, &QPushButton::clicked, this, [this] {
         if (page + 1 < pageCount()) {
             ++page;
+            requestFontPage();
             redraw();
         }
     });
@@ -249,6 +251,8 @@ void ChoiceScreen::showChoices(const QString &heading, QVector<Choice> choices, 
     for (int i = 0; i < items.size(); ++i)
         if (!current.isEmpty() && items[i].value == current)
             page = pageForIndex(i);
+    if (mode == Mode::Fonts)
+        requestFontPage();
     redraw();
     for (auto *widget : findChildren<QWidget *>())
         widget->ensurePolished();
@@ -310,6 +314,18 @@ int ChoiceScreen::pageForIndex(int index) const {
         return 0;
     }
     return index / pageSize;
+}
+
+void ChoiceScreen::requestFontPage() {
+    if (!fontPageRequested || mode != Mode::Fonts || page < 0 || page >= fontPages.size())
+        return;
+    QStringList families;
+    for (const int index : fontPages[page]) {
+        const QString family = items[index].value.isEmpty() ? QStringLiteral("Libron") : items[index].value;
+        if (!families.contains(family))
+            families.append(family);
+    }
+    fontPageRequested(families);
 }
 
 void ChoiceScreen::layoutChoices() {
