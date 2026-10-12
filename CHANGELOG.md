@@ -1,12 +1,10 @@
-## Unreleased
-
-Show rotation labels beside the icons when they fit, and icons only on narrower screens. Use white unselected split buttons with thin borders and black selected buttons. Add space between rotation icons and labels.
-
-Kobo devices with an orientation sensor now offer Portrait, Landscape and Both. Portrait lock is the default, and rejected orientations no longer trigger page layout changes. Devices without a sensor keep manual rotation.
-
 ## v1.0-beta.3
 
 ### What's changed
+
+- Show rotation labels beside the icons when they fit, and icons only on narrower screens. Use white unselected split buttons with thin borders and black selected buttons. Add space between rotation icons and labels.
+
+- Kobo devices with an orientation sensor now offer Portrait, Landscape and Both. Portrait lock is the default, and rejected orientations no longer trigger page layout changes. Devices without a sensor keep manual rotation.
 
 - Save changed reading progress to Nickel every 30 seconds while reading and before sleep, so the sleep screen can show the current progress.
 
