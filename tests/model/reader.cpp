@@ -737,6 +737,13 @@ int main(int argc, char **argv) {
     kobalt::ReaderModel granular(kobalt::test::readerFonts());
     require(granular.open(bytes, QSize(600, 800), defaults.state(), &error), qPrintable(error));
     require(granular.fontSize() == 45 && granular.spacing() == 121, "Single-unit typography was not restored");
+    require(defaults.style(kobalt::halfPointPixels(80), 121), "Cannot select 40 point text");
+    const auto largeImage = hash(defaults.image(0));
+    require(defaults.style(kobalt::maximumFontPixels(), 121) && hash(defaults.image(0)) != largeImage,
+            "48 point text rendered at the same size as 40 point text");
+    require(granular.open(bytes, QSize(600, 800), defaults.state(), &error) &&
+                granular.fontSize() == kobalt::maximumFontPixels(),
+            "Maximum text size was lost on reopening");
     require(defaults.style(44, 120), "Cannot restore defaults after granular typography check");
     require(defaults.style(44, 120, "NV Bitter", 48) && hash(defaults.image(0)) != defaultImage,
             "Bundled Libron did not change rendered text from bundled NV Bitter");
@@ -1854,7 +1861,7 @@ int main(int argc, char **argv) {
                 "Independent variable weight and thickness were lost on reopening");
         require(variable.setThickness(0) && hash(variable.image(0)) == normal,
                 "Clearing variable thickness did not restore pixels");
-        require(!variable.setThickness(-1) && !variable.setThickness(9), "Thickness accepted an unsupported value");
+        require(!variable.setThickness(-1) && !variable.setThickness(13), "Thickness accepted an unsupported value");
         auto actual = fontMan->GetFont(32, alternateWeight, false, css_ff_serif,
                                        lString8(variableFace.family.toUtf8().constData()));
         require(actual->getWeight() == alternateWeight && actual->getSynthWeight() == 0,
@@ -1892,10 +1899,10 @@ int main(int argc, char **argv) {
     require(reopened.open(styledBytes, QSize(1072, 1328), css.state(), &error), qPrintable(error));
     require(reopened.weight() == 3 && hash(reopened.image(0)) == weightedPage, "Weight lost on reopen");
     require(css.setWeight(0) && hash(css.image(0)) == hash(styledPage), "Zero weight did not restore original glyphs");
-    require(!css.setWeight(-1) && !css.setWeight(9) && css.weight() == 0, "Invalid weight changed the model");
+    require(!css.setWeight(-1) && !css.setWeight(13) && css.weight() == 0, "Invalid weight changed the model");
     require(hash(reopened.image(0)) == weightedPage, "Another model changed the saved font weight");
     quint64 previousInkSum = 0;
-    for (int step = 0; step <= 8; ++step) {
+    for (int step = 0; step <= 12; ++step) {
         require(css.setWeight(step), "Weight step failed");
         const auto image = css.image(0);
         quint64 ink = 0;
@@ -1905,6 +1912,9 @@ int main(int argc, char **argv) {
         require(ink > previousInkSum, "Increasing outline weight did not increase ink");
         previousInkSum = ink;
     }
+    require(reopened.open(styledBytes, QSize(1072, 1328), css.state(), &error) && reopened.thickness() == 12,
+            "Maximum thickness was lost on reopen");
+    require(reopened.setThickness(3), "Cannot restore the comparison model's thickness");
     require(css.setWeight(0) && hash(css.image(0)) == hash(styledPage), "Weight steps changed the original rendering");
     require(regular->getWeight() == 400 && bold->getWeight() == 700 &&
                 regular->getTextWidth(U"Regular words", 13) == regularWidth &&

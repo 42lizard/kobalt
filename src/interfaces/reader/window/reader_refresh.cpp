@@ -256,6 +256,14 @@ void Reader::syncAppearanceControls(bool pickingFont) {
     opticalSizeSlider->parentWidget()->setVisible(optical.available());
     if (optical.available() && !opticalSizeSlider->interacting()) {
         opticalSizeSlider->setRange(qCeil(optical.minimum), qFloor(optical.maximum));
+        QVector<int> stops{opticalSizeSlider->minimum()};
+        for (const int size : {6, 8, 10, 12, 14, 18, 24, 36, 48, 72, 96, 144}) {
+            if (size > opticalSizeSlider->minimum() && size < opticalSizeSlider->maximum()) {
+                stops.append(size);
+            }
+        }
+        stops.append(opticalSizeSlider->maximum());
+        opticalSizeSlider->setMarkers(stops, ui::SettingSlider::MarkerMode::Stops);
         opticalSizeSlider->setValue(qRound(settings->opticalSize()));
         const auto caption = strings::get("reader.text_size_value").arg(QString::number(opticalSizeSlider->value()));
         findChild<QLabel *>("rrOpticalSizeValue")->setText(caption);
@@ -281,6 +289,14 @@ void Reader::syncAppearanceControls(bool pickingFont) {
     }
     if (weightAxis.available() && !variableWeightSlider->interacting()) {
         variableWeightSlider->setRange(weightAxis.minimum, weightAxis.maximum);
+        QVector<int> stops{weightAxis.minimum};
+        for (const int weight : {100, 200, 300, 400, 450, 500, 600, 700, 800, 900}) {
+            if (weight > weightAxis.minimum && weight < weightAxis.maximum) {
+                stops.append(weight);
+            }
+        }
+        stops.append(weightAxis.maximum);
+        variableWeightSlider->setMarkers(stops, ui::SettingSlider::MarkerMode::Stops);
         variableWeightSlider->setPageStep(50);
         variableWeightSlider->setValue(normalWeight ? settings->weight() : weightAxis.defaultValue);
         findChild<QLabel *>("rrVariableFontWeightValue")

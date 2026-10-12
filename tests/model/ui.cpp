@@ -2951,6 +2951,25 @@ int main(int argc, char **argv) {
         require(slider.value() == (index == spacingStops.size() - 1 ? 299 : spacingStops[index]),
                 "Minus snapped instead of changing line height by one percent");
     }
+    slider.setRange(14, 96);
+    slider.setSingleStep(2);
+    const QVector<int> sizeStops{14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48, 56, 64, 80, 96};
+    slider.setMarkers(sizeStops, kobalt::ui::SettingSlider::MarkerMode::Stops);
+    slider.resize(560 + 2 * inset, 72);
+    for (int index = 0; index < sizeStops.size(); ++index) {
+        const int x = inset + 40 * index;
+        slide(QEvent::MouseButtonPress, x);
+        slide(QEvent::MouseButtonRelease, x);
+        require(slider.value() == sizeStops[index], "Font size did not snap to its nonlinear stop");
+    }
+    slider.nudge(-1);
+    require(slider.value() == 94, "Minus did not change 48 pt to 47 pt");
+    slider.nudge(-1);
+    require(slider.value() == 92, "Minus snapped instead of changing to 46 pt");
+    slider.setRange(100, 300);
+    slider.setSingleStep(1);
+    slider.setMarkers(spacingStops, kobalt::ui::SettingSlider::MarkerMode::Stops);
+    slider.resize(360 + 2 * inset, 72);
     for (const bool dark : {false, true}) {
         QPalette colors = originalPalette;
         colors.setColor(QPalette::Window, dark ? Qt::black : Qt::white);

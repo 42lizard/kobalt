@@ -694,7 +694,7 @@ private slots:
         QVERIFY(thickness);
         QVERIFY(thickness->isVisible() && thickness->isEnabled());
         QCOMPARE(thickness->minimum(), 0);
-        QCOMPARE(thickness->maximum(), 8);
+        QCOMPARE(thickness->maximum(), 12);
         QVERIFY(f.canvasClick(thickness, QPoint(thickness->width() / 2, thickness->height() / 2)));
         QTRY_VERIFY_WITH_TIMEOUT(!f.state()["preview_busy"].toBool(), 30000);
         const int selectedThickness = f.state()["preview_settings"].toObject()["weight_steps"].toInt();

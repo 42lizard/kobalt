@@ -463,7 +463,11 @@ private slots:
             QCOMPARE(panel.fontButton->parentWidget(), typography);
             QCOMPARE(panel.marginSlider->parentWidget()->parentWidget(), layout);
             QCOMPARE(panel.sizeSlider->minimum(), 14);
-            QCOMPARE(panel.sizeSlider->maximum(), 40);
+            QCOMPARE(panel.sizeSlider->maximum(), 96);
+            QCOMPARE(panel.sizeSlider->singleStep(), 2);
+            QCOMPARE(panel.weightSlider->minimum(), 0);
+            QCOMPARE(panel.weightSlider->maximum(), 12);
+            QCOMPARE(panel.weightSlider->singleStep(), 1);
             QCOMPARE(panel.spacingSlider->minimum(), 100);
             QCOMPARE(panel.spacingSlider->maximum(), 300);
             QCOMPARE(panel.spacingSlider->singleStep(), 1);

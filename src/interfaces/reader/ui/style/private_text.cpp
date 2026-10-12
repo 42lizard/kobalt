@@ -343,7 +343,7 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
     if (text.isEmpty() || !fonts().library) {
         return result;
     }
-    const int steps = weight < 0 ? (interfaceFamily(font) ? interfaceWeight() : 0) : qBound(0, weight, 8);
+    const int steps = weight < 0 ? (interfaceFamily(font) ? interfaceWeight() : 0) : qBound(0, weight, 12);
     QString cacheKey = font.toString() + ':' + QString::number(steps) + ':' + QString::number(rasterize) + ':' +
                        QString::number(font.capitalization()) + ':' + QString::number(font.letterSpacingType()) + ':' +
                        QString::number(font.letterSpacing(), 'g', 16) + ':' +

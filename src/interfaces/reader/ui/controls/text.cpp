@@ -105,7 +105,7 @@ void drawOpticalText(QPainter &painter, const QRectF &area, const QString &text,
         return;
     }
     const bool bold = appearance.bionic == "bold";
-    const int weight = bold ? 0 : qBound(0, appearance.weight, 8);
+    const int weight = bold ? 0 : qBound(0, appearance.weight, 12);
     if (!bold && !weight) {
         const auto label = painter.fontMetrics().elidedText(text, Qt::ElideRight, qMax(0, int(area.width())));
         const auto bounds = QFontMetricsF(painter.font()).tightBoundingRect(label);

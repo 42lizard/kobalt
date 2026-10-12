@@ -396,7 +396,7 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     hyphenation_ = hyphenation.isBool() ? (hyphenation.toBool() ? "auto" : "off") : hyphenation.toString("off");
     if (hyphenation_ != "auto" && hyphenation_ != "on" && hyphenation_ != "off")
         hyphenation_ = "off";
-    weight_ = qBound(0, saved.value("weight_steps").toInt(0), 8);
+    weight_ = qBound(0, saved.value("weight_steps").toInt(0), 12);
     bionic_ = saved.value("bionic_reading").toString("off");
     // Preserve enabled Bionic reading from the retired thickness mode.
     if (bionic_ == "synthetic")
@@ -424,6 +424,9 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     opticalSize_ = normalizedOpticalSize(optical, savedOptical);
     activateFontParameters();
     engine_ = std::make_unique<LVDocView>(32, true);
+    // CREngine defaults to a 72-pixel cap. Use the same physical limits as the controls.
+    engine_->setMinFontSize(minimumFontPixels());
+    engine_->setMaxFontSize(maximumFontPixels());
     // Keep normal word spacing when fitting a line. CREngine otherwise allows
     // spaces to shrink to half width, including in left-aligned paragraphs.
     auto properties = LVCreatePropsContainer();
@@ -604,7 +607,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     if (!engine_ || pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 ||
         spacing > maximumLineSpacing || margin < 0 || margin > maximumMarginPixels() || topMargin < 0 ||
         topMargin > maximumMarginPixels() || bottomMargin < 0 || bottomMargin > maximumMarginPixels() || weight < 0 ||
-        weight > 8 || !validAlignment(alignment) ||
+        weight > 12 || !validAlignment(alignment) ||
         (hyphenation != "auto" && hyphenation != "on" && hyphenation != "off") ||
         (bionic != "off" && bionic != "bold") || (!face.isEmpty() && !fontFaces().contains(face)) ||
         !fontFaces().contains(defaultFace))
@@ -674,7 +677,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     return goTo(anchor);
 }
 bool ReaderModel::setThickness(int steps) {
-    if (steps < 0 || steps > 8)
+    if (steps < 0 || steps > 12)
         return false;
     return applyAppearance(kobalt::qt::object({{"weight_steps", steps}}));
 }

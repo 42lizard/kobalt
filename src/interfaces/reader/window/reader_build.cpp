@@ -610,6 +610,10 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
                                               this->appearanceEdit.preview()->spacing());
         refresh();
     };
+    connect(sizeSlider, &QSlider::valueChanged, this, [this](int value) {
+        findChild<QLabel *>("rrTextSizeValue")
+            ->setText(strings::get("reader.text_size_value").arg(QString::number(value / 2.0, 'f', value % 2)));
+    });
     opticalSizeSlider->committed = [this](int value) {
         appearanceEdit.preview()->setOpticalSize(value);
         refresh();

@@ -679,7 +679,7 @@ void ReaderSession::setDarkMode(bool enabled) {
     request(true);
 }
 bool ReaderSession::setThickness(int steps) {
-    if (temporaryTypography() || steps < 0 || steps > 8 || desired.value("bionic_reading").toString("off") != "off")
+    if (temporaryTypography() || steps < 0 || steps > 12 || desired.value("bionic_reading").toString("off") != "off")
         return false;
     if (steps != thickness()) {
         desired["weight_steps"] = steps;
@@ -691,7 +691,7 @@ bool ReaderSession::setWeight(int steps) {
     if (temporaryTypography())
         return false;
     const auto axis = weightAxis();
-    if (axis.available() ? (steps < axis.minimum || steps > axis.maximum) : (steps < 0 || steps > 8))
+    if (axis.available() ? (steps < axis.minimum || steps > axis.maximum) : (steps < 0 || steps > 12))
         return false;
     if (desired.value("bionic_reading").toString("off") != "off")
         return false;
