@@ -342,6 +342,15 @@ void Navigation::update(QSize size, const NavigationState &state) {
     if (state.chaptersOpen) {
         state.chapters->stackUnder(upperEdge);
     }
+    // Settings opens raised above the reading bars. Its heavy bottom rule is
+    // upperEdge, so keep the panel beneath it. Move it only when it is above
+    // the rule; restacking an unchanged order would repaint the panel.
+    auto *settings = state.settings;
+    if (settings->isVisible() && settings->parentWidget() == upperEdge->parentWidget()) {
+        const auto siblings = settings->parentWidget()->children();
+        if (siblings.indexOf(settings) > siblings.indexOf(upperEdge))
+            settings->stackUnder(upperEdge);
+    }
 }
 bool Navigation::contains(QPoint global) const {
     return bar->isVisible() && QRect(bar->mapToGlobal(QPoint()), bar->size()).contains(global);

@@ -2651,6 +2651,31 @@ private slots:
         QCOMPARE(host.session()->state()["weight_steps"].toInt(), thickness + 2);
         QCOMPARE(host.session()->pages(), pages);
     }
+    // Settings ends in the heavy navigation rule that separates it from the
+    // page. Raising the panel must not cover that rule.
+    void overflowShowsBottomRule() {
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(nativeSize + QSize(40, 40));
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
+        auto *general = host.window()->findChild<QWidget *>("rrGeneralSettings");
+        QTRY_VERIFY(general->isVisible());
+        QCoreApplication::processEvents();
+        const QImage image = canvas.capture();
+        const QRgb ink = general->palette().color(QPalette::WindowText).rgb();
+        const int bottom = general->geometry().bottom();
+        for (const int x : {20, nativeSize.width() / 2, nativeSize.width() - 20})
+            for (const int y : {bottom - 1, bottom})
+                QVERIFY2(image.pixel(x, y) == ink, qPrintable(QString("%1,%2").arg(x).arg(y)));
+    }
     void linkHighlightsPaintOnlyChangedOutlines() {
         ReadingPage page(nullptr, [] {});
         page.resize(400, 600);
