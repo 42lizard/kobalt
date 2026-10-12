@@ -226,42 +226,18 @@ bool ReaderCoordinator::begin(const RetainOpening &retainOpening) {
     if (kobalt::previewBook(request->volume()))
         return false;
     QString nextIdentity, nextPath;
-    const auto route = kobalt::readerBookRoute(request->volume(), &nextIdentity, &nextPath);
+    const auto route = kobalt::readerBookCandidateRoute(request->volume(), &nextIdentity, &nextPath);
     if (route == kobalt::ReaderBookRoute::Unsupported)
         return false;
-    const bool assetsReady = environment_.assets.available();
-    const bool fontsReady = assetsReady && kobalt::ui::initializeInterfaceFonts(environment_.assets);
-    if (!fontsReady) {
-        kobalt::diagnostic(assetsReady ? "interface-fonts-unavailable" : "assets-unavailable");
-        // Keep the native settings and reader choice available. This failure
-        // needs no Kobalt window or asset-backed font, and consumes no book.
-        const bool filesystemRecovery = !assetsReady && environment_.assets.hasFilesystemRecoveryFiles();
-        if (filesystemRecovery)
-            kobalt::diagnostic("asset-filesystem-recovery");
-        run.fallbackAlert = kobalt::showMissingAssetsAlert(QStringLiteral(KOBALT_VERSION), filesystemRecovery);
-        if (!run.fallbackAlert) {
-            kobalt::diagnostic("assets-alert-unavailable");
-            return false;
-        }
-        busy = true;
-        watch();
-        const auto epoch = generation;
-        connect(run.fallbackAlert.data(), &QDialog::finished, this, [this, epoch] {
-            if (epoch == generation) {
-                busy = false;
-                run.fallbackAlert.clear();
-                status("ready");
-            }
-        });
-        status("assets-unavailable");
-        return true;
+    // The loading view draws in the interface faces. Check only those files
+    // now and leave the whole bundle for after its first paint. When they
+    // cannot be read, check everything now so recovery can show its alert.
+    if (!kobalt::ui::initializeOpeningFonts(environment_.assets)) {
+        const bool assetsReady = environment_.assets.available();
+        if (!assetsReady || !kobalt::ui::initializeInterfaceFonts(environment_.assets))
+            return missingAssetsBeforeOpening(assetsReady);
     }
-    if (run.model && nextIdentity != run.identity) {
-        if (run.sourceLease)
-            run.sourceLease->cancel();
-        run.model.reset();
-        run.sourceLease.reset();
-    }
+    const bool discardRetained = run.model && nextIdentity != run.identity;
     run.identity = nextIdentity;
     run.filePath = nextPath;
     if (!writeJson(activePath, kobalt::qt::object({{"book", run.identity}}))) {
@@ -277,11 +253,6 @@ bool ReaderCoordinator::begin(const RetainOpening &retainOpening) {
     watch();
     run.openingTimer.start();
     run.openingTimings = {};
-    run.orientation = std::make_unique<kobalt::ReaderOrientation>(kobalt::nativeOrientationSensor(),
-                                                                  kobalt::turnReaderScreen, kobalt::ownReaderRotation);
-    run.orientation->configure(readJson(environment_.paths.preferences()));
-    run.statePath = environment_.paths.bookState(run.identity);
-    status("loading");
     QWidget *background = QApplication::activeWindow();
     for (auto *window : QApplication::topLevelWidgets())
         if (window->isVisible() && window->inherits("MainWindowView")) {
@@ -299,22 +270,110 @@ bool ReaderCoordinator::begin(const RetainOpening &retainOpening) {
     connect(run.loading->window(), &QDialog::rejected, this, [this] {
         cancelOpening();
     });
+    const auto epoch = generation;
+    run.loading->afterFirstPaint([this, epoch, route, discardRetained] {
+        if (epoch == generation && busy && run.opening && run.loading) {
+            if (discardRetained) {
+                if (run.sourceLease) {
+                    run.sourceLease->cancel();
+                }
+                run.model.reset();
+                run.sourceLease.reset();
+            }
+            prepareOpening(route);
+        }
+    });
     run.loading->window()->show();
     run.loading->window()->raise();
-    const auto epoch = generation;
-    kobalt::qt::later(0, this, [this, epoch, route] {
-        if (epoch != generation || !busy)
-            return;
-        if (route == kobalt::ReaderBookRoute::Protected)
-            fail(QString(), kobalt::OpeningFallback::Protected);
-        else if (route == kobalt::ReaderBookRoute::Remembered)
-            fail(QString(), kobalt::OpeningFallback::Remembered);
-        else if (route == kobalt::ReaderBookRoute::Failed)
-            fail(strings::get("opening.failed"));
-        else
-            load();
-    });
     return true;
+}
+
+bool ReaderCoordinator::missingAssetsBeforeOpening(bool assetsReady) {
+    kobalt::diagnostic(assetsReady ? "interface-fonts-unavailable" : "assets-unavailable");
+    // Keep the native settings and reader choice available. This failure
+    // needs no Kobalt window or asset-backed font, and consumes no book.
+    const bool filesystemRecovery = !assetsReady && environment_.assets.hasFilesystemRecoveryFiles();
+    if (filesystemRecovery)
+        kobalt::diagnostic("asset-filesystem-recovery");
+    run.fallbackAlert = kobalt::showMissingAssetsAlert(QStringLiteral(KOBALT_VERSION), filesystemRecovery);
+    if (!run.fallbackAlert) {
+        kobalt::diagnostic("assets-alert-unavailable");
+        return false;
+    }
+    busy = true;
+    watch();
+    const auto epoch = generation;
+    connect(run.fallbackAlert.data(), &QDialog::finished, this, [this, epoch] {
+        if (epoch == generation) {
+            busy = false;
+            run.fallbackAlert.clear();
+            status("ready");
+        }
+    });
+    status("assets-unavailable");
+    return true;
+}
+
+void ReaderCoordinator::missingAssets(bool assetsReady) {
+    kobalt::diagnostic(assetsReady ? "interface-fonts-unavailable" : "assets-unavailable");
+    const bool filesystemRecovery = !assetsReady && environment_.assets.hasFilesystemRecoveryFiles();
+    if (filesystemRecovery) {
+        kobalt::diagnostic("asset-filesystem-recovery");
+    }
+    auto fallback = std::move(run.opening);
+    release();
+    run.fallbackAlert = kobalt::showMissingAssetsAlert(QStringLiteral(KOBALT_VERSION), filesystemRecovery);
+    if (!run.fallbackAlert) {
+        kobalt::diagnostic("assets-alert-unavailable");
+        status("stock");
+        if (fallback && !lifecycle->blocked() && !lifecycle->draining && !kobalt::NativeLifecycle::suspended()) {
+            fallback->openStock();
+        }
+        return;
+    }
+    busy = true;
+    watch();
+    const auto epoch = generation;
+    connect(run.fallbackAlert.data(), &QDialog::finished, this, [this, epoch] {
+        if (epoch == generation) {
+            busy = false;
+            run.fallbackAlert.clear();
+            status("ready");
+        }
+    });
+    status("assets-unavailable");
+}
+
+void ReaderCoordinator::prepareOpening(kobalt::ReaderBookRoute candidate) {
+    status("loading");
+    const bool assetsReady = environment_.assets.available();
+    bool fontsChanged = false;
+    if (!assetsReady || !kobalt::ui::initializeInterfaceFonts(environment_.assets, &fontsChanged)) {
+        missingAssets(assetsReady);
+        return;
+    }
+    if (fontsChanged) {
+        run.loading->refreshFonts();
+    }
+    QString identity, path;
+    const auto route = candidate == kobalt::ReaderBookRoute::Direct
+                           ? kobalt::readerBookRoute(run.opening->volume(), &identity, &path)
+                           : candidate;
+    if (route == kobalt::ReaderBookRoute::Protected) {
+        fail(QString(), kobalt::OpeningFallback::Protected);
+    } else if (route == kobalt::ReaderBookRoute::Remembered) {
+        fail(QString(), kobalt::OpeningFallback::Remembered);
+    } else if (route == kobalt::ReaderBookRoute::Failed) {
+        fail(strings::get("opening.failed"));
+    } else if (route != kobalt::ReaderBookRoute::Direct || identity != run.identity || path != run.filePath) {
+        fail(strings::get("reader_controller.native_publication_does_not_match_the_opening_request"));
+    } else {
+        run.orientation = std::make_unique<kobalt::ReaderOrientation>(
+            kobalt::nativeOrientationSensor(), kobalt::turnReaderScreen, kobalt::ownReaderRotation);
+        run.orientation->configure(readJson(environment_.paths.preferences()));
+        run.statePath = environment_.paths.bookState(run.identity);
+        load();
+    }
 }
 
 void ReaderCoordinator::updateOpening(kobalt::OpeningStage stage, int percent) {

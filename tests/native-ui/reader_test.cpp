@@ -352,6 +352,64 @@ private slots:
         }
 #endif
     }
+    void openingProgressPaintsAfterTheEventLoop() {
+        QWidget owner;
+        owner.resize(600, 800);
+        auto opening = createEmbeddedOpening(&owner, test::makeHostPresentation);
+        opening->window()->setGeometry(owner.rect());
+        owner.show();
+        opening->window()->show();
+        QCoreApplication::processEvents();
+        auto *bar = opening->window()->findChild<QProgressBar *>("rrOpeningProgress");
+        QVERIFY(bar);
+        QVERIFY(bar->isVisible());
+        PaintRegions paints;
+        bar->installEventFilter(&paints);
+        opening->setProgress(20);
+        opening->setProgress(40);
+        QCOMPARE(bar->value(), 40);
+        QCOMPARE(paints.count, 0);
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 1);
+        paints.count = 0;
+        opening->setProgress(40);
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 0);
+        opening->setProgress(60);
+        opening->setProgress(100);
+        opening->window()->hide();
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 0);
+    }
+    void openingFirstPaintCallback() {
+        QWidget owner;
+        owner.resize(600, 800);
+        auto opening = createEmbeddedOpening(&owner, test::makeHostPresentation);
+        opening->window()->setGeometry(owner.rect());
+        int calls = 0;
+        opening->afterFirstPaint([&] {
+            ++calls;
+        });
+        QCoreApplication::processEvents();
+        QCOMPARE(calls, 0);
+        owner.show();
+        opening->window()->show();
+        QTRY_COMPARE(calls, 1);
+        opening->window()->update();
+        QCoreApplication::processEvents();
+        QCOMPARE(calls, 1);
+
+        QWidget otherOwner;
+        otherOwner.resize(600, 800);
+        auto discarded = createEmbeddedOpening(&otherOwner, test::makeHostPresentation);
+        discarded->afterFirstPaint([&] {
+            ++calls;
+        });
+        discarded.reset();
+        otherOwner.show();
+        QCoreApplication::processEvents();
+        QCOMPARE(calls, 1);
+    }
     void navigationCompositionAndRelease() {
         QWidget owner;
         auto *toolbar = new ui::Panel(&owner, Qt::BottomEdge);

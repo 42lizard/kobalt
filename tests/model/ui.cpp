@@ -124,8 +124,22 @@ protected:
 };
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
+    {
+        // The loading view is built before the whole bundle is verified. A
+        // font used before then must not stop the faces registering later.
+        const auto early = kobalt::ui::interfaceFont();
+        Q_UNUSED(early);
+        kobalt::AssetBundle opening(kobalt::test::readerAssets().root(), QStringLiteral(KOBALT_VERSION));
+        require(kobalt::ui::initializeOpeningFonts(opening), "Cannot load the opening view's fonts");
+        require(QFontInfo(kobalt::ui::interfaceFont()).family() == "Kobalt UI Sans" &&
+                    QFontInfo(kobalt::ui::brandFont(32)).family() == "Kobalt UI Serif",
+                "Opening view does not draw in the interface fonts");
+    }
     require(kobalt::test::readerAssets().available(), "Component assets failed manifest verification");
-    require(kobalt::ui::initializeInterfaceFonts(kobalt::test::readerAssets()), "Cannot load verified UI font bytes");
+    bool facesChanged = true;
+    require(kobalt::ui::initializeInterfaceFonts(kobalt::test::readerAssets(), &facesChanged),
+            "Cannot load verified UI font bytes");
+    require(!facesChanged, "Full font initialization replaced the opening faces and repaints the loading view");
     require(QFontInfo(kobalt::ui::interfaceFont()).family() == "Kobalt UI Sans" &&
                 QFontInfo(kobalt::ui::chromeFont()).family() == "Kobalt UI Mono" &&
                 QFontInfo(kobalt::ui::brandFont(32)).family() == "Kobalt UI Serif",

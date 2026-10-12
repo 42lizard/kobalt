@@ -88,7 +88,7 @@ void rememberNativeBook(const QString &identity, const QString &path, bool prote
     nativeBooks.insert(identity, {path, file.size(), file.lastModified(),
                                   protectedBook ? ReaderBookRoute::Protected : ReaderBookRoute::Remembered});
 }
-ReaderBookRoute readerBookRoute(const void *volume, QString *identity, QString *path) {
+static ReaderBookRoute bookRoute(const void *volume, QString *identity, QString *path, bool inspectPublication) {
     using Route = ReaderBookRoute;
     if (previewBook(volume))
         return Route::Unsupported;
@@ -131,6 +131,9 @@ ReaderBookRoute readerBookRoute(const void *volume, QString *identity, QString *
         if (cached->path == filename && cached->size == fileInfo.size() && cached->modified == fileInfo.lastModified())
             return cached->route;
         nativeBooks.remove(id);
+    }
+    if (!inspectPublication) {
+        return Route::Direct;
     }
     if (purchased) {
         // Read only whether Nickel has protection metadata for this volume.
@@ -175,6 +178,12 @@ ReaderBookRoute readerBookRoute(const void *volume, QString *identity, QString *
         return Route::Failed;
     }
     return Route::Direct;
+}
+ReaderBookRoute readerBookRoute(const void *volume, QString *identity, QString *path) {
+    return bookRoute(volume, identity, path, true);
+}
+ReaderBookRoute readerBookCandidateRoute(const void *volume, QString *identity, QString *path) {
+    return bookRoute(volume, identity, path, false);
 }
 bool eligibleReaderBook(const void *volume, QString *identity, QString *path) {
     return readerBookRoute(volume, identity, path) == ReaderBookRoute::Direct;

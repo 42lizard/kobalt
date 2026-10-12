@@ -21,6 +21,7 @@ class NativeProgress;
 class ReaderSession;
 class ReaderOrientation;
 class SourceLease;
+enum class ReaderBookRoute;
 namespace nickel {
 struct ReaderEnvironment;
 struct CoordinatorBindings {
@@ -97,6 +98,9 @@ private:
     bool sameBook() const;
     void poll();
     void watch();
+    void prepareOpening(kobalt::ReaderBookRoute candidate);
+    void missingAssets(bool assetsReady);
+    bool missingAssetsBeforeOpening(bool assetsReady);
     void load();
 
     void showReader();
