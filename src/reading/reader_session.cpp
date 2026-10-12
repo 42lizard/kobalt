@@ -158,6 +158,8 @@ std::unique_ptr<ReaderSession> ReaderSession::retained() {
     frame.resources["ready_images"] = 0;
     auto retained = std::unique_ptr<ReaderSession>(new ReaderSession(model, placeholderFamily_));
     retained->frame = frame;
+    retained->formattingWarning_ = formattingWarning_;
+    retained->formattingDetails_ = formattingDetails_;
     retained->documentAuthor = documentAuthor;
     retained->documentCover = documentCover;
     retained->frame.turnDirection = 0;
@@ -269,6 +271,10 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
     const auto retainedHash =
         openingResult_.ready() && frame.error.isEmpty() && identity_ == identity ? fingerprint : QByteArray();
     const auto retainedSettings = frame.state;
+    const bool retainedWarning = formattingWarning_;
+    const auto retainedDetails = formattingDetails_;
+    formattingDetails_ = {};
+    formattingWarning_ = false;
     const auto systemFont = placeholderFamily_;
     const auto latest = newest;
     const auto job = revision;
@@ -286,8 +292,8 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
     kobalt::qt::invoke(
         engineWorker(),
         [guard, engine, path, identity, size, saved, nativeLocation, lease, factory, finished, report, systemFont,
-         layoutCachePath, documentCachePath, retainedHash, retainedSettings, latest, job, positions,
-         pinnedAppearance]() mutable {
+         layoutCachePath, documentCachePath, retainedHash, retainedSettings, latest, job, positions, pinnedAppearance,
+         retainedWarning, retainedDetails]() mutable {
             EngineJob activity;
             QElapsedTimer timer;
             timer.start();
@@ -316,6 +322,8 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
             Publication publication;
             qint64 directoryMs = 0, hashMs = 0, inspectionMs = 0, modelMs = 0;
             bool cacheHit = false, cacheStored = false, retainedHit = false, savedMatches = false;
+            bool formattingWarning = false;
+            QJsonObject formattingDetails;
             if (cancelled())
                 outcome = interrupted();
             else if (!factory)
@@ -443,26 +451,33 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                     LayoutCache cache(cancelled() ? QString() : layoutCachePath, KOBALT_LAYOUT_POLICY);
                     LayoutCompatibility layout;
                     cacheHit = !cancelled() && outcome.ready() && cache.lookup(digest, &layout);
+                    // Older warning cache entries have no issue location or excerpt.
+                    // Reinspect warnings so diagnostics always contain the cause.
+                    cacheHit = cacheHit && layout.verdict == LayoutCompatibility::Supported;
                     if (!cacheHit && !cancelled() && outcome.ready()) {
                         layout = inspectLayout(*resources, publication.sizes());
                         if (!cancelled())
                             cacheStored = cache.store(digest, layout);
                     }
                     inspectionMs = timer.elapsed() - inspectionStart;
-                    diagnostic("layout-compatibility", {{"verdict", int(layout.verdict)},
-                                                        {"resources", layout.resources},
-                                                        {"bytes", double(layout.bytes)}});
+                    formattingDetails = kobalt::qt::object({{"verdict", int(layout.verdict)},
+                                                            {"resources", layout.resources},
+                                                            {"bytes", double(layout.bytes)},
+                                                            {"issue", layout.issue},
+                                                            {"resource", layout.resource},
+                                                            {"line", double(layout.line)},
+                                                            {"column", double(layout.column)},
+                                                            {"excerpt", layout.excerpt}});
+                    diagnostic("layout-compatibility", formattingDetails);
                     if (cancelled())
                         outcome = interrupted();
-                    else if (outcome.ready() && layout.verdict != LayoutCompatibility::Supported) {
-                        const auto kind = layout.transientFailure ? OpeningFailureKind::Io
-                                          : layout.verdict == LayoutCompatibility::Incomplete
-                                              ? OpeningFailureKind::InvalidContent
-                                              : OpeningFailureKind::Unsupported;
-                        outcome =
-                            OpeningResult::failed(kind, layout.reasonKey(), {},
-                                                  layout.transientFailure ? ContentDisposition::Retry
-                                                                          : ContentDisposition::RememberRejection);
+                    else if (outcome.ready() && !resources->resumeAfterInspection()) {
+                        outcome = OpeningResult::failed(OpeningFailureKind::Io, layout.reasonKey());
+                    } else if (outcome.ready()) {
+                        // Inspection can be stricter than CREngine's parser. Let the
+                        // engine decide whether the book is readable and keep the
+                        // uncertain formatting visible as a warning.
+                        formattingWarning = layout.verdict != LayoutCompatibility::Supported;
                     }
                     const auto modelStart = timer.elapsed();
                     report(OpeningStage::Text, 0);
@@ -487,6 +502,14 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                 outcome.rememberContentRejection();
             if (cancelled())
                 outcome = interrupted();
+            if (retainedHit) {
+                formattingWarning = retainedWarning;
+                formattingDetails = retainedDetails;
+            }
+            if (outcome.ready() && formattingWarning) {
+                formattingDetails.insert("retained_book_hit", retainedHit);
+                diagnostic("opening-formatting-warning", formattingDetails);
+            }
             diagnostic("opening-phases",
                        {{"directory_ms", double(directoryMs)},
                         {"hash_ms", double(hashMs)},
@@ -504,8 +527,8 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
             const bool opened = outcome.ready();
             kobalt::qt::invoke(
                 qApp,
-                [guard, result = std::move(result), outcome, digest, identity, savedMatches, finished, lease,
-                 job]() mutable {
+                [guard, result = std::move(result), outcome, digest, identity, savedMatches, finished, lease, job,
+                 formattingWarning, formattingDetails]() mutable {
                     if (!guard || guard->revision != job || guard->lease_ != lease)
                         return;
                     if (!lease || lease->revoked()) {
@@ -520,6 +543,8 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                     guard->running = false;
                     guard->frame = result;
                     guard->openingResult_ = outcome;
+                    guard->formattingWarning_ = outcome.ready() && formattingWarning;
+                    guard->formattingDetails_ = guard->formattingWarning_ ? formattingDetails : QJsonObject();
                     guard->desired = result.state;
                     guard->fingerprint = digest;
                     guard->savedMatched = savedMatches;

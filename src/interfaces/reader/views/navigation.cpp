@@ -32,6 +32,9 @@ protected:
             painter.drawLine(0, status - 1, width(), status - 1);
         painter.drawLine(width() - c::cellWidth - 1, status, width() - c::cellWidth - 1, height());
         painter.drawLine(width() - 2 * c::cellWidth - 1, status, width() - 2 * c::cellWidth - 1, height());
+        if (property("formatting_warning").toBool()) {
+            painter.drawLine(width() - 3 * c::cellWidth - 1, status, width() - 3 * c::cellWidth - 1, height());
+        }
         painter.fillRect(0, height() - toolbarBorder, width(), toolbarBorder, palette().color(QPalette::WindowText));
     }
 };
@@ -202,7 +205,7 @@ Navigation::Navigation(QWidget *parent, const ToolbarComposition &controls)
     : bar(new BottomNavigation(parent)), pageCount(new QLabel(controls.panel)), toolbar(controls.panel),
       toolbarRows(controls.rows), exitAction(controls.exitAction), settings(controls.settings),
       bookmarks(controls.bookmarks), clock(controls.clock), session(controls.session), battery(controls.battery),
-      bluetooth(controls.bluetooth) {
+      bluetooth(controls.bluetooth), formattingWarning(controls.formattingWarning) {
     upperEdge = new ReadingRule(parent);
     upperEdge->setObjectName("rrNavigationUpperEdge");
     lowerEdge = new ReadingRule(parent);
@@ -226,6 +229,15 @@ Navigation::Navigation(QWidget *parent, const ToolbarComposition &controls)
     if (auto *button = dynamic_cast<ui::Button *>(bookmarks)) {
         bookmarksPaint = button->paintMode();
         button->setPaintMode(ui::ButtonPaintMode::ToolbarCell);
+    }
+    if (formattingWarning) {
+        formattingWarningStyle = formattingWarning->styleSheet();
+        formattingWarning->setFixedSize(c::cellWidth, c::actionHeight);
+        ui::readerStyle(formattingWarning, "QPushButton{border:none;padding:0;}");
+        if (auto *button = dynamic_cast<ui::Button *>(formattingWarning)) {
+            formattingWarningPaint = button->paintMode();
+            button->setPaintMode(ui::ButtonPaintMode::ToolbarCell);
+        }
     }
     pageCount->setObjectName("rrMenuPageCount");
     pageCount->setAlignment(Qt::AlignCenter);
@@ -255,6 +267,14 @@ Navigation::~Navigation() {
         button->setPaintMode(settingsPaint);
     if (auto *button = dynamic_cast<ui::Button *>(bookmarks))
         button->setPaintMode(bookmarksPaint);
+    if (formattingWarning) {
+        if (auto *button = dynamic_cast<ui::Button *>(formattingWarning)) {
+            button->setPaintMode(formattingWarningPaint);
+        }
+        formattingWarning->setStyleSheet(formattingWarningStyle);
+        formattingWarning->setFixedSize(ui::metrics::control::toolbarButtonSize,
+                                        ui::metrics::control::toolbarButtonSize);
+    }
     session->setStyleSheet(sessionStyle);
     settings->setStyleSheet(settingsStyle);
     bookmarks->setStyleSheet(bookmarksStyle);
@@ -297,9 +317,19 @@ void Navigation::update(QSize size, const NavigationState &state) {
     exitAction->setGeometry(ui::px(24), statusHeight(), exitAction->sizeHint().width(), c::actionHeight);
     settings->setGeometry(size.width() - c::cellWidth, statusHeight(), c::cellWidth, c::actionHeight);
     bookmarks->setGeometry(size.width() - 2 * c::cellWidth, statusHeight(), c::cellWidth, c::actionHeight);
+    if (formattingWarning) {
+        formattingWarning->setGeometry(size.width() - 3 * c::cellWidth, statusHeight(), c::cellWidth, c::actionHeight);
+    }
     pageCount->setText(state.pageCount);
-    const int labelWidth = size.width() / 3;
-    pageCount->setGeometry((size.width() - labelWidth) / 2, exitAction->y(), labelWidth, exitAction->height());
+    const int rightActions = formattingWarning && !formattingWarning->isHidden() ? 3 : 2;
+    if (rules->property("formatting_warning").toBool() != (rightActions == 3)) {
+        rules->setProperty("formatting_warning", rightActions == 3);
+        rules->update();
+    }
+    const int labelLeft = qMax(exitAction->geometry().right() + 1, size.width() / 3);
+    const int labelRight = qMin(size.width() - rightActions * int(c::cellWidth), 2 * size.width() / 3);
+    const int labelWidth = qMax(0, labelRight - labelLeft);
+    pageCount->setGeometry(labelLeft, exitAction->y(), labelWidth, exitAction->height());
     pageCount->show();
     for (auto *action : state.topActions)
         action->hide();

@@ -23,6 +23,9 @@ def write(directory, source_root=ROOT):
     reader, dictionary = load('reader_fixture'), load('dictionary_fixture')
     links, publisher = load('link_fixture'), load('publisher_fixture')
     reader.book(directory / 'text.epub', nested=True)
+    reader.book(directory / 'formatting-issues.epub', nested=True, formatting_issue='missing-css')
+    reader.book(directory / 'formatting-entity.epub', nested=True, formatting_issue='html-entity')
+    reader.book(directory / 'adobe-template.epub', nested=True, formatting_issue='adobe-template')
     reader.book(directory / 'oversized-metadata.epub', nested=True, chapter_count=1, paragraphs=1,
                 title='T' * 4095 + '😀' + 'T' * 300000, author='A' * 4095 + '😀' + 'A' * 300000)
     reader.book(directory / 'color.epub', nested=True, colors=True)

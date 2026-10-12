@@ -131,6 +131,9 @@ public:
     QString error() const {
         return frame.error;
     }
+    bool formattingWarning() const {
+        return formattingWarning_;
+    }
     QString imageWarning() const {
         return frame.resources.value("image_error").toString();
     }
@@ -258,6 +261,8 @@ public:
     void setChapters(QVector<ChapterTarget> contents, QVector<ChapterTarget> graph);
 
 private:
+    bool formattingWarning_ = false;
+    QJsonObject formattingDetails_;
     ReaderSession(std::shared_ptr<ReaderModel> retainedModel, QString placeholderFamily);
     EngineFontInputs fonts_;
     QString placeholderFamily_;

@@ -5,7 +5,7 @@ import zlib
 from xml.sax.saxutils import escape
 
 
-def book(path, nested=False, chapter_count=3, paragraphs=30, colors=False, rtl=False, cover=False, gif=False, deferred_cover=False, later_images=False, title="Native reader fixture", author="Kobalt"):
+def book(path, nested=False, chapter_count=3, paragraphs=30, colors=False, rtl=False, cover=False, gif=False, deferred_cover=False, later_images=False, title="Native reader fixture", author="Kobalt", formatting_issue=None):
     prefix = 'OEBPS/' if nested else ''
     paragraph = ('A reader keeps the chapter ready. Changing the size of the words should preserve the passage. '
                  'We can turn the page, visit another chapter, and return to the same place. ')
@@ -68,4 +68,9 @@ def book(path, nested=False, chapter_count=3, paragraphs=30, colors=False, rtl=F
                         '<p><img src="artwork/colors.svg" width="384" height="64" alt="SVG test"/></p>'
                         '<p><svg xmlns="http://www.w3.org/2000/svg" width="64" height="24" viewBox="0 0 64 24">'
                         '<rect width="64" height="24" fill="#ff8000"/></svg></p>') + body
-            z.writestr(prefix + f'c{i}.xhtml', f'<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter {i}</title></head><body><h1><span class="koboSpan" id="kobo.1.1">Chapter {i}</span></h1>{body}</body></html>')
+            if formatting_issue == 'html-entity':
+                body += '<p>Readable text&nbsp;with an HTML entity.</p>'
+            style = '<link rel="stylesheet" href="missing.css"/>' if formatting_issue == 'missing-css' else ''
+            if formatting_issue == 'adobe-template':
+                style = '<link rel="stylesheet" type="application/adobe-page-template+xml" href="missing.xpgt"/>'
+            z.writestr(prefix + f'c{i}.xhtml', f'<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter {i}</title>{style}</head><body><h1><span class="koboSpan" id="kobo.1.1">Chapter {i}</span></h1>{body}</body></html>')

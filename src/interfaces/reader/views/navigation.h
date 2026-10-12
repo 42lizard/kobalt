@@ -27,6 +27,7 @@ struct ToolbarComposition {
     QPushButton *exitAction = nullptr, *settings = nullptr, *bookmarks = nullptr;
     QLabel *clock = nullptr, *session = nullptr, *battery = nullptr;
     ui::BluetoothIndicator *bluetooth = nullptr;
+    QPushButton *formattingWarning = nullptr;
 };
 enum class NavigationDestination { Chapters, Text, Layout, Light, Stats, Search };
 struct NavigationState {
@@ -117,7 +118,9 @@ private:
     QWidget *exitAction, *rules, *settings, *bookmarks, *upperEdge, *lowerEdge;
     QLabel *clock, *session, *battery;
     ui::BluetoothIndicator *bluetooth;
-    QString sessionStyle, settingsStyle, bookmarksStyle;
-    ui::ButtonPaintMode settingsPaint = ui::ButtonPaintMode::Native, bookmarksPaint = ui::ButtonPaintMode::Native;
+    QPushButton *formattingWarning;
+    QString sessionStyle, settingsStyle, bookmarksStyle, formattingWarningStyle;
+    ui::ButtonPaintMode settingsPaint = ui::ButtonPaintMode::Native, bookmarksPaint = ui::ButtonPaintMode::Native,
+                        formattingWarningPaint = ui::ButtonPaintMode::Native;
 };
 }

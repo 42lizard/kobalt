@@ -381,6 +381,13 @@ void Reader::buildToolbar() {
             openBookmarks();
         });
     toolbarComposition.bookmarks->setEnabled(bookmarks->available());
+    toolbarComposition.formattingWarning =
+        iconButton(topControls, top, "rrFormattingWarning", strings::get("reader.formatting_warning"),
+                   ControlIcon::FileWarning, [this] {
+                       showFormattingWarning();
+                   });
+    toolbarComposition.formattingWarning->setVisible(model->formattingWarning());
+
     toolbarComposition.settings =
         iconButton(topControls, top, "rrSettings", strings::get("reader.reader_settings"), ControlIcon::More, [this] {
             // The button stays enabled while a panel's changes apply, so the
@@ -399,7 +406,8 @@ void Reader::buildToolbar() {
     for (auto *button : topControls->findChildren<QPushButton *>(QString(), Qt::FindDirectChildrenOnly)) {
         if (button == back)
             continue;
-        if (button->objectName() != "rrSettings" && button->objectName() != "rrBookmarks")
+        if (button->objectName() != "rrSettings" && button->objectName() != "rrBookmarks" &&
+            button->objectName() != "rrFormattingWarning")
             topActions.append(button);
         if (auto *action = dynamic_cast<kobalt::ui::Button *>(button))
             action->setPaintMode(kobalt::ui::ButtonPaintMode::ToolbarSquare);

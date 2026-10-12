@@ -302,11 +302,13 @@ private:
     kobalt::BookmarkList *bookmarkList = nullptr;
     QPointer<kobalt::ui::ModalOverlay> removeDialog;
     QPointer<kobalt::ui::ModalOverlay> bookmarkErrorDialog;
+    QPointer<kobalt::ui::ModalOverlay> formattingWarningDialog;
     QVector<kobalt::BookmarkRow> bookmarkRows() const;
     void openBookmarks();
     void askRemoveBookmark(const QString &position);
     void toggleBookmark();
     void showBookmarkError();
+    void showFormattingWarning();
     bool flashAfterMenu = false;
     void requestFlash(const char *reason);
     QTimer *saveTimer = nullptr;

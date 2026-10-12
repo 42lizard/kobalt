@@ -1507,6 +1507,85 @@ private slots:
         QVERIFY(panel.autoRotateOption->isHidden());
     }
 
+    void missingAdobeTemplateKeepsBookReadable() {
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        const auto book =
+            qEnvironmentVariable("KOBALT_TEST_EPUB", qEnvironmentVariable("KOBALT_FIXTURES") + "/adobe-template.epub");
+        host.open(book, nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QVERIFY(!host.session()->formattingWarning());
+        QVERIFY(!host.session()->image().isNull());
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QTRY_VERIFY(host.window()->readyForPresentation());
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        auto *warning = host.window()->findChild<QPushButton *>("rrFormattingWarning");
+        QVERIFY(warning && warning->isHidden());
+        const int page = host.session()->page();
+        QVERIFY(host.session()->turn(1));
+        QTRY_VERIFY(!host.session()->busy() && host.session()->page() > page);
+        QVERIFY(!host.session()->formattingWarning());
+        host.shutdown();
+        QTRY_VERIFY(host.idle());
+        host.open(book, nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
+        QVERIFY(!host.session()->formattingWarning());
+        host.shutdown();
+        QTRY_VERIFY(host.idle());
+    }
+    void formattingWarningKeepsBookReadable_data() {
+        QTest::addColumn<QString>("bookName");
+        QTest::newRow("missing-stylesheet") << "formatting-issues.epub";
+        QTest::newRow("html-entity") << "formatting-entity.epub";
+    }
+    void formattingWarningKeepsBookReadable() {
+        QFETCH(QString, bookName);
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        const auto book = qEnvironmentVariable("KOBALT_FIXTURES") + "/" + bookName;
+        host.open(book, nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QVERIFY(host.session()->formattingWarning());
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QTRY_VERIFY(host.window()->readyForPresentation());
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        auto *warning = host.window()->findChild<QPushButton *>("rrFormattingWarning");
+        auto *bookmarks = host.window()->findChild<QPushButton *>("rrBookmarks");
+        QVERIFY(warning && bookmarks);
+        QTRY_VERIFY(warning->isVisible());
+        QCOMPARE(warning->size(), bookmarks->size());
+        QVERIFY(warning->geometry().right() < bookmarks->geometry().left());
+        QVERIFY(canvas.capture().save("native-reader-warning-menu-" + bookName + ".png"));
+        QVERIFY(click(canvas, warning));
+        auto *notice = host.window()->findChild<QWidget *>("rrFormattingWarningDialog");
+        QVERIFY(notice && notice->isVisible());
+        QVERIFY(canvas.capture().save("native-reader-warning-popup-" + bookName + ".png"));
+        QVERIFY(click(canvas, notice->findChild<QPushButton *>("rrFormattingWarningConfirm")));
+        QTRY_VERIFY(host.window()->findChild<QWidget *>("rrFormattingWarningDialog") == nullptr);
+        const int page = host.session()->page();
+        QVERIFY(host.session()->turn(1));
+        QTRY_VERIFY(!host.session()->busy() && host.session()->page() > page);
+        QVERIFY(host.session()->formattingWarning());
+        host.shutdown();
+        QTRY_VERIFY(host.idle());
+        host.open(book, nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
+        QVERIFY(host.session()->formattingWarning());
+        host.shutdown();
+        QTRY_VERIFY(host.idle());
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 3, 30000);
+        QVERIFY(!host.session()->formattingWarning());
+        QVERIFY(host.window()->findChild<QPushButton *>("rrFormattingWarning")->isHidden());
+        host.shutdown();
+        QTRY_VERIFY(host.idle());
+    }
     void systemRotationHidesManualControls() {
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
         CloseHost cleanup{host};

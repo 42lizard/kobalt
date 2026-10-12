@@ -209,10 +209,10 @@ std::shared_ptr<ResourceCache> nativeResources(QMap<QString, qint64> sizes, cons
              headersDone = false;
         qint64 length = -1, bodyBytes = 0;
         QByteArray prefix, header;
-        const bool validateXml = name.endsWith(".xhtml", Qt::CaseInsensitive) ||
-                                 name.endsWith(".html", Qt::CaseInsensitive) ||
-                                 name.endsWith(".opf", Qt::CaseInsensitive) ||
-                                 name.endsWith(".ncx", Qt::CaseInsensitive) || name == "META-INF/container.xml";
+        // CREngine parses reading content as HTML and can recover from errors
+        // that a strict XML parser rejects. Only validate the package structure
+        // here; chapters and navigation remain the engine's responsibility.
+        const bool validateXml = name.endsWith(".opf", Qt::CaseInsensitive) || name == "META-INF/container.xml";
         QXmlStreamReader xml;
         auto finish = [&] {
             finished = true;

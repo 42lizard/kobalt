@@ -110,12 +110,42 @@ void Reader::showFontDefaultDialog(const QString &face) {
         textRefresh(widget);
 }
 
+void Reader::showFormattingWarning() {
+    if (formattingWarningDialog || closing || lifecycleHidden || services.suspended()) {
+        return;
+    }
+    model->cancelPendingTurn();
+    auto *notice = new kobalt::ui::NoticeModal(
+        this, {strings::get("reader.formatting_warning_description"), strings::get("reader.formatting_warning"), {}},
+        {strings::get("common.ok"), "rrFormattingWarningConfirm"});
+    formattingWarningDialog = notice;
+    notice->setObjectName("rrFormattingWarningDialog");
+    const auto dismiss = [this, notice] {
+        notice->hide();
+        notice->deleteLater();
+        formattingWarningDialog.clear();
+        updateOrientationBlock();
+        refresh();
+    };
+    notice->dismissed = dismiss;
+    connect(notice->primaryButton(), &QPushButton::clicked, this, dismiss);
+    notice->card()->fitToWidth(qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance));
+    notice->centerCard();
+    notice->show();
+    notice->raise();
+    notice->primaryButton()->setFocus();
+    updateOrientationBlock();
+    for (auto *widget : notice->findChildren<QWidget *>()) {
+        textRefresh(widget);
+    }
+}
+
 bool Reader::progressBlocked() const {
-    return bool(debugDialog) || bool(finishDialog) || bool(bookmarkErrorDialog) || book->deviceTransition() ||
-           services.suspended() || !isVisible() || lightPopup->isVisible() || model->busy() ||
-           (chapterGraph->isVisible() && !statsPinned()) || dictionaryPanel->isVisible() || searchPanel->isVisible() ||
-           linksActive() || lookupPending || appearanceEdit.panelOpen() || appearanceEdit.applying() ||
-           general->isVisible() || choices->isVisible() || acknowledgments->isVisible();
+    return bool(debugDialog) || bool(finishDialog) || bool(bookmarkErrorDialog) || bool(formattingWarningDialog) ||
+           book->deviceTransition() || services.suspended() || !isVisible() || lightPopup->isVisible() ||
+           model->busy() || (chapterGraph->isVisible() && !statsPinned()) || dictionaryPanel->isVisible() ||
+           searchPanel->isVisible() || linksActive() || lookupPending || appearanceEdit.panelOpen() ||
+           appearanceEdit.applying() || general->isVisible() || choices->isVisible() || acknowledgments->isVisible();
 }
 
 void Reader::dismissProgressChoice() {
