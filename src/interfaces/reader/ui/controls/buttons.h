@@ -20,6 +20,13 @@ public:
         return hasConfiguredIcon ? &configuredIcon : nullptr;
     }
     void refreshIcon();
+    void setIconLabelGap(int pixels) {
+        if (iconLabelGap == pixels) {
+            return;
+        }
+        iconLabelGap = pixels;
+        update();
+    }
 
 protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
@@ -28,6 +35,7 @@ protected:
 private:
     ButtonPaintMode mode = ButtonPaintMode::Native;
     ButtonIcon configuredIcon;
+    int iconLabelGap = 0;
     bool hasConfiguredIcon = false, hasIconTheme = false, iconDark = false;
 };
 

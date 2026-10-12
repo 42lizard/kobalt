@@ -138,6 +138,9 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
         result.filled = true;
         for (int x : {14, 32, 50})
             path.addEllipse(QPointF(x, 32), 3.5, 3.5);
+    } else if (icon == ControlIcon::RotationBoth) {
+        path.addRoundedRect(QRectF(6, 10, 20, 36), 2, 2);
+        path.addRoundedRect(QRectF(32, 24, 28, 22), 2, 2);
     } else if (icon >= ControlIcon::Portrait && icon <= ControlIcon::InvertedLandscape) {
         result.canvas = 24;
         result.filled = true;

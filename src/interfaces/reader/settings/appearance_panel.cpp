@@ -2,12 +2,15 @@
 #include "interfaces/reader/ui/controls/icons.h"
 #include "interfaces/reader/ui/controls/rows.h"
 #include "interfaces/reader/ui/controls/sliders.h"
+#include "interfaces/reader/ui/style/private_text.h"
 #include "interfaces/reader/ui/style/theme.h"
 #include "appearance_panel.h"
 #include "support/strings.h"
 #include "reading/appearance_settings.h"
 #include "reading/reading_density.h"
 #include "interfaces/reader/ui/style/styles.h"
+
+#include <QEvent>
 
 namespace kobalt::reader {
 namespace m = ui::metrics;
@@ -16,6 +19,40 @@ using ui::readerStyle;
 using ui::buttonIcon;
 using ui::ControlIcon;
 using ui::FontButton;
+namespace {
+class ChoiceLabels : public QObject {
+public:
+    ChoiceLabels(QWidget *frame, const QVector<QPushButton *> &buttons)
+        : QObject(frame), frame(frame), buttons(buttons) {
+        frame->installEventFilter(this);
+    }
+
+protected:
+    bool eventFilter(QObject *, QEvent *event) override {
+        if (event->type() == QEvent::Resize || event->type() == QEvent::Show) {
+            int required = 0;
+            for (auto *button : buttons) {
+                const auto label = button->property("full_label").isValid() ? button->property("full_label").toString()
+                                                                            : button->accessibleName();
+                const int iconWidth = button->icon().isNull() ? 0 : button->iconSize().width() + ui::px(20);
+                required = qMax(required, ui::interfaceTextWidth(label, button->font()) + iconWidth + ui::px(36));
+            }
+            const bool compact = frame->width() / buttons.size() < required;
+            for (auto *button : buttons) {
+                const auto label = button->property("full_label").isValid() ? button->property("full_label").toString()
+                                                                            : button->accessibleName();
+                button->setText(compact ? button->property("compact_label").toString() : label);
+            }
+        }
+        return false;
+    }
+
+private:
+    QWidget *frame;
+    QVector<QPushButton *> buttons;
+};
+}
+
 AppearancePanel::AppearancePanel(const AppearanceLayout &layout, const AppearancePanelInputs &inputs) {
     auto *typography = layout.typography, *pageLayout = layout.pageLayout;
     auto *typeRows = layout.typeRows, *pageRows = layout.pageRows;
@@ -89,21 +126,47 @@ AppearancePanel::AppearancePanel(const AppearanceLayout &layout, const Appearanc
         const QStringList rotationNames = {strings::get("reader.portrait"), strings::get("reader.landscape"),
                                            strings::get("reader.portrait_upside_down"),
                                            strings::get("reader.landscape_upside_down")};
+        auto inlineIconLabel = [](QPushButton *button) {
+            button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+            button->setProperty("full_label", button->text());
+            button->setProperty("compact_label", QString());
+            static_cast<ui::Button *>(button)->setIconLabelGap(ui::px(20));
+        };
         const bool sideButtons = inputs.sideButtons;
-        for (int index = 0; index < rotationNames.size(); ++index) {
-            const int target = inputs.reverseLandscapeButtons && (index == 1 || index == 3) ? 4 - index : index;
+        for (int index = 0; index < (inputs.automaticRotationAvailable ? 2 : rotationNames.size()); ++index) {
+            const int target =
+                !inputs.automaticRotationAvailable && inputs.reverseLandscapeButtons && (index == 1 || index == 3)
+                    ? 4 - index
+                    : index;
             const int value = 1 << target;
             auto *button = rotation.add(QString("rrOrientation%1").arg(value));
             button->setProperty("orientation", value);
-            button->setAccessibleName(rotationNames[index]);
-            button->setToolTip(rotationNames[index]);
+            const auto label = inputs.automaticRotationAvailable
+                                   ? strings::get(index == 0 ? "reader.lock_portrait" : "reader.lock_landscape")
+                                   : rotationNames[index];
+            button->setAccessibleName(label);
+            button->setToolTip(label);
+            if (inputs.automaticRotationAvailable) {
+                button->setText(rotationNames[index]);
+                inlineIconLabel(button);
+            }
             rotationButtons.append(button);
             static_cast<ui::Button *>(button)->setIconConfiguration(
                 {static_cast<ControlIcon>(int(ControlIcon::Portrait) + index), ui::IconRendition::OriginalAsset,
                  sideButtons});
-            button->setIconSize(QSize(m::control::iconSize, m::control::iconSize));
+            button->setIconSize(inputs.automaticRotationAvailable
+                                    ? QSize(m::control::chapterIconSize, m::control::chapterIconSize)
+                                    : QSize(m::control::iconSize, m::control::iconSize));
         }
-        autoRotateOption = rotation.add("rrAutoRotate", strings::get("common.auto"));
+        autoRotateOption = rotation.add("rrAutoRotate", strings::get("reader.both"));
+        if (inputs.automaticRotationAvailable) {
+            buttonIcon(autoRotateOption, ControlIcon::RotationBoth);
+            autoRotateOption->setIconSize(QSize(m::control::chapterIconSize, m::control::chapterIconSize));
+            inlineIconLabel(autoRotateOption);
+            auto buttons = rotationButtons;
+            buttons.append(autoRotateOption);
+            new ChoiceLabels(autoRotateOption->parentWidget(), buttons);
+        }
         autoRotateOption->setAccessibleName(strings::get("reader.automatic_rotation"));
         autoRotateOption->setVisible(inputs.automaticRotationAvailable);
     }

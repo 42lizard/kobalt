@@ -476,8 +476,14 @@ private slots:
             QCOMPARE(panel.verticalMarginSlider->parentWidget()->parentWidget(), layout);
             QCOMPARE(panel.headerTextSize->text(), QString("Small"));
             QCOMPARE(panel.footerTextSize->text(), QString("Off"));
-            QCOMPARE(panel.rotationButtons.size(), 4);
-            const QList<int> orientations = {1, 8, 4, 2};
+            QCOMPARE(panel.rotationButtons.size(), 2);
+            QCOMPARE(panel.rotationButtons[0]->text(), strings::get("reader.portrait"));
+            QCOMPARE(panel.rotationButtons[1]->text(), strings::get("reader.landscape"));
+            QCOMPARE(panel.autoRotateOption->text(), strings::get("reader.both"));
+            QVERIFY(!panel.autoRotateOption->icon().isNull());
+            QCOMPARE(panel.rotationButtons[0]->accessibleName(), strings::get("reader.lock_portrait"));
+            QCOMPARE(panel.rotationButtons[1]->accessibleName(), strings::get("reader.lock_landscape"));
+            const QList<int> orientations = {1, 2};
             for (int i = 0; i < orientations.size(); ++i) {
                 QCOMPARE(panel.rotationButtons[i]->property("orientation").toInt(), orientations[i]);
                 const auto *button = dynamic_cast<ui::Button *>(panel.rotationButtons[i]);
@@ -1076,6 +1082,55 @@ private slots:
         host.shutdown();
         QTRY_VERIFY(host.idle());
     }
+    void rotationLabelsFollowAvailableWidth() {
+        QWidget owner;
+        auto *typography = new QWidget(&owner), *layout = new QWidget(&owner);
+        auto *typeRows = new QVBoxLayout(typography), *pageRows = new QVBoxLayout(layout);
+        reader::AppearancePanelInputs inputs;
+        inputs.automaticRotationAvailable = true;
+        reader::AppearancePanel panel({typography, layout, typeRows, pageRows}, inputs);
+        auto *frame = panel.autoRotateOption->parentWidget();
+        auto buttons = panel.rotationButtons;
+        buttons.append(panel.autoRotateOption);
+        const QStringList labels = {strings::get("reader.portrait"), strings::get("reader.landscape"),
+                                    strings::get("reader.both")};
+        QEvent show(QEvent::Show);
+        frame->resize(1000, 72);
+        QApplication::sendEvent(frame, &show);
+        for (int index = 0; index < buttons.size(); ++index) {
+            QCOMPARE(buttons[index]->text(), labels[index]);
+        }
+        const auto iconSize = panel.autoRotateOption->iconSize();
+        frame->resize(360, 72);
+        QApplication::sendEvent(frame, &show);
+        for (auto *button : buttons) {
+            QVERIFY(button->text().isEmpty());
+            QVERIFY(!button->icon().isNull());
+            QVERIFY(!button->accessibleName().isEmpty());
+            QCOMPARE(button->iconSize(), iconSize);
+        }
+        frame->resize(1000, 72);
+        QApplication::sendEvent(frame, &show);
+        for (int index = 0; index < buttons.size(); ++index) {
+            QCOMPARE(buttons[index]->text(), labels[index]);
+        }
+    }
+
+    void sensorlessRotationKeepsManualControls() {
+        QWidget owner;
+        auto *typography = new QWidget(&owner), *layout = new QWidget(&owner);
+        auto *typeRows = new QVBoxLayout(typography), *pageRows = new QVBoxLayout(layout);
+        reader::AppearancePanelInputs inputs;
+        inputs.reverseLandscapeButtons = true;
+        reader::AppearancePanel panel({typography, layout, typeRows, pageRows}, inputs);
+        QCOMPARE(panel.rotationButtons.size(), 4);
+        const QList<int> orientations = {1, 8, 4, 2};
+        for (int i = 0; i < orientations.size(); ++i) {
+            QCOMPARE(panel.rotationButtons[i]->property("orientation").toInt(), orientations[i]);
+        }
+        QVERIFY(panel.autoRotateOption->isHidden());
+    }
+
     void systemRotationHidesManualControls() {
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
         CloseHost cleanup{host};

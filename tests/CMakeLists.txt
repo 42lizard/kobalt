@@ -238,6 +238,7 @@ foreach(input CRENGINE_SOURCE CRENGINE_BUILD KOBALT_TEST_DEPENDENCIES KOBALT_TES
     endif()
 endforeach()
 find_package(Qt6 6.5 REQUIRED COMPONENTS Sensors)
+kobalt_check(reader-orientation SOURCES tests/model/reader_orientation.cpp src/platform/api/reader_orientation.cpp LIBRARIES Qt6::Sensors Qt6::Gui)
 file(READ "${CRENGINE_SOURCE}/cr3gui/data/html5.css" READER_HTML_CSS)
 configure_file("${KOBALT_ROOT}/src/engine/crengine/reader_styles.h.in" reader_styles.h @ONLY)
 file(GLOB READER_HYPHENATION_PATTERNS RELATIVE "${CRENGINE_SOURCE}/cr3gui/data/hyph" "${CRENGINE_SOURCE}/cr3gui/data/hyph/*.pattern")

@@ -230,6 +230,7 @@
       "expected": "Theme replay, narrow/wide relayout, dropdown borders and popup placement preserve clipping and stacking.",
       "assertions": [
         "reader-window:chromeSizePopoverCoversPanelBorder",
+        "reader-window:rotationLabelsFollowAvailableWidth",
         "reader-window:searchClearConstructionAndReplay",
         "desktop-window:resizeAndNavigate",
         "desktop-window:fontHoverKeepsHeaderBorder",

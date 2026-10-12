@@ -587,3 +587,8 @@
 
 "native_ui.removing_kobalt" = "Removing Kobalt";
 "native_ui.restarting_device" = "Restarting your device...";
+
+"reader.lock_portrait" = "Lock portrait";
+"reader.lock_landscape" = "Lock landscape";
+
+"reader.both" = "Both";

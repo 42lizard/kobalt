@@ -39,7 +39,8 @@ enum class ControlIcon {
     Dictionary,
     Undo,
     Download,
-    Bluetooth
+    Bluetooth,
+    RotationBoth
 };
 // Paint vectors at the target resolution without an intermediate icon bitmap.
 void paintOpeningIcon(QPainter &painter, ControlIcon icon, const QRectF &bounds, QColor color);

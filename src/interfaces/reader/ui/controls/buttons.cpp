@@ -45,6 +45,28 @@ void Button::setPaintMode(ButtonPaintMode value) {
 
 void Button::paintEvent(QPaintEvent *event) {
     if (mode == ButtonPaintMode::Native) {
+        if (iconLabelGap) {
+            QStyleOptionButton option;
+            initStyleOption(&option);
+            option.text.clear();
+            option.icon = QIcon();
+            QPainter painter(this);
+            style()->drawControl(QStyle::CE_PushButton, &option, &painter, this);
+            const bool active = isEnabled() && (isChecked() || isDown());
+            painter.setPen(palette().color(!isEnabled() ? QPalette::Mid
+                                           : active     ? QPalette::Window
+                                                        : QPalette::WindowText));
+            painter.setFont(font());
+            const int labelWidth = interfaceTextWidth(text(), font());
+            const int gap = text().isEmpty() ? 0 : iconLabelGap;
+            const int left = (width() - iconSize().width() - gap - labelWidth) / 2;
+            icon().paint(
+                &painter, QRect(left, (height() - iconSize().height()) / 2, iconSize().width(), iconSize().height()),
+                Qt::AlignCenter, isEnabled() ? QIcon::Normal : QIcon::Disabled, active ? QIcon::On : QIcon::Off);
+            drawInterfaceText(painter, QRect(left + iconSize().width() + gap, 0, labelWidth, height()), text(),
+                              Qt::AlignCenter);
+            return;
+        }
         QPushButton::paintEvent(event);
         return;
     }
