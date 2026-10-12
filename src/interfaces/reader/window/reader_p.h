@@ -274,6 +274,7 @@ private:
     void showProgressChoice();
     void buildProgressChoice(const kobalt::ReadingProgress &shown, int direction, bool located);
     void turnPage(int direction);
+    bool pageList(int direction);
     // Runs from a tap or swipe until its page is painted; invalid otherwise.
     QElapsedTimer turnStarted;
     // Exit Kobalt ignores taps from when the chapter list closes until a short

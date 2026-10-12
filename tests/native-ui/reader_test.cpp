@@ -2676,6 +2676,55 @@ private slots:
             for (const int y : {bottom - 1, bottom})
                 QVERIFY2(image.pixel(x, y) == ink, qPrintable(QString("%1,%2").arg(x).arg(y)));
     }
+    // Hardware page buttons page an open fullscreen list. They never turn
+    // the book behind it, including when the list has only one page.
+    void pageButtonsPageFullscreenLists() {
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(nativeSize + QSize(40, 40));
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        const int bookPage = host.session()->page();
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavChapters")));
+        auto *choices = host.window()->findChild<QWidget *>("rrChoices");
+        QVERIFY(choices);
+        QTRY_VERIFY(choices->isVisible());
+        host.window()->pageButton(1);
+        QTest::qWait(30);
+        QVERIFY(choices->isVisible());
+        QCOMPARE(host.session()->page(), bookPage);
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavChapters")));
+        QTRY_VERIFY(!choices->isVisible());
+
+        auto *top = host.window()->findChild<QWidget *>("rrControlsTop");
+        QVERIFY(top);
+        if (!top->isVisible())
+            QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
+        QTRY_VERIFY(host.window()->findChild<QWidget *>("rrGeneralSettings")->isVisible());
+        auto *openLicenses = host.window()->findChild<QPushButton *>("rrOpenAcknowledgments");
+        QVERIFY(openLicenses);
+        openLicenses->click();
+        auto *licenses = host.window()->findChild<QWidget *>("rrAcknowledgments");
+        QVERIFY(licenses);
+        QTRY_VERIFY(licenses->isVisible());
+        auto *counter = licenses->findChild<QLabel *>("rrAcknowledgmentsPage");
+        auto *next = licenses->findChild<QPushButton *>("rrAcknowledgmentsNext");
+        QVERIFY(counter && next);
+        QVERIFY(next->isVisible() && next->isEnabled());
+        const auto first = counter->text();
+        host.window()->pageButton(1);
+        QTRY_VERIFY(counter->text() != first);
+        host.window()->pageButton(-1);
+        QTRY_COMPARE(counter->text(), first);
+        QCOMPARE(host.session()->page(), bookPage);
+    }
     // With a panel open, the active tab's fill meets the panel's bottom rule.
     // The bar's own rule band must not leave a paper gap above the tab.
     void activeTabMeetsPanelRule() {

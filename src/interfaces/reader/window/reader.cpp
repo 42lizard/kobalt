@@ -1,5 +1,6 @@
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/icons.h"
+#include "interfaces/reader/ui/controls/paging.h"
 #include "interfaces/reader/ui/controls/panels.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/theme.h"
@@ -1244,12 +1245,32 @@ void Reader::openGraph() {
     refresh();
 }
 
+// A fullscreen list pages with the hardware buttons, as with its own arrows.
+// Returns whether such a list is open; the book behind it never turns.
+bool Reader::pageList(int direction) {
+    QWidget *list = choices->isVisible() && !choosingTypography ? static_cast<QWidget *>(choices)
+                    : bookmarkList->isVisible()                 ? static_cast<QWidget *>(bookmarkList)
+                    : searchPanel->isVisible()                  ? static_cast<QWidget *>(searchPanel)
+                    : acknowledgments->isVisible()              ? acknowledgments
+                                                                : nullptr;
+    if (!list)
+        return false;
+    // PagerBar has no meta-object, so qobject_cast cannot select it.
+    for (auto *child : list->findChildren<QWidget *>()) {
+        auto *pager = dynamic_cast<ui::PagerBar *>(child);
+        if (!pager || !pager->isVisible())
+            continue;
+        auto *button = direction > 0 ? pager->next : pager->previous;
+        if (button->isVisible() && button->isEnabled())
+            button->click();
+        break;
+    }
+    return true;
+}
+
 void Reader::pageButton(int direction) {
     if ((direction != -1 && direction != 1) || !isEnabled() || !isVisible() || lifecycleHidden ||
-        services.suspended() || closing || !model->canTurn() || appearanceEdit.panelOpen() || general->isVisible() ||
-        choices->isVisible() || (chapterGraph->isVisible() && !statsPinned()) || revealingLinks ||
-        dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() || lookupPending ||
-        acknowledgments->isVisible() || bookmarkList->isVisible() || lightPopup->isVisible())
+        services.suspended() || closing)
         return;
     const auto *modal = QApplication::activeModalWidget();
     if (modal && modal != this)
@@ -1257,6 +1278,13 @@ void Reader::pageButton(int direction) {
     for (auto *widget : popups())
         if (widget && widget->isVisible() && dynamic_cast<ui::ModalOverlay *>(widget))
             return;
+    if (pageList(direction))
+        return;
+    if (!model->canTurn() || appearanceEdit.panelOpen() || general->isVisible() || choices->isVisible() ||
+        (chapterGraph->isVisible() && !statsPinned()) || revealingLinks || dictionaryPanel->isVisible() ||
+        searchPanel->isVisible() || linksActive() || lookupPending || acknowledgments->isVisible() ||
+        bookmarkList->isVisible() || lightPopup->isVisible())
+        return;
     turnPage(direction);
 }
 
