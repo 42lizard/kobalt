@@ -370,7 +370,7 @@ int main(int argc, char **argv) {
                 require(loading.card()->rect().contains(bar->geometry()), "Loading bar exceeds the modal card");
         }
         for (const auto &message :
-             {"Enabling bionic reading...", "Disabling bionic reading...", "Updating page layout..."}) {
+             {"Enabling Bold Reading...", "Disabling Bold Reading...", "Updating page layout..."}) {
             loading.setDelayedProgress(true, 1100, 0, message);
             require(loading.findChild<QLabel *>("rrUpdatingText")->text() == message &&
                         loading.card()->findChildren<QLabel *>().size() == 1 &&
