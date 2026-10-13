@@ -10,6 +10,7 @@
 #include <QCloseEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QLineEdit>
 #include <QStackedLayout>
 
 namespace kobalt::pocketbook {
@@ -145,14 +146,19 @@ bool Window::eventFilter(QObject *object, QEvent *event) {
             return QWidget::eventFilter(object, event);
         }
         if (key->key() == Qt::Key_Home || back) {
-            if (event->type() == QEvent::KeyRelease && !key->isAutoRepeat()) {
+            // Handle the press: a modal dismissed by Escape must not make its
+            // following release become a second, application-wide close.
+            if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) {
                 close();
             }
             return true;
         }
         const auto direction = readerServices().pageButtonDirection(key);
         if (direction && controller.window()) {
-            if (event->type() == QEvent::KeyPress) {
+            if (QApplication::activeModalWidget() || qobject_cast<QLineEdit *>(QApplication::focusWidget())) {
+                return QWidget::eventFilter(object, event);
+            }
+            if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) {
                 controller.window()->pageButton(direction);
             }
             return true;

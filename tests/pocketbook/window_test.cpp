@@ -4,8 +4,11 @@
 #include "platform/pocketbook/window.h"
 
 #include <QApplication>
+#include <QFileDialog>
 #include <QFontDatabase>
 #include <QImage>
+#include <QLineEdit>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -34,6 +37,18 @@ private slots:
             window.show();
             QSignalSpy opened(&window, &pocketbook::Window::bookOpened);
             QSignalSpy failed(&window, &pocketbook::Window::bookFailed);
+            if (pass == 0) {
+                auto *open = window.findChild<QPushButton *>("androidOpenBook");
+                QVERIFY(open);
+                QTimer::singleShot(0, &window, [&] {
+                    auto *dialog = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+                    QVERIFY(dialog);
+                    QTest::keyPress(dialog, Qt::Key_Escape);
+                    QTest::keyRelease(&window, Qt::Key_Escape);
+                });
+                open->click();
+                QVERIFY(window.isVisible());
+            }
             window.openBook(QStringLiteral(KOBALT_FIXTURE));
             QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
             QCOMPARE(failed.count(), 0);
@@ -47,6 +62,13 @@ private slots:
                 QTRY_VERIFY_WITH_TIMEOUT(page() != first, 10000);
                 QTest::qWait(300);
                 second = page();
+                QLineEdit editor(&window);
+                editor.setText("abc");
+                editor.show();
+                editor.setFocus();
+                editor.setCursorPosition(2);
+                QTest::keyClick(&editor, Qt::Key_Left);
+                QCOMPARE(editor.cursorPosition(), 1);
             } else {
                 QTRY_COMPARE_WITH_TIMEOUT(page(), second, 10000);
             }

@@ -97,10 +97,8 @@ ReaderHostServices readerServices() {
     services.pageButtonDirection = [](QKeyEvent *event) {
         switch (event->key()) {
         case Qt::Key_PageDown:
-        case Qt::Key_Right:
             return 1;
         case Qt::Key_PageUp:
-        case Qt::Key_Left:
             return -1;
         default:
             return 0;

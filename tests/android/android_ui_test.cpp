@@ -306,7 +306,7 @@ private slots:
         hold();
         QCOMPARE(reopen.count(), 0);
         QCOMPARE(forget.count(), 0);
-        auto *canvas = screen.findChild<android::WidgetCanvas *>("androidRecentModalCanvas");
+        auto *canvas = dynamic_cast<android::WidgetCanvas *>(screen.findChild<QWidget *>("androidRecentModalCanvas"));
         QVERIFY(canvas);
         auto *confirm = canvas->content->findChild<QPushButton *>("androidForgetConfirm");
         auto *cancel = canvas->content->findChild<QPushButton *>("androidForgetCancel");
@@ -345,7 +345,7 @@ private slots:
         QTest::mouseMove(card, QPoint(20, 60));
         QTest::qWait(650);
         QTest::mouseRelease(card, Qt::LeftButton, Qt::NoModifier, QPoint(20, 60));
-        QVERIFY(!screen.findChild<android::WidgetCanvas *>("androidRecentModalCanvas"));
+        QVERIFY(!dynamic_cast<android::WidgetCanvas *>(screen.findChild<QWidget *>("androidRecentModalCanvas")));
     }
     void lastBookPaintsCoverAndStandardButtonEdges() {
         android::StartScreen screen(presentation());
