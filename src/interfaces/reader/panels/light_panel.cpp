@@ -67,7 +67,8 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
                       "rrBrightnessLess", "rrBrightnessMore", 0, 100, 1, {}, {}, "%");
     brightnessSlider->setMarkers({0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100});
     warmthSlider = ui::sliderRow(this, rows, "rrWarmth", "rrWarmthValue", strings::get("light_panel.warmth"),
-                                 "rrWarmthLess", "rrWarmthMore", 0, 100, 1, {});
+                                 "rrWarmthLess", "rrWarmthMore", 0, 100, 10, {}, {}, "%");
+    warmthSlider->setMarkers({0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100}, ui::SettingSlider::MarkerMode::Stops);
     brightnessValue = findChild<QLabel *>("rrBrightnessValue");
     warmthValue = findChild<QLabel *>("rrWarmthValue");
     warmthRow = warmthSlider->parentWidget();
@@ -108,11 +109,9 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
                 warmthOriginal = this->light.warmth();
                 warmthAutomatic = this->light.automaticWarmth();
             }
-            this->light.setWarmth(value);
+            const int minimum = this->light.warmthMinimum(), range = this->light.warmthMaximum() - minimum;
+            this->light.setWarmth(minimum + qRound(range * value / 100.0));
         }
-        const int range = warmthSlider->maximum() - warmthSlider->minimum();
-        warmthValue->setText(
-            QString::number(range > 0 ? qRound(100.0 * (value - warmthSlider->minimum()) / range) : 0) + '%');
     });
     warmthSlider->committed = [this](int) {
         finishWarmth(true);
@@ -179,29 +178,12 @@ void LightPanel::refreshValues() {
         strings::get(warmth ? "settings.edge_light_description" : "settings.edge_brightness_description"));
     if (warmth) {
         if (!warmthSlider->interacting()) {
-            const int minimum = light.warmthMinimum(), maximum = light.warmthMaximum();
-            const int step = qMax(1, light.warmthStep()), range = maximum - minimum;
-            warmthSlider->setRange(minimum, maximum);
-            warmthSlider->setSingleStep(step);
-            QVector<int> markers;
-            if (range / step <= 20) {
-                for (int value = minimum; value < maximum; value += step) {
-                    markers.append(value);
-                }
-                markers.append(maximum);
-            } else {
-                // Dense ranges use reference marks at supported levels.
-                for (int percent = 0; percent <= 100; percent += 10) {
-                    markers.append(qMin(maximum, minimum + qRound(double(range) * percent / (100 * step)) * step));
-                }
-            }
-            warmthSlider->setMarkers(markers);
-            warmthSlider->setValue(light.warmth());
+            const int minimum = light.warmthMinimum(), range = light.warmthMaximum() - minimum;
+            const int percent = range > 0 ? qRound(10.0 * (light.warmth() - minimum) / range) * 10 : 0;
+            warmthSlider->setValue(qBound(0, percent, 100));
         }
         // setValue does not emit when the current value is unchanged.
-        const int range = light.warmthMaximum() - light.warmthMinimum();
-        warmthValue->setText(QString::number(qRound(100.0 * (warmthSlider->value() - light.warmthMinimum()) / range)) +
-                             '%');
+        warmthValue->setText(QString::number(warmthSlider->value()) + '%');
     }
     updating = false;
     layoutPanel();

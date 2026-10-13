@@ -118,7 +118,7 @@ private slots:
         QVERIFY(!panel.findChild<QLabel *>("rrLightError"));
         QCOMPARE(panel.geometry(), before);
     }
-    void lightMarkersRespectNativeSteps() {
+    void lightMarkersUsePercentageStops() {
         QWidget parent;
         parent.resize(1072, 1448);
         parent.show();
@@ -132,7 +132,9 @@ private slots:
         auto *warmth = dynamic_cast<kobalt::ui::SettingSlider *>(panel.findChild<QSlider *>("rrWarmth"));
         auto *brightness = dynamic_cast<kobalt::ui::SettingSlider *>(panel.findChild<QSlider *>("rrBrightness"));
         QVERIFY(warmth && brightness);
-        QCOMPARE(warmth->singleStep(), 500);
+        QCOMPARE(warmth->minimum(), 0);
+        QCOMPARE(warmth->maximum(), 100);
+        QCOMPARE(warmth->singleStep(), 10);
         const auto verifyMarkers = [](kobalt::ui::SettingSlider *slider) {
             const auto image = slider->grab().toImage();
             const int inset = kobalt::ui::metrics::control::sliderInset;
@@ -149,6 +151,38 @@ private slots:
         QCOMPARE(panel.findChild<QLabel *>("rrWarmthValue")->text(), QString("10%"));
         brightness->nudge(1);
         QCOMPARE(light.level, 51);
+    }
+    void warmthDragKeepsTenPercentStopsAndStableGeometry() {
+        QWidget parent;
+        parent.resize(1072, 1448);
+        parent.show();
+        Light light;
+        light.warmthEnabled = true;
+        light.warmthMin = light.warmthLevel = 1000;
+        light.warmthMax = 6000;
+        light.roundWarmthTo = 200;
+        kobalt::LightPanel panel(light, &parent);
+        QVERIFY(panel.open());
+        auto *slider = panel.findChild<QSlider *>("rrWarmth");
+        const QRect bounds = panel.geometry();
+        const int inset = kobalt::ui::metrics::control::sliderInset, span = slider->width() - 2 * inset;
+        const auto point = [&](int percent) {
+            return QPoint(inset + qRound(span * percent / 100.0), slider->height() / 2);
+        };
+        QTest::mousePress(slider, Qt::LeftButton, Qt::NoModifier, point(34));
+        QCOMPARE(slider->value(), 30);
+        QCOMPARE(light.warmthLevel, 2600);
+        QCOMPARE(panel.findChild<QLabel *>("rrWarmthValue")->text(), QString("30%"));
+        QVERIFY(!panel.findChild<QLabel *>("rrLightError"));
+        QCOMPARE(panel.geometry(), bounds);
+        QTest::mouseMove(slider, point(46));
+        QCOMPARE(slider->value(), 50);
+        QCOMPARE(light.warmthLevel, 3600);
+        QCOMPARE(panel.findChild<QLabel *>("rrWarmthValue")->text(), QString("50%"));
+        QCOMPARE(panel.geometry(), bounds);
+        QTest::mouseRelease(slider, Qt::LeftButton, Qt::NoModifier, point(46));
+        QCOMPARE(slider->value(), 50);
+        QCOMPARE(panel.geometry(), bounds);
     }
     void thinBordersFollowDensity_data() {
         QTest::addColumn<int>("ppi");
