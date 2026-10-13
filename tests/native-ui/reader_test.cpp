@@ -39,6 +39,7 @@
 #include "reading/reading_density.h"
 #include "engine/crengine/engine_activity.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/private_text.h"
 #include <QApplication>
 #include <QKeyEvent>
 #include <QFontDatabase>
@@ -844,8 +845,8 @@ private slots:
         QPointer<ui::FontButton> retainedFont;
         {
             reader::AppearancePanelInputs inputs;
-            inputs.headerCaption = "Small";
-            inputs.footerCaption = "Off";
+            inputs.headerSize = "small";
+            inputs.footerSize = "off";
             inputs.sideButtons = true;
             inputs.reverseLandscapeButtons = true;
             inputs.automaticRotationAvailable = true;
@@ -866,8 +867,10 @@ private slots:
             QCOMPARE(panel.marginSlider->singleStep(), 3);
             QCOMPARE(panel.verticalMarginSlider->singleStep(), 3);
             QCOMPARE(panel.verticalMarginSlider->parentWidget()->parentWidget(), layout);
-            QCOMPARE(panel.headerTextSize->text(), QString("Small"));
-            QCOMPARE(panel.footerTextSize->text(), QString("Off"));
+            QCOMPARE(panel.headerSizeButtons.size(), 4);
+            QVERIFY(panel.headerSizeButtons[1]->isChecked());
+            QCOMPARE(panel.footerSizeButtons.size(), 4);
+            QVERIFY(panel.footerSizeButtons[0]->isChecked());
             QCOMPARE(panel.rotationButtons.size(), 2);
             QCOMPARE(panel.rotationButtons[0]->text(), strings::get("reader.portrait"));
             QCOMPARE(panel.rotationButtons[1]->text(), strings::get("reader.landscape"));
@@ -1645,8 +1648,8 @@ private slots:
         QTRY_VERIFY(host.window()->readyForPresentation());
         QVERIFY(!host.window()->findChild<QWidget *>("rrRotation"));
         QVERIFY(!host.window()->findChild<QPushButton *>("rrAutoRotate"));
-        QVERIFY(host.window()->findChild<QPushButton *>("rrHeaderTextSize"));
-        QVERIFY(host.window()->findChild<QPushButton *>("rrFooterTextSize"));
+        QVERIFY(host.window()->findChild<QWidget *>("rrHeaderTextSize"));
+        QVERIFY(host.window()->findChild<QWidget *>("rrFooterTextSize"));
     }
     void openingWaitsForTheFinalViewport() {
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
@@ -3101,9 +3104,13 @@ private slots:
         QTest::qWait(30);
         QCOMPARE(host.session()->page(), 1);
     }
-    void chromeSizePopoverCoversPanelBorder() {
-        const auto originalPreferences = storage::readJson(testPaths().preferences());
-        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+    void chromeSizeSegmentsApplyAndPersist() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        storage::Paths paths{directory.path()};
+        paths.stateReport = paths.directory + "/state.json";
+        const auto identity = QUrl::fromLocalFile(QFileInfo(fixture()).absoluteFilePath()).toString();
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
         CloseHost cleanup{host};
         QSignalSpy opened(&host, &test::ReaderHost::opened);
         host.open(fixture(), nativeSize);
@@ -3115,36 +3122,94 @@ private slots:
         QTRY_VERIFY(!host.session()->busy());
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavLayout")));
-        QVERIFY(!host.session()->busy());
-        for (const auto *name : {"rrHeaderTextSize", "rrFooterTextSize"}) {
-            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>(name)));
-            auto *choices = host.window()->findChild<QWidget *>("rrChoices");
-            QVERIFY(choices);
-            QTRY_VERIFY(choices->isVisible());
-            auto *rule = host.window()->findChild<QWidget *>("rrNavigationLowerEdge");
-            QVERIFY(rule);
-            const QRect overlap = choices->geometry().intersected(rule->geometry());
-            // Header choices cross the panel rule; footer choices sit below it.
-            if (QString::fromLatin1(name) == "rrHeaderTextSize")
-                QVERIFY(!overlap.isEmpty());
-            const QPoint point = overlap.isEmpty() ? choices->geometry().center() : overlap.center();
-            auto *above = host.window()->childAt(point);
-            QVERIFY(above);
-            QVERIFY(above == choices || choices->isAncestorOf(above));
-            const QString visibility = QString::fromLatin1(name) == "rrHeaderTextSize" ? "show_header" : "show_footer";
-            const bool wasVisible = originalPreferences.value(visibility).toBool(true);
-            auto *choice =
-                choices->findChild<QPushButton *>(QString::fromLatin1(name) + (wasVisible ? "_off" : "_small"));
-            QVERIFY(choice);
-            QVERIFY(click(canvas, choice));
-            QTRY_VERIFY(!choices->isVisible());
-            QTRY_COMPARE(storage::readJson(testPaths().preferences()).value(visibility).toBool(), !wasVisible);
-            QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
+        const auto previewReady = [&] {
+            host.window()->checkpoint();
+            const auto state = storage::readJson(paths.stateReport);
+            return state["preview_ready"].toBool() && !state["preview_busy"].toBool();
+        };
+        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        QVERIFY(page);
+        for (const auto &part : {QString("Header"), QString("Footer")}) {
+            const bool footer = part == "Footer";
+            const QString visibility = footer ? "show_footer" : "show_header";
+            const QString sizeKey = footer ? "footer_text_size" : "header_text_size";
+            for (const auto &value : {QString("small"), QString("medium"), QString("large"), QString("off")}) {
+                auto *button = host.window()->findChild<QPushButton *>("rr" + part + "TextSize_" + value);
+                QVERIFY(button);
+                QVERIFY(click(canvas, button));
+                QVERIFY(button->isChecked());
+                QVERIFY(host.window()->findChild<QWidget *>("rrChoices")->isHidden());
+                QTRY_VERIFY(previewReady());
+                QCOMPARE(footer ? page->showFooter : page->showHeader, value != "off");
+                QCOMPARE(footer ? page->footerSize : page->headerSize, value == "off" ? QString("large") : value);
+                const auto saved = storage::readJson(paths.bookState(identity));
+                QCOMPARE(saved.value(visibility).toBool(), value != "off");
+                QCOMPARE(saved.value(sizeKey).toString(), value == "off" ? QString("large") : value);
+                for (auto *sibling : button->parentWidget()->findChildren<QPushButton *>()) {
+                    QCOMPARE(sibling->isChecked(), sibling == button);
+                }
+            }
         }
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavStats")));
-        QTRY_VERIFY(host.window()->findChild<QWidget *>("rrChapterGraph")->isVisible() && !host.session()->busy());
-        QVERIFY(!inspectReader(host)["preview_ready"].toBool());
-        QVERIFY(storage::writeJson(testPaths().preferences(), originalPreferences));
+        QTRY_VERIFY(!host.session()->busy());
+        host.shutdown();
+        QTRY_VERIFY_WITH_TIMEOUT(host.idle(), 10000);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
+        QVERIFY(host.window()->findChild<QPushButton *>("rrHeaderTextSize_off")->isChecked());
+        QVERIFY(host.window()->findChild<QPushButton *>("rrFooterTextSize_off")->isChecked());
+    }
+    void chromeSizeLabelsFollowAvailableWidth_data() {
+        QTest::addColumn<int>("ppi");
+        QTest::addColumn<int>("width");
+        QTest::addColumn<bool>("compact");
+        QTest::newRow("libra") << 300 << 1264 << false;
+        QTest::newRow("nia") << 212 << 758 << false;
+        QTest::newRow("narrow-300") << 300 << 800 << true;
+        QTest::newRow("narrow-212") << 212 << 566 << true;
+    }
+    void chromeSizeLabelsFollowAvailableWidth() {
+        QFETCH(int, ppi);
+        QFETCH(int, width);
+        QFETCH(bool, compact);
+        const int previous = ui::density();
+        struct RestoreDensity {
+            int value;
+            ~RestoreDensity() {
+                ui::setDensity(value);
+            }
+        } restore{previous};
+        ui::setDensity(ppi);
+        QWidget owner;
+        auto *typography = new QWidget(&owner), *layout = new QWidget(&owner);
+        auto *typeRows = new QVBoxLayout(typography), *pageRows = new QVBoxLayout(layout);
+        pageRows->setContentsMargins(ui::metrics::panel::contentMargins);
+        reader::AppearancePanel panel({typography, layout, typeRows, pageRows}, {});
+        owner.resize(width, ui::px(900));
+        layout->resize(owner.size());
+        owner.show();
+        layout->show();
+        QCoreApplication::processEvents();
+        const QStringList full = {"Off", "Small", "Medium", "Large"};
+        const QStringList shortLabels = {"Off", "S", "M", "L"};
+        for (const auto &buttons : {panel.headerSizeButtons, panel.footerSizeButtons}) {
+            for (int i = 0; i < buttons.size(); ++i) {
+                auto *button = buttons[i];
+                QCOMPARE(button->text(), (compact ? shortLabels : full)[i]);
+                QCOMPARE(button->accessibleName(), full[i]);
+                QCOMPARE(button->font().pixelSize(), int(ui::metrics::text::secondary));
+                QVERIFY(ui::interfaceTextWidth(button->text(), button->font()) +
+                            2 * int(ui::metrics::control::segmentHorizontalPadding) <=
+                        button->width());
+            }
+        }
+        owner.resize(1264, owner.height());
+        layout->resize(owner.size());
+        QCoreApplication::processEvents();
+        for (int i = 0; i < full.size(); ++i) {
+            QCOMPARE(panel.headerSizeButtons[i]->text(), full[i]);
+            QCOMPARE(panel.footerSizeButtons[i]->text(), full[i]);
+        }
     }
     void bookLayoutAndGlobalBionicReopen() {
         QTemporaryDir directory;

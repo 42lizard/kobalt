@@ -172,14 +172,23 @@ AppearancePanel::AppearancePanel(const AppearanceLayout &layout, const Appearanc
     }
     auto chromeSizeRow = [this, pageLayout, pageRows, &inputs](bool footer) {
         const QString name = footer ? "rrFooterTextSize" : "rrHeaderTextSize";
-        auto *row = kobalt::ui::labeledRow(pageLayout, pageRows,
-                                           footer ? strings::get("reader.footer") : strings::get("reader.header"));
-        auto *button = new kobalt::ui::DropdownButton(pageLayout);
-        button->setObjectName(name);
-        button->setMinimumWidth(m::control::captionWidth);
-        button->setText(footer ? inputs.footerCaption : inputs.headerCaption);
-        row->addWidget(button, 1);
-        (footer ? footerTextSize : headerTextSize) = button;
+        ui::SegmentedRow row(pageLayout, pageRows, name.toLatin1().constData(),
+                             strings::get(footer ? "reader.footer" : "reader.header"));
+        auto &buttons = footer ? footerSizeButtons : headerSizeButtons;
+        for (const auto &value : {QString("off"), QString("small"), QString("medium"), QString("large")}) {
+            const QByteArray key = value == "off" ? QByteArray("common.off") : ("common.size_" + value).toLatin1();
+            const QByteArray compactKey = value == "off" ? key : key + "_short";
+            const QString label = strings::get(key.constData());
+            auto *button = row.add(name + "_" + value, label);
+            button->setProperty("text_size", value);
+            button->setProperty("full_label", label);
+            button->setProperty("compact_label", strings::get(compactKey.constData()));
+            button->setAccessibleName(label);
+            button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+            button->setChecked(value == (footer ? inputs.footerSize : inputs.headerSize));
+            buttons.append(button);
+        }
+        new ChoiceLabels(buttons.first()->parentWidget(), buttons);
     };
     chromeSizeRow(false);
     chromeSizeRow(true);

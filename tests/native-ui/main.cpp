@@ -115,8 +115,6 @@ int main(int argc, char **argv) {
         rows->setSpacing(ui::metrics::control::rowGap);
     }
     kobalt::reader::AppearancePanelInputs appearanceInputs;
-    appearanceInputs.headerCaption = "Header";
-    appearanceInputs.footerCaption = "Footer";
     kobalt::reader::AppearancePanel appearance({typography, layout, typeRows, pageRows}, appearanceInputs);
     const int sampleHalfPoints = 21;
     appearance.sizeSlider->setValue(sampleHalfPoints);

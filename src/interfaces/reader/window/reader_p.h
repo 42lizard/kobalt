@@ -43,8 +43,6 @@
 #include <memory>
 
 namespace kobalt::reader {
-QString sizeLabel(const QString &value);
-
 // Input and accessibility target only. The cached header image supplies its
 // pixels and invalidates only the part whose text changed.
 class ChapterHeader : public QPushButton {
@@ -171,7 +169,8 @@ private:
     QVector<QPushButton *> rotationButtons;
     bool restoringDefaults = false, themeReady = false, darkTheme = false;
     kobalt::ui::FontButton *fontButton;
-    QVector<QPushButton *> alignmentButtons, hyphenButtons;
+    QVector<QPushButton *> alignmentButtons, hyphenButtons, headerSizeButtons, footerSizeButtons;
+    void syncChromeSizeButtons();
     kobalt::ui::SettingSlider *sizeSlider, *opticalSizeSlider, *weightSlider, *variableWeightSlider, *spacingSlider,
         *marginSlider, *verticalMarginSlider, *bookSlider;
     kobalt::reader::AppearanceEditSession appearanceEdit;

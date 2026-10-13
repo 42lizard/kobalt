@@ -586,15 +586,14 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
     auto *typography = layout.typography, *pageLayout = layout.pageLayout;
     auto *typeRows = layout.typeRows, *pageRows = layout.pageRows;
     kobalt::reader::AppearancePanelInputs appearanceInputs;
-    const auto chromeCaption = [this](bool footer) {
+    const auto chromeSize = [this](bool footer) {
         const QString key = footer ? "footer_text_size" : "header_text_size";
         const QString visibility = footer ? "show_footer" : "show_header";
-        return sizeLabel(preferences.value(visibility).toBool(true)
-                             ? m::reading::textSize(preferences.value(key).toString())
-                             : QString("off"));
+        return preferences.value(visibility).toBool(true) ? m::reading::textSize(preferences.value(key).toString())
+                                                          : QString("off");
     };
-    appearanceInputs.headerCaption = chromeCaption(false);
-    appearanceInputs.footerCaption = chromeCaption(true);
+    appearanceInputs.headerSize = chromeSize(false);
+    appearanceInputs.footerSize = chromeSize(true);
     appearanceInputs.sideButtons = services.pageButtons();
     appearanceInputs.reverseLandscapeButtons = services.reverseLandscapeButtons();
     appearanceInputs.automaticRotationAvailable = orientation->automaticAvailable();
@@ -739,24 +738,26 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
                                         : strings::get("reader.the_orientation_sensor_is_unavailable"));
             refresh();
         });
-    auto connectChromeSize = [this, &appearance](bool footer) {
+    headerSizeButtons = appearance.headerSizeButtons;
+    footerSizeButtons = appearance.footerSizeButtons;
+    auto connectChromeSize = [this](bool footer) {
         const QString key = footer ? "footer_text_size" : "header_text_size";
-        const QString name = footer ? "rrFooterTextSize" : "rrHeaderTextSize";
         const QString visibility = footer ? "show_footer" : "show_header";
-        auto *button = footer ? appearance.footerTextSize : appearance.headerTextSize;
-        connect(button, &QPushButton::clicked, this, [this, button, key, name, footer, visibility] {
-            QVector<Choice> items;
-            for (const auto &value : {QString("off"), QString("small"), QString("medium"), QString("large")})
-                items.append({sizeLabel(value), value, name + "_" + value});
-            choices->selected = [this, button, key, footer, visibility](const QString &value) {
-                if (model->temporaryTypography())
+        for (auto *button : footer ? footerSizeButtons : headerSizeButtons) {
+            connect(button, &QPushButton::clicked, this, [this, button, key, footer, visibility] {
+                if (model->temporaryTypography()) {
+                    syncChromeSizeButtons();
                     return;
+                }
+                const QString value = button->property("text_size").toString();
                 auto next = preferences;
                 next[visibility] = value != "off";
-                if (value != "off")
+                if (value != "off") {
                     next[key] = value;
+                }
                 const bool changed = next != preferences;
                 if (!writePreferences(next)) {
+                    syncChromeSizeButtons();
                     appearanceEdit.setError(strings::get("reader.could_not_save_reader_settings"));
                     refresh();
                     return;
@@ -772,31 +773,18 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
                     page->headerTextPixels = m::reading::textPixels(page->headerSize, false);
                 }
                 const QSize viewport(width(), height() - page->topHeight() - page->bottomHeight());
-                if (changed)
+                if (changed) {
                     mutateAppearance([viewport](ReaderSession &preview) {
                         preview.resize(viewport);
                     });
+                }
                 header->setGeometry(0, 0, width(), page->topHeight());
                 header->setVisible(page->topHeight() > 0);
-                button->setText(sizeLabel(value));
+                syncChromeSizeButtons();
                 appearanceEdit.clearError();
-                choices->hide();
                 refresh();
-            };
-            choosingTypography = true;
-            const auto below = button->mapTo(this, QPoint(0, button->height()));
-            const int dropdownHeight = 4 * m::list::oneLine + 4;
-            const int bottom = navigation->contentBottom(size());
-            const bool opensAbove = below.y() + dropdownHeight > bottom;
-            const int top = opensAbove ? below.y() - button->height() - dropdownHeight : below.y();
-            choices->setDropdownGeometry(QRect(below.x(), qMax(0, top), button->width(), dropdownHeight));
-            choices->showChoices({}, std::move(items),
-                                 preferences.value(visibility).toBool(true)
-                                     ? m::reading::textSize(preferences.value(key).toString())
-                                     : QString("off"),
-                                 ChoiceScreen::Mode::Sizes);
-            refresh();
-        });
+            });
+        }
     };
     connectChromeSize(false);
     connectChromeSize(true);

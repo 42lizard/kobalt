@@ -24,11 +24,15 @@ using kobalt::ui::ControlIcon;
 using kobalt::ui::buttonIcon;
 using kobalt::platform::textRefresh;
 
-QString sizeLabel(const QString &value) {
-    return value == "off"     ? strings::get("common.off")
-           : value == "small" ? strings::get("common.size_small")
-           : value == "large" ? strings::get("common.size_large")
-                              : strings::get("common.size_medium");
+void Reader::syncChromeSizeButtons() {
+    for (const auto &key : {QString("header"), QString("footer")}) {
+        const auto value = preferences.value("show_" + key).toBool(true)
+                               ? m::reading::textSize(preferences.value(key + "_text_size").toString())
+                               : QString("off");
+        for (auto *button : key == "header" ? headerSizeButtons : footerSizeButtons) {
+            button->setChecked(button->property("text_size").toString() == value);
+        }
+    }
 }
 
 void Reader::refreshHostPresentation() {
@@ -166,12 +170,7 @@ void Reader::applySettings() {
     page->footerSize = m::reading::textSize(preferences.value("footer_text_size").toString());
     page->headerTextPixels = m::reading::textPixels(page->headerSize, false);
     page->footerTextPixels = m::reading::textPixels(page->footerSize, true);
-    for (const auto &key : {QString("header"), QString("footer")}) {
-        const auto value = preferences.value("show_" + key).toBool(true)
-                               ? m::reading::textSize(preferences.value(key + "_text_size").toString())
-                               : QString("off");
-        findChild<QPushButton *>(key == "header" ? "rrHeaderTextSize" : "rrFooterTextSize")->setText(sizeLabel(value));
-    }
+    syncChromeSizeButtons();
     page->showClock = clockOption->isChecked();
     page->showProgress = progressOption->isChecked();
     applyEdgeLight();

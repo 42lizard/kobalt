@@ -75,8 +75,11 @@
 "common.percent" = "%1%";
 "common.previous_page" = "Previous page";
 "common.size_large" = "Large";
+"common.size_large_short" = "L";
 "common.size_medium" = "Medium";
+"common.size_medium_short" = "M";
 "common.size_small" = "Small";
+"common.size_small_short" = "S";
 
 /* components */
 "components.battery_level_unavailable" = "Battery level unavailable";

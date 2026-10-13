@@ -1004,10 +1004,7 @@ public:
             tap("rrNavLayout");
             capture("layout", "rrMargins");
             for (const auto &part : {"Header", "Footer"}) {
-                tap("rr" + QString(part) + "TextSize");
-                require(widget("rrChoices")->width() == widget("rr" + QString(part) + "TextSize")->width(),
-                        "Size dropdown lost its selector width");
-                capture(QString(part).toLower() + "-sizes", "rrChoices");
+                capture(QString(part).toLower() + "-sizes", "rr" + QString(part) + "TextSize");
                 tap("rr" + QString(part) + "TextSize_small");
             }
             tap("rrWider");
