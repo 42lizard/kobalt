@@ -1,3 +1,4 @@
+#include "application.h"
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
 #include "device.h"
@@ -20,7 +21,7 @@ int main(int argc, char **argv) {
 #endif
     const auto size = pocketbook::initialize();
     FontCopies copies;
-    QApplication app(argc, argv);
+    pocketbook::Application app(argc, argv);
     app.setApplicationName("Kobalt");
     app.setOrganizationName("Kobalt");
     app.setStyle("Fusion");
