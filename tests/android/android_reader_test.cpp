@@ -128,7 +128,7 @@ private slots:
         QTRY_COMPARE(state().value("page").toInt(-1), 1);
         window->pageButton(-1);
         QTRY_COMPARE(state().value("page").toInt(-1), 0);
-        auto *page = window->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(window->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         page->swiped(-1);
         QTRY_COMPARE(state().value("page").toInt(-1), 1);
