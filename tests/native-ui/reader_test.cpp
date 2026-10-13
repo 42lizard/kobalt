@@ -3889,6 +3889,9 @@ private slots:
                 return state.brightness = qBound(0, value, 100);
             }
             void finishGesture(bool save) override {
+                if (!gesturing()) {
+                    return;
+                }
                 if (!save)
                     state.brightness = state.originalBrightness;
                 state.originalBrightness = -1;
