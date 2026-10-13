@@ -8,6 +8,7 @@
 #include "interfaces/reader/ui/controls/buttons.h"
 #include <QLabel>
 #include <QSlider>
+#include <QStyle>
 #include <QTest>
 
 namespace kobalt::platform {
@@ -17,7 +18,8 @@ class Light final : public kobalt::LightControls {
 public:
     bool supported = true, automatic = true, saveAllowed = true;
     int changes = 0, level = 50, original = -1;
-    bool originalAutomatic = false;
+    bool originalAutomatic = false, warmthEnabled = false;
+    int warmthLevel = 0, warmthMin = 0, warmthMax = 100, warmthIncrement = 1;
     bool initialize() override {
         return true;
     }
@@ -36,25 +38,25 @@ public:
         return true;
     }
     bool hasWarmth() const override {
-        return false;
+        return warmthEnabled;
     }
     int warmth() const override {
-        return 0;
+        return warmthLevel;
     }
     int warmthMinimum() const override {
-        return 0;
+        return warmthMin;
     }
     int warmthMaximum() const override {
-        return 100;
+        return warmthMax;
     }
     int warmthStep() const override {
-        return 1;
+        return warmthIncrement;
     }
     bool automaticWarmth() const override {
         return false;
     }
     int setWarmth(int value) override {
-        return value;
+        return warmthLevel = qBound(warmthMin, value, warmthMax);
     }
     bool saveWarmth() override {
         return true;
@@ -95,6 +97,38 @@ public:
 class LightPanelTest : public QObject {
     Q_OBJECT
 private slots:
+    void lightMarkersRespectNativeSteps() {
+        QWidget parent;
+        parent.resize(1072, 1448);
+        parent.show();
+        Light light;
+        light.warmthEnabled = true;
+        light.warmthMin = light.warmthLevel = 1000;
+        light.warmthMax = 6000;
+        light.warmthIncrement = 500;
+        kobalt::LightPanel panel(light, &parent);
+        QVERIFY(panel.open());
+        auto *warmth = dynamic_cast<kobalt::ui::SettingSlider *>(panel.findChild<QSlider *>("rrWarmth"));
+        auto *brightness = dynamic_cast<kobalt::ui::SettingSlider *>(panel.findChild<QSlider *>("rrBrightness"));
+        QVERIFY(warmth && brightness);
+        QCOMPARE(warmth->singleStep(), 500);
+        const auto verifyMarkers = [](kobalt::ui::SettingSlider *slider) {
+            const auto image = slider->grab().toImage();
+            const int inset = kobalt::ui::metrics::control::sliderInset;
+            for (int index = 0; index <= 10; ++index) {
+                const int x = inset + QStyle::sliderPositionFromValue(0, 10, index, slider->width() - 2 * inset);
+                QCOMPARE(image.pixelColor(x, kobalt::ui::metrics::control::sliderMarkerTop + 1),
+                         slider->palette().color(QPalette::WindowText));
+            }
+        };
+        verifyMarkers(warmth);
+        verifyMarkers(brightness);
+        warmth->nudge(1);
+        QCOMPARE(light.warmthLevel, 1500);
+        QCOMPARE(panel.findChild<QLabel *>("rrWarmthValue")->text(), QString("10%"));
+        brightness->nudge(1);
+        QCOMPARE(light.level, 51);
+    }
     void thinBordersFollowDensity_data() {
         QTest::addColumn<int>("ppi");
         QTest::addColumn<int>("border");
