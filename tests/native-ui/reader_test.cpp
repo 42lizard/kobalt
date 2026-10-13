@@ -899,6 +899,47 @@ private slots:
         delete typography;
         QVERIFY(retainedFont.isNull());
     }
+    void marginNotchesMatchStepPositions() {
+        const int originalDensity = ui::density();
+        struct RestoreDensity {
+            int ppi;
+            ~RestoreDensity() {
+                ui::setDensity(ppi);
+            }
+        } restore{originalDensity};
+        for (const int ppi : {212, 300}) {
+            ui::setDensity(ppi);
+            QWidget owner;
+            owner.setFont(ui::interfaceFont());
+            QWidget typography(&owner), layout(&owner);
+            auto *typeRows = new QVBoxLayout(&typography), *pageRows = new QVBoxLayout(&layout);
+            reader::AppearancePanel panel({&typography, &layout, typeRows, pageRows}, {});
+            layout.resize(ppi == 212 ? 758 : 1264, 800);
+            owner.show();
+            layout.show();
+            QCoreApplication::processEvents();
+            for (auto *slider : {panel.marginSlider, panel.verticalMarginSlider}) {
+                const auto image = slider->grab().toImage();
+                const int inset = ui::metrics::control::sliderInset;
+                const int span = slider->width() - 2 * inset;
+                const int y = ui::metrics::control::sliderMarkerTop + 1;
+                const auto paper = slider->palette().color(QPalette::Window);
+                for (int value = 0; value <= 120; value += 3) {
+                    const int x = inset + QStyle::sliderPositionFromValue(0, 120, value, span);
+                    QVERIFY(image.pixelColor(x, y) != paper);
+                    if (value < 120) {
+                        const int next = inset + QStyle::sliderPositionFromValue(0, 120, value + 3, span);
+                        QCOMPARE(image.pixelColor((x + next) / 2, y), paper);
+                    }
+                }
+                const int x = inset + QStyle::sliderPositionFromValue(0, 120, 62, span);
+                QTest::mouseClick(slider, Qt::LeftButton, Qt::NoModifier, QPoint(x, slider->height() / 2));
+                QCOMPARE(slider->value(), 63);
+                slider->nudge(1);
+                QCOMPARE(slider->value(), 66);
+            }
+        }
+    }
     void dictionaryManagementView() {
         QWidget owner;
         reader::DictionariesPage page(&owner);

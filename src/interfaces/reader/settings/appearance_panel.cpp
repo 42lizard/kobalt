@@ -91,6 +91,12 @@ AppearancePanel::AppearancePanel(const AppearanceLayout &layout, const Appearanc
     verticalMarginSlider = kobalt::ui::sliderRow(pageLayout, pageRows, "rrVerticalMargins", "rrVerticalMarginsValue",
                                                  strings::get("reader.vertical_margins"), "rrVerticalMarginsLess",
                                                  "rrVerticalMarginsMore", 0, 120, 3, {});
+    QVector<int> marginMarks;
+    for (int value = 0; value <= 120; value += 3) {
+        marginMarks.append(value);
+    }
+    marginSlider->setMarkers(marginMarks);
+    verticalMarginSlider->setMarkers(marginMarks);
     typeRows->addSpacing(m::control::sectionGap);
     kobalt::ui::SegmentedRow alignment(typography, typeRows, "rrAlignment", strings::get("reader.alignment"));
     auto alignmentButton = [&](const char *name, const char *value, const QString &label, ControlIcon icon) {
