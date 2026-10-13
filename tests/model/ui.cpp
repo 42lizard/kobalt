@@ -194,6 +194,21 @@ int main(int argc, char **argv) {
                 "Light indicator is off center in landscape");
     }
     {
+        kobalt::ui::PagerBar pager(nullptr, "test");
+        for (int count : {0, 1}) {
+            pager.setPage(0, count, {}, true);
+            require(!pager.previous->isEnabled() && !pager.next->isEnabled(),
+                    "Empty or single-page list enabled a turn");
+            require(pager.turnTarget(-1) == 0 && pager.turnTarget(1) == 0, "Empty or single-page list changed page");
+        }
+        pager.setPage(0, 3, {}, true);
+        require(pager.previous->isEnabled() && pager.turnTarget(-1) == 2, "List previous did not wrap");
+        pager.setPage(2, 3, {}, true);
+        require(pager.next->isEnabled() && pager.turnTarget(1) == 0, "List next did not wrap");
+        pager.setPage(2, 3);
+        require(!pager.next->isEnabled() && pager.turnTarget(1) == 2, "Bounded content pager wrapped");
+    }
+    {
         using namespace kobalt::ui;
         const int savedDensity = density();
         for (int ppi : {212, 300})
@@ -959,7 +974,7 @@ int main(int argc, char **argv) {
         QApplication::processEvents();
         auto *contents = &choices;
         auto *previous = choices.findChild<QPushButton *>("rrContentsPrevious");
-        require(choices.currentPage() == 2 && !choices.findChild<QPushButton *>("rrContentsNext")->isEnabled(),
+        require(choices.currentPage() == 2 && choices.findChild<QPushButton *>("rrContentsNext")->isEnabled(),
                 "Contents did not open on the current chapter's page");
         auto *current = contents->findChild<QLabel *>("chapter34Title");
         require(current && !current->font().bold(), "Current chapter uses a bold label");
@@ -977,7 +992,7 @@ int main(int argc, char **argv) {
         previous->click();
         previous->click();
         QApplication::processEvents();
-        require(choices.currentPage() == 0 && !previous->isEnabled(), "Contents pager did not change the visible page");
+        require(choices.currentPage() == 0 && previous->isEnabled(), "Contents pager did not change the visible page");
         auto *parent = contents->findChild<QLabel *>("chapter0Title");
         auto *nested = contents->findChild<QLabel *>("chapter1Title");
         require(parent && nested &&
@@ -1033,8 +1048,13 @@ int main(int argc, char **argv) {
         require(close->geometry().topLeft() == QPoint() && close->width() == kobalt::ui::metrics::chrome::cellWidth,
                 "The Chapters bar lost its close cell");
         auto *next = choices.findChild<QPushButton *>("rrContentsNext");
-        while (next->isEnabled())
-            next->click();
+        previous->click();
+        require(choices.currentPage() == 2, "Previous did not wrap to the final contents page");
+        next->click();
+        require(choices.currentPage() == 0, "Next did not wrap to the first contents page");
+        previous->click();
+        require(currentButton->grab().toImage().pixel(4, 4) == selectedPaper,
+                "Wrapping changed the selected chapter highlight");
         choices.resize(1448, 1072);
         QApplication::processEvents();
         const auto count = choices.findChild<QLabel *>("rrContentsPage")->text().split(" of ");
@@ -1328,15 +1348,20 @@ int main(int argc, char **argv) {
                 ++visible;
             }
             require(visible == (page < 2 ? 12 : 1), "Grid page capacity is wrong");
-            require(next->isEnabled() == (page < 2), "Grid last-page boundary is wrong");
-            if (next->isEnabled())
+            require(next->isEnabled(), "Grid last-page boundary is wrong");
+            if (page < 2)
                 next->click();
         }
-        while (previous->isEnabled())
+        for (int turn = 0; turn < 2; ++turn)
             previous->click();
         require(requestedPages.size() == 5 && requestedPages[3] == requestedPages[1] &&
                     requestedPages[4] == requestedPages[0],
                 "Returning to a font page requested different families");
+        previous->click();
+        require(requestedPages.last() == QStringList{choices.last().value},
+                "Font previous did not request the last page");
+        next->click();
+        require(requestedPages.last() == requestedPages.first(), "Font next did not request the first page");
         for (const QSize size : {QSize(1072, picker.fontPanelHeight()), QSize(600, 450)}) {
             picker.setFontGeometry(QRect(QPoint(), size));
             app.processEvents();
@@ -1346,7 +1371,7 @@ int main(int argc, char **argv) {
                         "Grid clips a cell after resize");
             }
         }
-        require(requestedPages.size() == 5, "Resizing the font picker requested a hidden font page");
+        require(requestedPages.size() == 7, "Resizing the font picker requested a hidden font page");
         picker.fontPageRequested = {};
         require(picker.findChild<QPushButton *>("font0")->width() == picker.width() / 3 &&
                     picker.findChild<QPushButton *>("font1")->width() == picker.width() / 3,
@@ -1406,7 +1431,7 @@ int main(int argc, char **argv) {
             cell->click();
             require(chosen == sections[i].value, "Section page chose a font from another page");
         }
-        require(!next->isEnabled(), "Supplemental page passed the last section");
+        require(next->isEnabled(), "Supplemental page cannot wrap to the first section");
         const auto sparse = picker.grab().toImage();
         const auto paper = picker.palette().color(QPalette::Window);
         const auto ink = picker.palette().color(QPalette::WindowText);
@@ -2298,11 +2323,18 @@ int main(int argc, char **argv) {
                     seen.insert(id);
                 }
             auto *next = page.findChild<QPushButton *>("rrDictionariesNext");
-            if (!next->isEnabled())
+            const auto fraction = page.findChild<QLabel *>("rrDictionariesPage")->text().split(" of ");
+            if (fraction.first() == fraction.last())
                 break;
             next->click();
         } while (pageCount < 20);
         require(seen.size() == entries.size() && pageCount > 1, "Dictionary paging lost entries");
+        auto *catalogCounter = page.findChild<QLabel *>("rrDictionariesPage");
+        const auto finalCatalogPage = catalogCounter->text();
+        page.findChild<QPushButton *>("rrDictionariesNext")->click();
+        require(catalogCounter->text().startsWith("1 of "), "Dictionary list did not wrap forwards");
+        page.findChild<QPushButton *>("rrDictionariesPrevious")->click();
+        require(catalogCounter->text() == finalCatalogPage, "Dictionary list did not wrap backwards");
         page.setLanguage("zz");
         page.setState({}, false, {});
         app.processEvents();
@@ -2312,7 +2344,8 @@ int main(int argc, char **argv) {
                         "Unknown language retains book-specific captions");
         auto resetPage = [&] {
             auto *previous = page.findChild<QPushButton *>("rrDictionariesPrevious");
-            while (previous->isEnabled())
+            for (int turn = 0; turn < 20 && !page.findChild<QLabel *>("rrDictionariesPage")->text().startsWith("1 of ");
+                 ++turn)
                 previous->click();
             app.processEvents();
         };
@@ -2336,7 +2369,8 @@ int main(int argc, char **argv) {
             for (int i = 0; auto *row = page.findChild<QWidget *>(QString("rrDictionaryRow%1").arg(i)); ++i)
                 ordered.append(row->property("dictionary_id").toString());
             auto *next = page.findChild<QPushButton *>("rrDictionariesNext");
-            if (!next->isEnabled())
+            const auto fraction = page.findChild<QLabel *>("rrDictionariesPage")->text().split(" of ");
+            if (fraction.first() == fraction.last())
                 break;
             next->click();
         } while (ordered.size() < 10);
@@ -2381,8 +2415,7 @@ int main(int argc, char **argv) {
             dynamic_cast<kobalt::ui::ListHeader *>(page.findChild<QWidget *>("rrDictionarySection0"));
         require(installedHeader && installedHeader->leftLabel()->text().startsWith("Installed for this book"),
                 "Completed install did not move into the installed section");
-        while (page.findChild<QPushButton *>("rrDictionariesNext")->isEnabled())
-            page.findChild<QPushButton *>("rrDictionariesNext")->click();
+        page.findChild<QPushButton *>("rrDictionariesPrevious")->click();
         page.setCatalog({english[1]});
         page.setState({"en-en"}, false, {});
         app.processEvents();

@@ -259,6 +259,13 @@ public:
         QTest::mouseClick(canvas->windowHandle(), Qt::LeftButton, Qt::NoModifier,
                           canvas->surface()->mapTo(canvas.get(), point));
     }
+    bool lastListPage(const QString &prefix) {
+        auto *counter = qobject_cast<QLabel *>(widget(prefix + "Page"));
+        require(counter, "List page counter is missing");
+        const auto parts = counter->text().split(" of ");
+        require(parts.size() == 2, "List page counter has an unexpected format");
+        return parts.first() == parts.last();
+    }
     int checkPagerEnds(const QString &prefix, QWidget *content = nullptr) {
         auto *next = widget(prefix + "Next");
         auto *previous = widget(prefix + "Previous");
@@ -267,7 +274,7 @@ public:
         const QString initial = counter->text();
         const auto firstContent = content ? content->grab().toImage() : QImage();
         int turns = 0;
-        while (next->isVisible() && next->isEnabled()) {
+        while (next->isVisible() && next->isEnabled() && !lastListPage(prefix)) {
             require(turns < 128, "Pager did not reach its end within 128 pages");
             const QString before = counter->text();
             tap(prefix + "Next");
@@ -291,7 +298,7 @@ public:
             tap(prefix + "Previous");
             require(counter->text() != before, "Previous did not restore an earlier page");
         }
-        require(counter->text() == initial && !previous->isEnabled(), "Pager did not restore its first page");
+        require(counter->text() == initial, "Pager did not restore its first page");
         return turns;
     }
     void pageTap() {
@@ -532,8 +539,10 @@ public:
         menu();
         tap("rrNavText");
         tap("rrFont");
-        while (widget("rrFontPagerNext")->isEnabled())
+        for (int turn = 0; !lastListPage("rrFontPager"); ++turn) {
+            require(turn < 128, "Font pager did not reach its final page");
             tap("rrFontPagerNext");
+        }
         auto *section = qobject_cast<QLabel *>(widget("rrFontSection"));
         require(section && section->text() == "SUPPLEMENTAL FONTS", "Language font section did not appear");
         bool matchingFont = false;
@@ -951,7 +960,7 @@ public:
                 if (i + 1 < sections.size())
                     tap("rrFontPagerNext");
             }
-            while (widget("rrFontPagerPrevious")->isEnabled())
+            while (!qobject_cast<QLabel *>(widget("rrFontPagerPage"))->text().startsWith("1 of "))
                 tap("rrFontPagerPrevious");
             // Synthetic names exercise wrapping without installing extra fonts.
             const QStringList longNames{"Atkinson Hyperlegible Next", "Source Serif Pro Semibold",
@@ -1010,7 +1019,7 @@ public:
             tap("rrNavChapters");
             for (int i = 0; i < 100; ++i) {
                 capture(QString("chapters-%1").arg(i + 1, 2, 10, QChar('0')), "rrContents");
-                if (!widget("rrContentsNext")->isEnabled())
+                if (lastListPage("rrContents"))
                     return;
                 tap("rrContentsNext");
             }

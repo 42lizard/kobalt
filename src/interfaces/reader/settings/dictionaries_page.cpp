@@ -106,12 +106,12 @@ DictionariesPage::DictionariesPage(QWidget *parent) : QWidget(parent) {
     layout->addWidget(storage);
     connect(pager->previous, &QPushButton::clicked, this, [this] {
         failedId.clear();
-        --page;
+        page = pager->turnTarget(-1);
         redraw();
     });
     connect(pager->next, &QPushButton::clicked, this, [this] {
         failedId.clear();
-        ++page;
+        page = pager->turnTarget(1);
         redraw();
     });
 }
@@ -275,7 +275,7 @@ void DictionariesPage::redraw() {
         }
     }
     page = qBound(0, page, int(pages.size()) - 1);
-    pager->setPage(page, pages.size());
+    pager->setPage(page, pages.size(), {}, true);
     pager->show();
     int y = 0, rowIndex = 0, sectionIndex = 0, languageIndex = 0;
     for (const auto &item : pages[page]) {

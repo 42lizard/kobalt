@@ -733,8 +733,13 @@ private slots:
         panel->installEventFilter(&damage);
         for (auto *widget : panel->findChildren<QWidget *>())
             widget->installEventFilter(&damage);
+        auto *counter = panel->findChild<QLabel *>(prefix + "Page");
+        QVERIFY(counter);
+        const auto firstPage = counter->text();
         auto before = panel->grab().toImage();
+        int turns = 0;
         do {
+            QVERIFY(++turns < 128);
             paints.count = 0;
             damage.painted = {};
             next->click();
@@ -748,7 +753,18 @@ private slots:
                     if (before.pixel(x, y) != after.pixel(x, y))
                         QVERIFY(changed.contains(QPoint(x, y)));
             before = after;
-        } while (next->isEnabled());
+        } while (next->isEnabled() && counter->text().split(" of ").first() != counter->text().split(" of ").last());
+        if (kind != "stats" && kind != "license") {
+            auto *previous = panel->findChild<QPushButton *>(prefix + "Previous");
+            QVERIFY(previous);
+            const auto lastPage = counter->text();
+            QVERIFY(next->isEnabled());
+            next->click();
+            QCOMPARE(counter->text(), firstPage);
+            previous->click();
+            QCOMPARE(counter->text(), lastPage);
+            QCOMPARE(panel->grab().toImage(), before);
+        }
     }
     void navigationReplayDoesNotInvalidateRules_data() {
         QTest::addColumn<bool>("bluetoothActive");
@@ -1062,7 +1078,7 @@ private slots:
             QVERIFY(option->presentation().indicator == ui::DescribedOption::Indicator::Square);
         QCOMPARE(panel->smoothOption->presentation().minimumRowHeight, int(ui::metrics::chrome::listActionHeight));
         QVERIFY(!panel->findChild<QPushButton *>("rrManageDictionaries"));
-        QCOMPARE(panel->findChildren<ui::DescribedOption *>().size(), 10);
+        QCOMPARE(panel->findChildren<ui::DescribedOption *>().size(), 11);
         QCOMPARE(panel->bionicOption->parentWidget(), panel->settingsPages->widget(reader::DisplaySettings));
         QVERIFY(!panel->animationOption->isEnabled());
         QVERIFY(!panel->edgeLightOption->isEnabled());
@@ -2801,6 +2817,11 @@ private slots:
         host.window()->pageButton(1);
         QTRY_VERIFY(counter->text() != first);
         host.window()->pageButton(-1);
+        QTRY_COMPARE(counter->text(), first);
+        host.window()->pageButton(-1);
+        const auto finalPage = counter->text().split(" of ");
+        QCOMPARE(finalPage.first(), finalPage.last());
+        host.window()->pageButton(1);
         QTRY_COMPARE(counter->text(), first);
         QCOMPARE(host.session()->page(), bookPage);
     }

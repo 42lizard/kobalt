@@ -172,15 +172,15 @@ ChoiceScreen::ChoiceScreen(QWidget *parent) : kobalt::ui::Panel(parent), navigat
     fontClose = close;
     fontPager = new ui::PagerBar(this, "rrFontPager");
     connect(fontPager->previous, &QPushButton::clicked, this, [this] {
-        if (page > 0) {
-            --page;
+        if (pageCount() > 1) {
+            page = fontPager->turnTarget(-1);
             requestFontPage();
             redraw();
         }
     });
     connect(fontPager->next, &QPushButton::clicked, this, [this] {
-        if (page + 1 < pageCount()) {
-            ++page;
+        if (pageCount() > 1) {
+            page = fontPager->turnTarget(1);
             requestFontPage();
             redraw();
         }
@@ -435,7 +435,7 @@ void ChoiceScreen::redrawFonts() {
     const int first = itemIndex(0);
     fontSection->setText(first < 0 ? QString() : items[first].section.toUpper());
     fontPager->setGeometry(0, height() - pager, width(), pager);
-    fontPager->setPage(page, pageCount());
+    fontPager->setPage(page, pageCount(), {}, true);
     fontPager->show();
     while (buttons.size() < pageSize) {
         const int row = buttons.size();

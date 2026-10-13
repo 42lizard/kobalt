@@ -78,11 +78,11 @@ SearchPanel::SearchPanel(QWidget *parent, KeyboardFactory makeKeyboard) : ui::Pa
     });
     pager = new ui::PagerBar(this, "rrSearch");
     connect(pager->previous, &QPushButton::clicked, this, [this] {
-        --resultPage;
+        resultPage = pager->turnTarget(-1);
         redraw();
     });
     connect(pager->next, &QPushButton::clicked, this, [this] {
-        ++resultPage;
+        resultPage = pager->turnTarget(1);
         redraw();
     });
     empty = new QLabel(this);
@@ -263,7 +263,8 @@ void SearchPanel::redraw() {
     pager->setPage(resultPage, count,
                    strings::get("search_panel.result_range")
                        .arg(resultPage * pageSize + 1)
-                       .arg(qMin((resultPage + 1) * pageSize, int(hits.size()))));
+                       .arg(qMin((resultPage + 1) * pageSize, int(hits.size()))),
+                   true);
     original->setVisible(returning);
     original->setGeometry(0, c::headerHeight, width(), m::list::twoLines);
     const bool waiting = hits.isEmpty() && !scanning;

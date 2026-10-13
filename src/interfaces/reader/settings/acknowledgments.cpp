@@ -228,7 +228,7 @@ void Acknowledgments::turnPage(int direction) {
         text->update();
         pager->setPage(text->page, text->pages());
     } else {
-        listPage += direction;
+        listPage = pager->turnTarget(direction);
         redraw(true);
     }
 }
@@ -365,7 +365,7 @@ void Acknowledgments::redraw(bool paging) {
         rows.at(row)->hide();
     for (; heading < headings.size(); ++heading)
         headings.at(heading)->hide();
-    pager->setPage(page, count);
+    pager->setPage(page, count, {}, !reading);
     if (reading)
         text->update();
     if (!paging)
