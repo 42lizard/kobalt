@@ -34,6 +34,7 @@ public:
     }
 
 protected:
+    void initStyleOption(QStyleOptionButton *option) const;
     bool event(QEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void paintEvent(QPaintEvent *event) override;

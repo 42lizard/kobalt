@@ -136,6 +136,8 @@ Kobalt also reports reading sessions and page turns to Nickel, so Nickel's readi
 
 ## Reading interface
 
+Reader buttons keep their keyboard focus behavior without drawing a native focus frame. A held bottom tab uses the same continuous fill as a selected tab.
+
 The Light panel includes an edge-swipe tip below its controls. It explains brightness on the left edge and adds warmth on the right edge only when the device supports adjustable warmth. Layout uses Horizontal margins and Vertical margins; slider labels wrap when needed on smaller screens. Both margin controls use steps of 3 in the unchanged 0 to 120 range, measured at 300 ppi and scaled for the screen.
 
 On Kobo Qt5 and Qt6 builds, the reading menu's status strip shows a Bluetooth icon beside the battery while Bluetooth is powered on. It indicates that Bluetooth is enabled, not that a remote is connected. The icon is hidden while the reading controls are closed. Bluetooth remains controlled by Nickel. Android and desktop do not show this indicator.

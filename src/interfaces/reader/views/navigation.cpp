@@ -146,6 +146,12 @@ BottomNavigation::BottomNavigation(QWidget *parent) : ui::Panel(parent, Qt::TopE
         tab->setObjectName(QString("rrNav%1").arg(names[i]));
         row->addWidget(tab, 1);
         tabs.append(tab);
+        connect(tab, &QPushButton::pressed, this, [this] {
+            update();
+        });
+        connect(tab, &QPushButton::released, this, [this] {
+            update();
+        });
         connect(tab, &QPushButton::clicked, this, [this, i] {
             if (activated)
                 activated(NavigationDestination(i));
@@ -163,7 +169,7 @@ void BottomNavigation::paintEvent(QPaintEvent *event) {
     // An open panel draws the rule above the bar and leaves this band empty.
     // Extend the active tab's fill through it, so the fill meets that rule.
     for (auto *tab : tabs)
-        if (tab->isChecked())
+        if (tab->isChecked() || tab->isDown())
             painter.fillRect(tab->mapTo(this, QPoint()).x(), 0, tab->width(), toolbarBorder,
                              tab->palette().color(QPalette::Text));
 }

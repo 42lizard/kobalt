@@ -17,6 +17,11 @@
 
 namespace kobalt::ui {
 namespace m = metrics;
+void Button::initStyleOption(QStyleOptionButton *option) const {
+    QPushButton::initStyleOption(option);
+    // Keep keyboard focus without drawing Nickel's focus frame on reader buttons.
+    option->state &= ~QStyle::State_HasFocus;
+}
 void Button::mouseReleaseEvent(QMouseEvent *event) {
     // Qt repaints the released button synchronously before emitting clicked.
     // Queue that paint with the panel changes made by the click handler.
@@ -51,7 +56,7 @@ bool Button::event(QEvent *event) {
         return true;
     return QPushButton::event(event);
 }
-void Button::paintEvent(QPaintEvent *event) {
+void Button::paintEvent(QPaintEvent *) {
     if (mode == ButtonPaintMode::Native) {
         if (iconLabelGap) {
             QStyleOptionButton option;
@@ -75,7 +80,10 @@ void Button::paintEvent(QPaintEvent *event) {
                               Qt::AlignCenter);
             return;
         }
-        QPushButton::paintEvent(event);
+        QStyleOptionButton option;
+        initStyleOption(&option);
+        QPainter painter(this);
+        style()->drawControl(QStyle::CE_PushButton, &option, &painter, this);
         return;
     }
     QPainter painter(this);
