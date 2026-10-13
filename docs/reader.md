@@ -192,7 +192,7 @@ Arabic and Hebrew text uses FriBidi for right-to-left ordering and HarfBuzz for 
 
 Thai word selection follows Qt’s Unicode boundaries. It can select a letter cluster rather than a complete dictionary word.
 
-The book's `dc:language` sets the text language, and `lang` attributes set it for parts of the text. The language selects the hyphenation dictionary and the line-breaking rules. CREngine uses libunibreak for Unicode line breaking and its supported CSS `line-break` and `word-break` rules. Kobalt has dictionaries for English (US and UK), German, Dutch, French, Spanish, Italian and Portuguese (Portugal and Brazil). Other languages use CREngine's algorithmic hyphenation. The hyphenation setting still decides whether text is hyphenated.
+The book's `dc:language` sets the text language, and `lang` attributes set it for parts of the text. The language selects the hyphenation dictionary and the line-breaking rules. CREngine uses libunibreak for Unicode line breaking and its supported CSS `line-break` and `word-break` rules. Kobalt has dictionaries for English (US and UK), German, Dutch, French, Spanish, Italian, Portuguese (Portugal and Brazil), Estonian, Finnish, Georgian, Hungarian, Latvian, Lithuanian, Polish, Slovak, Slovenian and Ukrainian. Other languages use CREngine's algorithmic hyphenation. The hyphenation setting still decides whether text is hyphenated.
 
 Pop-ups use the same heading and body text styles. Confirmation buttons use the same height and spacing. Font-section headings have a gray background, and the font panel has the shared thick divider only at its top.
 

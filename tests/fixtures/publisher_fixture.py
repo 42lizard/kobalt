@@ -90,6 +90,20 @@ def russian_book(path):
            '<itemref idref="text.xhtml"/>')
 
 
+def hyphenation_books(directory):
+    """Package language selects each added dictionary, including regional tags."""
+    words = {
+        'et-EE': 'rahvusvaheline', 'fi-FI': 'kirjallisuus', 'ka-GE': 'საქართველო',
+        'hu-HU': 'Magyarország', 'lt-LT': 'universitetas', 'lv-LV': 'universitāte',
+        'pl-PL': 'przedstawienie', 'sk-SK': 'medzinárodného', 'sl-SI': 'slovenščina',
+        'uk-UA': 'література',
+    }
+    for language, word in words.items():
+        _write(directory / f'hyphenation-{language}.epub', language, 'Hyphenation',
+               [('text.xhtml', 'application/xhtml+xml', _xhtml('<p>' + (word + ' ') * 80 + '</p>'))],
+               '<itemref idref="text.xhtml"/>')
+
+
 def equations_book(path):
     """Font-relative SVG equations, separate from ordinary coloured artwork."""
     svg = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200"><rect width="400" height="200" fill="#d02030"/></svg>'

@@ -47,6 +47,7 @@ def write(directory, source_root=ROOT):
     publisher.embedded_fonts_book(directory / 'embedded-fonts.epub', Path(source_root) / 'resources/fonts/IBMPlexSans-Regular.ttf')
     publisher.german_book(directory / 'publisher-de.epub')
     publisher.russian_book(directory / 'publisher-ru.epub')
+    publisher.hyphenation_books(directory)
     for language in ('ja', 'ko', 'zh-Hans', 'zh-Hant', 'zh-HK'):
         publisher.cjk_book(directory / f'cjk-{language}.epub', language)
     publisher.cjk_book(directory / 'cjk-inline.epub', 'ja', 'zh-Hans')

@@ -2,7 +2,9 @@
 
 ### What's changed
 
-- Page buttons now page Chapters, Bookmarks, search results and licenses instead of being ignored.
+- Added hyphenation dictionaries for Estonian, Finnish, Georgian, Hungarian, Latvian, Lithuanian, Polish, Slovak, Slovenian and Ukrainian.
+
+- Page buttons now page Chapters, Bookmarks, search results and licenses instead of being ignored. This can be managed via the "Hide non-linear fragments" setting.
 
 - Long chapters in the Stats chart fill the chart height without a visible line through the bars when chapters are very long relative to other chapters.
 

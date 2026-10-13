@@ -62,13 +62,17 @@ Before a release, review the latest upstream collection and update the revision,
 
 Run `./build-kobo.sh --mini --jobs 2` to build both firmware packages with uncommitted fixes. The script writes `build/mini/Kobalt-qt5-mini.zip` and `build/mini/Kobalt-qt6-mini.zip`. It does not require a tag, commit, installation or upload. To build one target with the local SDK, use `python3 tools/build.py --target qt5 --mini --jobs 2` or select `qt6`. Its output directory ends in `reader-hardware-mini`. For a disposable CI SDK build, use `python3 tools/ci_build.py --target qt5 --mini --allow-dirty`.
 
-Mini packages keep all four styles of Libron and NV Bitter, all interface fonts, all script, CJK and math fallback fonts, and all nine hyphenation dictionaries. They omit the other recommended reading families. A book configured with an omitted font uses an available font instead. Publisher fonts, sideloaded fonts and the reader controls remain available.
+Mini packages keep all four styles of Libron and NV Bitter, all interface fonts, all script, CJK and math fallback fonts, and all nineteen hyphenation dictionaries. They omit the other recommended reading families. A book configured with an omitted font uses an available font instead. Publisher fonts, sideloaded fonts and the reader controls remain available.
 
 The mini CJK font retains all five regional faces, glyphs, outlines, layout tables and metrics. The build removes hinting instructions with checksum-pinned FontTools. CREngine already disables font hinting. Qt can render CJK interface text differently where it uses font hinting. The generated font stays in the ignored dependency cache; the original asset is unchanged. The first conversion takes several minutes, and later builds reuse the verified result.
 
 Mini builds use separate object and package directories and generate manifests for exactly the supplied assets. Installation uses the normal `.adds` and `.kobo` copy procedure. A mini ZIP over 25,000,000 bytes fails packaging and is removed. Full release builds keep the complete font collection and original CJK font. Distribute the corresponding source and dependency sources with test binaries too, as described under CI and tagged releases.
 
 Run `python3 tools/run_tests.py --mini --offline --jobs 2` to test the mini assets in a separate host test directory. The `mini-build` check compares all CJK glyph outlines and the five faces' character maps, layout tables and metrics with the original font. It requires the pinned FontTools archive in the cache.
+
+## Hyphenation assets
+
+`tools/assets.py` lists the bundled dictionaries for Kobo, Android, macOS and host tests. Full and mini builds keep the same dictionaries. Copy new XML patterns from the checksum-pinned CREngine archive in `dependencies/manifest.json`; keep their filenames so CREngine can select them by language. Review the original source license, update `resources/notices/Hyphenation-patterns`, `resources/acknowledgments.json` and `ACKNOWLEDGEMENTS.md`, and test language selection and pattern loading before adding a dictionary. Do not assume that every dictionary in the engine has the same license.
 
 ## C++ style
 

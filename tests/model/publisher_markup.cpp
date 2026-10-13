@@ -245,6 +245,33 @@ int main(int argc, char **argv) {
                 "Russian lost algorithmic hyphenation");
     }
     {
+        const auto directory = QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteDir();
+        const QMap<QString, QString> dictionaries = {
+            {"et-EE", "Estonian"},   {"fi-FI", "Finnish"},  {"ka-GE", "Georgian"}, {"hu-HU", "Hungarian"},
+            {"lt-LT", "Lithuanian"}, {"lv-LV", "Latvian"},  {"pl-PL", "Polish"},   {"sk-SK", "Slovak"},
+            {"sl-SI", "Slovenian"},  {"uk-UA", "Ukrainian"}};
+        for (auto entry = dictionaries.cbegin(); entry != dictionaries.cend(); ++entry) {
+            kobalt::ReaderModel model(kobalt::test::readerFonts());
+            const auto path = directory.filePath("hyphenation-" + entry.key() + ".epub").toLocal8Bit();
+            require(model.open(read(path.constData()), QSize(320, 720),
+                               kobalt::qt::object({{"hyphenation", "on"}, {"text_alignment", "justify"}}), &error),
+                    qPrintable(error));
+            require(text(TextLangMan::getMainLang()) == entry.key(), "Package language was not applied");
+            auto *method = TextLangMan::getTextLangCfg()->getHyphMethod();
+            require(text(method->getId()) == entry.value() + ".pattern",
+                    qPrintable(entry.key() + " did not select its dictionary"));
+            require(method->getCount() > 0, "Selected dictionary has no loaded patterns");
+            require(
+                text(TextLangMan::getTextLangCfg(lString32("hu"))->getHyphMethod()->getId()) == "Hungarian.pattern" &&
+                    text(TextLangMan::getTextLangCfg(lString32("pl"))->getHyphMethod()->getId()) == "Polish.pattern",
+                "Inline language selection lost Hungarian or Polish patterns");
+            const auto hyphenated = model.image(model.page());
+            require(model.setHyphenation("off"), "Cannot disable hyphenation");
+            require(model.image(model.page()) != hyphenated,
+                    qPrintable(entry.key() + " hyphenation did not change wrapping"));
+        }
+    }
+    {
         QMap<QString, QImage> pages;
         const auto directory = QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteDir();
         for (const auto *language : {"ja", "ko", "zh-Hans", "zh-Hant", "zh-HK", "inline"}) {
