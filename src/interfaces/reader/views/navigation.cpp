@@ -75,8 +75,10 @@ protected:
         const auto paper = palette().color(QPalette::Base);
         const auto ink = palette().color(QPalette::Text);
         painter.fillRect(rect(), active ? ink : paper);
-        painter.setPen(QPen(palette().color(QPalette::Mid), ui::metrics::control::border));
-        painter.drawLine(rect().topRight(), rect().bottomRight());
+        if (!active) {
+            painter.setPen(QPen(palette().color(QPalette::Mid), ui::metrics::control::border));
+            painter.drawLine(rect().topRight(), rect().bottomRight());
+        }
         if (!isEnabled())
             painter.setOpacity(.45);
         const auto color = active ? paper : ink;
