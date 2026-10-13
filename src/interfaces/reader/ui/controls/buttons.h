@@ -34,7 +34,11 @@ public:
     }
 
 protected:
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    void initStyleOption(QStyleOptionButton *option) const override;
+#else
     void initStyleOption(QStyleOptionButton *option) const;
+#endif
     bool event(QEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
