@@ -1,6 +1,7 @@
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "platform/pocketbook/application.h"
 #include "platform/pocketbook/window.h"
 
 #include <QApplication>
@@ -18,6 +19,25 @@ using namespace kobalt;
 class PocketBookTest : public QObject {
     Q_OBJECT
 private slots:
+    void platformUpdatesReachReceiver() {
+        class UpdateReceiver : public QObject {
+        public:
+            int updates = 0;
+            bool event(QEvent *event) override {
+                if (event->type() == QEvent::UpdateLater) {
+                    ++updates;
+                    return true;
+                }
+                return QObject::event(event);
+            }
+        } receiver;
+        // The firmware QPA posts plain UpdateLater events, without a QWidget region.
+        QCoreApplication::postEvent(&receiver, new QEvent(QEvent::UpdateLater));
+        QCoreApplication::postEvent(&receiver, new QEvent(QEvent::UpdateLater));
+        QCoreApplication::sendPostedEvents(&receiver);
+        QCOMPARE(receiver.updates, 2);
+    }
+
     void pageSurvivesCloseAndReopen() {
         QTemporaryDir profile;
         QVERIFY(profile.isValid());
@@ -78,7 +98,7 @@ private slots:
     }
 };
 int main(int argc, char **argv) {
-    QApplication app(argc, argv);
+    pocketbook::Application app(argc, argv);
     app.setStyle("Fusion");
     app.setQuitOnLastWindowClosed(false);
     PocketBookTest test;
