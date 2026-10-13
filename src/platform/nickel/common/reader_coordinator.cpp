@@ -683,7 +683,7 @@ void ReaderCoordinator::load() {
     kobalt::appearance::applyFontDefault(saved, preferences);
     saved["dark_mode"] = preferences.value("dark_mode").toBool(false);
     saved["smooth_images"] = preferences.value("smooth_images").toBool(true);
-    saved["bionic_reading"] = preferences.value("bionic_reading").toString("off");
+    saved["bold_reading"] = preferences.value("bold_reading").toString("off");
     const auto size = run.interface->readingViewport(QGuiApplication::primaryScreen()->size(), preferences);
     run.model->open(
         {run.identity, run.filePath, size, saved,

@@ -769,10 +769,10 @@ public:
                 waitFor(
                     [&] {
                         return !host.session()->busy() &&
-                               host.session()->state().value("bionic_reading").toString() == mode;
+                               host.session()->state().value("bold_reading").toString() == mode;
                     },
                     "Bionic apply did not finish", 60000);
-                require(host.session()->state().value("bionic_reading").toString() == mode,
+                require(host.session()->state().value("bold_reading").toString() == mode,
                         "Bionic choice was not applied");
                 if (visible("rrControlsTop"))
                     pageTap();
@@ -946,9 +946,9 @@ public:
             capture("applying-before-delay", "rrFont");
             loading->setDelayedProgress(true, 1000, 37, strings::get("reader.applying_appearance_changes"));
             capture("applying-progress", "rrApplyingProgress");
-            loading->setDelayedProgress(true, 1000, 37, strings::get("reader.enabling_bionic_reading"));
+            loading->setDelayedProgress(true, 1000, 37, strings::get("reader.enabling_bold_reading"));
             capture("enabling-bionic", "rrApplyingProgress");
-            loading->setDelayedProgress(true, 1000, 37, strings::get("reader.disabling_bionic_reading"));
+            loading->setDelayedProgress(true, 1000, 37, strings::get("reader.disabling_bold_reading"));
             capture("disabling-bionic", "rrApplyingProgress");
             loading->setDelayedProgress(false, 0, 0);
             tap("rrFont");

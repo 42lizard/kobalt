@@ -105,7 +105,7 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
                             animationsSupported ? strings::get("settings.animations_description")
                                                 : strings::get("settings.unsupported_description"));
     animationOption->setEnabled(animationsSupported);
-    bionicOption = check(displayPage, "rrBionicReading", strings::get("reader.bionic_reading"),
+    bionicOption = check(displayPage, "rrBionicReading", strings::get("reader.bold_reading"),
                          strings::get("reader.bionic_description"));
     int optionIndex = 0;
     for (auto *option : {darkOption, progressOption, bionicOption, animationOption}) {

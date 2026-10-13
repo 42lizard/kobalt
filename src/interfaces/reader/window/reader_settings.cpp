@@ -80,7 +80,7 @@ void Reader::openSettings() {
     hideNonlinearOption->setChecked(model->state().value("hide_nonlinear_fragments").toBool(false));
     progressOption->setChecked(page->showProgress);
     animationOption->setChecked(preferences.value("page_animations").toBool(false));
-    bionicOption->setChecked(model->state().value("bionic_reading").toString("off") == "bold");
+    bionicOption->setChecked(model->state().value("bold_reading").toString("off") == "bold");
     linkIndicatorOption->setChecked(preferences.value("show_link_indicator").toBool(false));
     edgeLightOption->setChecked(preferences.value("edge_light_gestures").toBool(true));
     denseGraphOption->setChecked(preferences.value("dense_stats_chart").toBool(false));
@@ -125,7 +125,7 @@ void Reader::applySettings() {
     }
     auto next = preferences;
     next["show_clock"] = clockOption->isChecked();
-    next["bionic_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
+    next["bold_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
     next["dark_mode"] = darkOption->isChecked();
     next["smooth_images"] = smoothOption->isChecked();
     next["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
@@ -183,7 +183,7 @@ void Reader::applySettings() {
     settings["dark_mode"] = darkOption->isChecked();
     settings["smooth_images"] = smoothOption->isChecked();
     settings["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
-    settings["bionic_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
+    settings["bold_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
     if (restoringDefaults) {
         const auto defaults = kobalt::appearance::typographyDefaults();
         for (auto it = defaults.begin(); it != defaults.end(); ++it)

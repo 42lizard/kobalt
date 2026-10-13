@@ -42,11 +42,11 @@ int main() {
         require(copied.value(key).toInt() == 36, "Appearance copy lost a vertical margin");
     }
     auto bionic = from;
-    bionic["bionic_reading"] = QStringLiteral("bold");
+    bionic["bold_reading"] = QStringLiteral("bold");
     require(!appearance::same(bionic, from), "Bionic mode changes reused an old layout");
     auto bionicCopy = from;
     appearance::copy(bionicCopy, bionic);
-    require(bionicCopy.value("bionic_reading").toString() == "bold", "Appearance copy lost Bionic mode");
+    require(bionicCopy.value("bold_reading").toString() == "bold", "Appearance copy lost Bionic mode");
     auto optical = from;
     optical["font_optical_size"] = 12;
     require(!appearance::same(optical, from), "Optical size reused an old layout");
@@ -106,12 +106,12 @@ int main() {
     require(!appearance::same(hidden, from), "Non-linear paging changes did not invalidate the retained model");
 
     const auto global = qt::object(
-        {{"show_clock", true}, {"header_text_size", "small"}, {"bionic_reading", "bold"}, {"page_animations", true}});
-    const auto book = qt::object({{"show_clock", false}, {"header_text_size", "large"}, {"bionic_reading", "off"}});
+        {{"show_clock", true}, {"header_text_size", "small"}, {"bold_reading", "bold"}, {"page_animations", true}});
+    const auto book = qt::object({{"show_clock", false}, {"header_text_size", "large"}, {"bold_reading", "off"}});
     const auto preferences = appearance::readerPreferences(global, book);
     require(!preferences["show_clock"].toBool() && preferences["header_text_size"].toString() == "large",
             "Book layout did not override legacy global settings");
-    require(preferences["bionic_reading"].toString() == "bold", "Book state overrode global Bionic reading");
+    require(preferences["bold_reading"].toString() == "bold", "Book state overrode global Bionic reading");
     const auto persistedGlobal = appearance::globalPreferences(preferences);
     require(!persistedGlobal.contains("show_clock") && !persistedGlobal.contains("header_text_size") &&
                 persistedGlobal["page_animations"].toBool(),
@@ -134,7 +134,7 @@ int main() {
                 defaults.value("font_weight").toInt() == 450 && defaults.value("hyphenation").toString() == "off",
             "Typography defaults changed");
     require(!defaults.contains("dark_mode") && !defaults.contains("smooth_images") &&
-                !defaults.contains("bionic_reading") && defaults.size() == 12,
+                !defaults.contains("bold_reading") && defaults.size() == 12,
             "Restoring typography must not change display choices");
     readingPpi.store(212);
     require(appearance::typographyDefaults().value("font_pixels").toInt() == defaultFontPixels(),

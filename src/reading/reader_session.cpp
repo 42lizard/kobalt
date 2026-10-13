@@ -371,13 +371,13 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                 hashMs = timer.elapsed() - directoryMs;
             }
             if (outcome.ready()) {
-                const auto bionic = saved.value("bionic_reading");
+                const auto bionic = saved.value("bold_reading");
                 const auto dark = saved.value("dark_mode");
                 const auto smooth = saved.value("smooth_images");
                 const auto hideNonlinear = saved.value("hide_nonlinear_fragments");
                 if (!savedMatches)
                     saved = {};
-                saved["bionic_reading"] = bionic;
+                saved["bold_reading"] = bionic;
                 saved["dark_mode"] = dark;
                 saved["smooth_images"] = smooth;
                 saved["hide_nonlinear_fragments"] = hideNonlinear;
@@ -667,8 +667,8 @@ void ReaderSession::apply(const QJsonObject &settings, QSize size) {
     if (resized)
         desiredSize = size;
     if (next != desired || resized) {
-        const auto previousBionic = desired.value("bionic_reading").toString("off");
-        const auto nextBionic = next.value("bionic_reading").toString("off");
+        const auto previousBionic = desired.value("bold_reading").toString("off");
+        const auto nextBionic = next.value("bold_reading").toString("off");
         const auto reason = nextBionic != previousBionic
                                 ? (nextBionic == "off" ? RenderReason::DisableBionic : RenderReason::EnableBionic)
                                 : (next == desired && resized ? RenderReason::PageLayout : RenderReason::Appearance);
@@ -712,7 +712,7 @@ void ReaderSession::setDarkMode(bool enabled) {
     request(true);
 }
 bool ReaderSession::setThickness(int steps) {
-    if (temporaryTypography() || steps < 0 || steps > 12 || desired.value("bionic_reading").toString("off") != "off")
+    if (temporaryTypography() || steps < 0 || steps > 12 || desired.value("bold_reading").toString("off") != "off")
         return false;
     if (steps != thickness()) {
         desired["weight_steps"] = steps;
@@ -726,7 +726,7 @@ bool ReaderSession::setWeight(int steps) {
     const auto axis = weightAxis();
     if (axis.available() ? (steps < axis.minimum || steps > axis.maximum) : (steps < 0 || steps > 12))
         return false;
-    if (desired.value("bionic_reading").toString("off") != "off")
+    if (desired.value("bold_reading").toString("off") != "off")
         return false;
     if (steps != weight()) {
         desired[axis.available() ? "font_weight" : "weight_steps"] = steps;

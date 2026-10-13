@@ -437,7 +437,7 @@ int run(int argc, char **argv) {
                 "Completed relayout lost formatting progress or kept its progress active");
         auto bionicSettings = session->state();
         const auto applyBionic = [&](const QString &mode) {
-            bionicSettings["bionic_reading"] = mode;
+            bionicSettings["bold_reading"] = mode;
             session->apply(bionicSettings);
         };
         applyBionic("bold");

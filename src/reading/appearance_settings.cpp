@@ -47,7 +47,7 @@ QJsonObject benchmarkTypography(const QString &identity) {
                        {"weight_steps", 0},
                        {"font_weight", 400},
                        {"font_optical_size", 0},
-                       {"bionic_reading", "off"},
+                       {"bold_reading", "off"},
                        {"hyphenation", QStringLiteral("off")},
                        {"dark_mode", false},
                        {"smooth_images", true}});

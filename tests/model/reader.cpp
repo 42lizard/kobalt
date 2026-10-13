@@ -1334,7 +1334,7 @@ int main(int argc, char **argv) {
                 "The document cache identity omitted the compiled Kobalt version");
         // CREngine leaves books under 30 kB out of its cache.
         const qint64 cachedBytes = 1024 * 1024;
-        const auto settings = kobalt::qt::object({{"text_alignment", "left"}, {"bionic_reading", "off"}});
+        const auto settings = kobalt::qt::object({{"text_alignment", "left"}, {"bold_reading", "off"}});
         const auto opened = [&](kobalt::ReaderModel &target, const QByteArray &key, const QByteArray &rules,
                                 const QJsonObject &saved) {
             target.setDocumentCache(cacheDirectory, key, rules, cachedBytes);
@@ -1368,7 +1368,7 @@ int main(int argc, char **argv) {
         const int middle = parsed.pages() / 2;
         require(restored.goTo(parsed.pageStart(middle)) && restored.page() == middle,
                 "A parsed position did not resolve in the restored book");
-        const auto prefixSettings = kobalt::qt::object({{"text_alignment", "left"}, {"bionic_reading", "bold"}});
+        const auto prefixSettings = kobalt::qt::object({{"text_alignment", "left"}, {"bold_reading", "bold"}});
         kobalt::ReaderModel emphasized(model.fontInputs()), emphasizedAgain(model.fontInputs()),
             plainAgain(model.fontInputs());
         opened(emphasized, fingerprint, policy, prefixSettings);
@@ -1967,7 +1967,7 @@ int main(int argc, char **argv) {
     require(css.setWeight(4), "Cannot prepare saved thickness for Bionic reading");
     const auto priorWeightPage = hash(css.image(0));
     for (const auto *mode : {"bold"}) {
-        require(css.applyAppearance(kobalt::qt::object({{"bionic_reading", mode}})), "Cannot enable Bionic reading");
+        require(css.applyAppearance(kobalt::qt::object({{"bold_reading", mode}})), "Cannot enable Bionic reading");
         const auto emphasized = hash(css.image(0));
         kobalt::ReaderModel freshlyEmphasized(css.fontInputs());
         require(freshlyEmphasized.open(styledBytes, css.viewport(), css.state(), &error), qPrintable(error));
@@ -1988,19 +1988,19 @@ int main(int argc, char **argv) {
         css.releaseImages();
         require(hash(reopened.image(0)) == weightedPage && hash(css.image(0)) == emphasized,
                 "Alternating models contaminated font glyph caches");
-        require(css.applyAppearance(kobalt::qt::object({{"bionic_reading", "off"}})) &&
+        require(css.applyAppearance(kobalt::qt::object({{"bold_reading", "off"}})) &&
                     hash(css.image(0)) == priorWeightPage,
                 "Disabling Bionic reading did not restore thickness");
     }
-    require(!css.applyAppearance(kobalt::qt::object({{"bionic_reading", "invalid"}})),
+    require(!css.applyAppearance(kobalt::qt::object({{"bold_reading", "invalid"}})),
             "Invalid Bionic mode was accepted");
-    require(!css.applyAppearance(kobalt::qt::object({{"bionic_reading", "synthetic"}})),
+    require(!css.applyAppearance(kobalt::qt::object({{"bold_reading", "synthetic"}})),
             "Retired Bionic mode was accepted");
     auto legacyBionic = css.state();
-    legacyBionic["bionic_reading"] = QStringLiteral("synthetic");
+    legacyBionic["bold_reading"] = QStringLiteral("synthetic");
     kobalt::ReaderModel migratedBionic(css.fontInputs());
     require(migratedBionic.open(styledBytes, css.viewport(), legacyBionic, &error), qPrintable(error));
-    require(migratedBionic.state().value("bionic_reading").toString() == "bold",
+    require(migratedBionic.state().value("bold_reading").toString() == "bold",
             "Retired Bionic setting did not migrate to bold");
 
     require(css.setWeight(0) && hash(css.image(0)) == normalBionicPage, "Bionic reading changed normal rendering");
@@ -2023,7 +2023,7 @@ int main(int argc, char **argv) {
     require(codeModel.open(codeBook.finish(&error), QSize(1072, 1328), {}, &error), qPrintable(error));
     const auto codeImage = hash(codeModel.image(0));
     for (const auto *mode : {"bold"})
-        require(codeModel.applyAppearance(kobalt::qt::object({{"bionic_reading", mode}})) &&
+        require(codeModel.applyAppearance(kobalt::qt::object({{"bold_reading", mode}})) &&
                     hash(codeModel.image(0)) == codeImage,
                 "Bionic reading altered proportional code");
     kobalt::Publication nowrapBook;
@@ -2051,7 +2051,7 @@ int main(int argc, char **argv) {
     const auto nowrapAnchor = nowrapModel.position();
     for (const auto *mode : {"bold", "off", "bold", "off"}) {
         int formattingStarts = 0;
-        require(nowrapModel.applyAppearance(kobalt::qt::object({{"bionic_reading", mode}}), {},
+        require(nowrapModel.applyAppearance(kobalt::qt::object({{"bold_reading", mode}}), {},
                                             [&](kobalt::OpeningStage stage, int percent) {
                                                 require(stage != kobalt::OpeningStage::Text && percent >= 0 &&
                                                             percent <= 100,
@@ -2091,11 +2091,11 @@ int main(int argc, char **argv) {
     kobalt::ReaderModel inlineHeading(css.fontInputs());
     require(inlineHeading.open(inlineBook.finish(&error), QSize(1072, 1328), {}, &error), qPrintable(error));
     for (const auto &face : {QStringLiteral("Libron"), kobalt::test::headingReadingFace()}) {
-        require(inlineHeading.applyAppearance(kobalt::qt::object({{"font_face", face}, {"bionic_reading", "off"}})),
+        require(inlineHeading.applyAppearance(kobalt::qt::object({{"font_face", face}, {"bold_reading", "off"}})),
                 "Cannot select the inline-heading regression font");
         int normalHeight = 0;
         for (const auto *mode : {"off", "bold"}) {
-            require(inlineHeading.applyAppearance(kobalt::qt::object({{"bionic_reading", mode}})),
+            require(inlineHeading.applyAppearance(kobalt::qt::object({{"bold_reading", mode}})),
                     "Cannot test emphasized inline heading");
             const auto headings = inlineHeading.searchPage("One", 0).hits;
             require(!headings.isEmpty(), "Cannot find inline chapter number");

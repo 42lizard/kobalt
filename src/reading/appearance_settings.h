@@ -20,7 +20,7 @@ QJsonObject globalPreferences(QJsonObject preferences);
 inline constexpr std::array<const char *, 17> keys{
     "line_spacing_version",    "font_pixels",    "line_spacing",      "font_face",
     "default_font_face",       "margin_pixels",  "top_margin_pixels", "bottom_margin_pixels",
-    "text_alignment",          "bionic_reading", "weight_steps",      "font_weight",
+    "text_alignment",          "bold_reading", "weight_steps",      "font_weight",
     "font_optical_size",       "hyphenation",    "dark_mode",         "smooth_images",
     "hide_nonlinear_fragments"};
 // Copies every appearance key from `from` into `to`. A key that `from` does

@@ -84,7 +84,7 @@ void ReaderController::begin(const QString &path, QSize pixels) {
     kobalt::appearance::applyFontDefault(saved, settings);
     saved["dark_mode"] = settings.value("dark_mode").toBool(false);
     saved["smooth_images"] = settings.value("smooth_images").toBool(true);
-    saved["bionic_reading"] = settings.value("bionic_reading").toString("off");
+    saved["bold_reading"] = settings.value("bold_reading").toString("off");
     orientation.configure(settings);
     const auto viewport = readerInterface().readingViewport(pixels, settings);
     opening = std::make_unique<ReaderSession>(fonts, placeholder);

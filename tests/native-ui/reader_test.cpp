@@ -1976,7 +1976,7 @@ private slots:
             QCOMPARE(host.session()->state().value(key).toBool(), !before);
         };
         // Weight controls are disabled while Bionic Reading is active.
-        if (host.session()->state().value("bionic_reading").toString() != "off") {
+        if (host.session()->state().value("bold_reading").toString() != "off") {
             menu();
             QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
             auto *option = host.window()->findChild<QCheckBox *>("rrBionicReading");
@@ -1984,9 +1984,9 @@ private slots:
             QVERIFY(click(canvas, option));
             QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
             QTRY_VERIFY_WITH_TIMEOUT(
-                !host.session()->busy() && host.session()->state().value("bionic_reading").toString() == "off", 30000);
+                !host.session()->busy() && host.session()->state().value("bold_reading").toString() == "off", 30000);
             preserved();
-            QCOMPARE(host.session()->state().value("bionic_reading").toString(), QString("off"));
+            QCOMPARE(host.session()->state().value("bold_reading").toString(), QString("off"));
         }
         const auto openText = [&] {
             menu();
@@ -2059,9 +2059,9 @@ private slots:
         QVERIFY(click(canvas, bionic));
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
         QTRY_VERIFY_WITH_TIMEOUT(
-            !host.session()->busy() && host.session()->state().value("bionic_reading").toString() == "bold", 30000);
+            !host.session()->busy() && host.session()->state().value("bold_reading").toString() == "bold", 30000);
         preserved();
-        QCOMPARE(host.session()->state().value("bionic_reading").toString(), QString("bold"));
+        QCOMPARE(host.session()->state().value("bold_reading").toString(), QString("bold"));
         settingsToggle("rrDarkMode", "dark_mode");
         settingsToggle("rrDarkMode", "dark_mode");
         for (const auto &size : {QSize(800, 1200), QSize(1400, 1000)}) {
@@ -3131,8 +3131,8 @@ private slots:
                                                                                      {"show_header", false},
                                                                                      {"show_clock", false},
                                                                                      {"header_text_size", "large"},
-                                                                                     {"bionic_reading", "off"}}));
-        QVERIFY(storage::writeJson(paths.preferences(), QJsonObject{{"bionic_reading", "bold"}}));
+                                                                                     {"bold_reading", "off"}}));
+        QVERIFY(storage::writeJson(paths.preferences(), QJsonObject{{"bold_reading", "bold"}}));
         test::ReaderHost host(paths, testFonts, testPlaceholder);
         CloseHost cleanup{host};
         QSignalSpy opened(&host, &test::ReaderHost::opened);
@@ -3141,7 +3141,7 @@ private slots:
             host.open(path, nativeSize);
             QTRY_COMPARE_WITH_TIMEOUT(opened.count(), count + 1, 30000);
             QTRY_VERIFY(!host.session()->busy());
-            QCOMPARE(host.session()->state()["bionic_reading"].toString(), QString("bold"));
+            QCOMPARE(host.session()->state()["bold_reading"].toString(), QString("bold"));
             auto *page = host.window()->findChild<ReadingPage *>("rrPage");
             QVERIFY(page);
             QCOMPARE(page->showHeader, path != firstPath);
@@ -3177,7 +3177,7 @@ private slots:
                 QVERIFY(click(canvas, option));
             pageTap();
             QTRY_VERIFY_WITH_TIMEOUT(
-                !host.session()->busy() && host.session()->state().value("bionic_reading").toString() == value, 30000);
+                !host.session()->busy() && host.session()->state().value("bold_reading").toString() == value, 30000);
         };
         mode("off");
         QVERIFY(host.session()->setWeight(3));

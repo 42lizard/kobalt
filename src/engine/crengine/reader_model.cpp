@@ -398,7 +398,7 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     if (hyphenation_ != "auto" && hyphenation_ != "on" && hyphenation_ != "off")
         hyphenation_ = "off";
     weight_ = qBound(0, saved.value("weight_steps").toInt(0), 12);
-    bionic_ = saved.value("bionic_reading").toString("off");
+    bionic_ = saved.value("bold_reading").toString("off");
     // Preserve enabled Bionic reading from the retired thickness mode.
     if (bionic_ == "synthetic")
         bionic_ = "bold";
@@ -588,7 +588,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     const int topMargin = settings.value("top_margin_pixels").toInt(topMargin_);
     const int bottomMargin = settings.value("bottom_margin_pixels").toInt(bottomMargin_);
     const int weight = settings.value("weight_steps").toInt(weight_);
-    const auto bionic = settings.value("bionic_reading").toString(bionic_);
+    const auto bionic = settings.value("bold_reading").toString(bionic_);
     const auto face = settings.value("font_face").toString(face_);
     const auto defaultFace = settings.value("default_font_face").toString(defaultFace_);
     const auto axis = fontWeightAxis(readingFonts, face);
@@ -1120,7 +1120,7 @@ QJsonObject ReaderModel::state() const {
                                {"weight_steps", weight_},
                                {"font_weight", axisWeight_},
                                {"font_optical_size", opticalSize_},
-                               {"bionic_reading", bionic_},
+                               {"bold_reading", bionic_},
                                {"hyphenation", hyphenation_},
                                {"dark_mode", darkMode_},
                                {"smooth_images", smoothImages_},

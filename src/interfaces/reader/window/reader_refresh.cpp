@@ -19,10 +19,10 @@ void Reader::refreshRenderNotice() {
     const char *message = strings::key("reader.applying_appearance_changes");
     switch (progress.reason) {
     case RenderReason::EnableBionic:
-        message = strings::key("reader.enabling_bionic_reading");
+        message = strings::key("reader.enabling_bold_reading");
         break;
     case RenderReason::DisableBionic:
-        message = strings::key("reader.disabling_bionic_reading");
+        message = strings::key("reader.disabling_bold_reading");
         break;
     case RenderReason::PageLayout:
         message = strings::key("reader.updating_page_layout");
@@ -282,7 +282,7 @@ void Reader::syncAppearanceControls(bool pickingFont) {
         const auto caption = strings::get("reader.text_size_value").arg(QString::number(opticalSizeSlider->value()));
         findChild<QLabel *>("rrOpticalSizeValue")->setText(caption);
     }
-    const auto bionic = settings->state().value("bionic_reading").toString("off");
+    const auto bionic = settings->state().value("bold_reading").toString("off");
     const bool normalWeight = bionic == "off";
     const auto weightAxis = settings->weightAxis();
     // The font samples follow the displayed page, so a thickness change
