@@ -305,3 +305,15 @@ Kobalt keeps the book’s link styling. When reading controls are open, pages co
 Advanced settings includes “Show link indicator while reading”. It is off by default. When enabled, pages containing links show a small button with a link icon and the link count at the right of the footer, level with the page number. Without a footer it sits just above the bottom edge. The button opens the same reveal mode. The indicator covers all links, regardless of publisher styling. Revealing links does not change pagination.
 
 Fonts with an optical-size axis show an Optical size slider below Text size. The slider uses whole-point steps and does not change the text size. Fonts use their declared optical-size default, rounded to a whole point. The manual value is saved with the book and restored after reopening. Fonts without this axis hide the row.
+
+## Experimental PocketBook host
+
+The PocketBook fork opens local unprotected EPUBs from its start screen or a
+launcher file argument. The last book, positions, bookmarks and preferences are
+local to `/mnt/ext1/system/kobalt/config`; native PocketBook reading databases
+are not used. Page keys and touch use the shared reader actions. Home drains
+pending reading work before exit; closing a book returns to the start screen.
+Manual rotation uses InkView; automatic sensor rotation, in-app frontlight,
+dictionary installation and browser launch are unavailable. Native keyboard,
+refresh and lifecycle behavior still require device acceptance on PB743K3
+U743k3.6.10.2854. Build and installation steps are in the parent PocketBook repo.

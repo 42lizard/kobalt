@@ -62,14 +62,15 @@ def bundled_png(qt):
 DEFAULT_CACHE = ROOT / '.cache/kobalt'
 
 
-def dependency_identity(qt, specs, text_only):
+def dependency_identity(qt, specs, text_only, png_override=None):
     """Inputs that can change a host dependency's ABI or generated code."""
     files = [Path(__file__).resolve(), ROOT / 'tools/build.py', ROOT / 'dependencies/crengine-patches.txt']
     if not text_only:
         files += [ROOT / 'dependencies/patches' / name for name in ENGINE_PATCHES]
-        png, header, _ = bundled_png(qt)
+        png, header, _ = png_override or bundled_png(qt)
         files += [png, header / 'png.h']
-        files += [qt / 'lib/cmake/Qt6/Qt6Config.cmake']
+        if qt is not None:
+            files += [qt / 'lib/cmake/Qt6/Qt6Config.cmake']
     environment = {name: os.environ.get(name, '') for name in
                    ('CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'LDFLAGS', 'SDKROOT',
                     'MACOSX_DEPLOYMENT_TARGET', 'CMAKE_TOOLCHAIN_FILE')}
@@ -168,13 +169,16 @@ def build_qt(output, jobs, cache=DEFAULT_CACHE, offline=False):
     return install
 
 
-def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False, text_only=False):
+def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False, text_only=False,
+                 png_override=None, autotools_host=None, cmake_options=()):
     """Build the pinned text dependencies and optionally CREngine for the host."""
     prefix = output / 'deps'
     specs = json.loads((ROOT / 'dependencies/manifest.json').read_text())
     names = ('freetype', 'harfbuzz', 'fribidi') if text_only else ENGINE_DEPENDENCIES
     sources = fetch_sources(names, specs, cache, offline)
-    identity = dependency_identity(qt, {name: specs[name] for name in names}, text_only)
+    identity = dependency_identity(qt, {name: specs[name] for name in names}, text_only, png_override)
+    identity['autotools_host'] = autotools_host
+    identity['cmake_options'] = list(cmake_options)
     identity['output'] = str(output.resolve())
     identity['source_directories'] = {name: str(path) for name, path in sources.items()}
     cached = cached_dependencies(output, identity)
@@ -188,14 +192,14 @@ def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False, text_only
         environment['MACOSX_DEPLOYMENT_TARGET'] = '14.0'
     pkgconfig = prefix / 'lib/pkgconfig'
     pkgconfig.mkdir(parents=True, exist_ok=True)
-    png, png_include, png_version = bundled_png(qt) if not text_only else (None, None, None)
+    png, png_include, png_version = (png_override or bundled_png(qt)) if not text_only else (None, None, None)
     (pkgconfig / 'zlib.pc').write_text('Name: zlib\nDescription: Host zlib\nVersion: 1\nLibs: -lz\n')
     if png:
         (pkgconfig / 'libpng.pc').write_text(f'Name: libpng\nDescription: PNG from the Qt SDK\nVersion: {png_version}\n'
                                              f'Libs: {png} -lz\nCflags: -I{png_include}\n')
     common = ['-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_POSITION_INDEPENDENT_CODE=ON',
               '-DBUILD_SHARED_LIBS=OFF', '-DCMAKE_INSTALL_LIBDIR=lib', f'-DCMAKE_INSTALL_PREFIX={prefix}',
-              f'-DCMAKE_PREFIX_PATH={prefix}', '-DCMAKE_POLICY_VERSION_MINIMUM=3.5']
+              f'-DCMAKE_PREFIX_PATH={prefix}', '-DCMAKE_POLICY_VERSION_MINIMUM=3.5', *cmake_options]
     if platform.system() == 'Darwin':
         common += ['-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0', f'-DCMAKE_OSX_ARCHITECTURES={platform.machine()}']
 
@@ -217,7 +221,7 @@ def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False, text_only
         # Make does not rebuild objects just because compiler flags changed.
         if directory.exists():
             shutil.rmtree(directory)
-        build_autotools(source, directory, prefix, jobs, environment=environment)
+        build_autotools(source, directory, prefix, jobs, host=autotools_host, environment=environment)
 
     png_options = ['-DFT_DISABLE_PNG=ON'] if text_only else ['-DFT_DISABLE_PNG=OFF', f'-DPNG_LIBRARY={png}', f'-DPNG_PNG_INCLUDE_DIR={png_include}']
     dependency('freetype-' + sources['freetype'].name, sources['freetype'], '-DFT_DISABLE_HARFBUZZ=ON', '-DFT_DISABLE_BZIP2=ON',

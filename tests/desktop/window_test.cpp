@@ -104,7 +104,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        reader->findChild<ReadingPage *>("rrPage")->tapped(reader->rect().center());
+        dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"))->tapped(reader->rect().center());
         reader->findChild<QPushButton *>("rrSettings")->click();
         auto *tab = reader->findChild<QPushButton *>("rrSettingsDictionaries");
         QVERIFY(tab->isVisible());
@@ -150,7 +150,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        auto *page = reader->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
         auto *toolbar = reader->findChild<QWidget *>("rrControlsTop");
         if (toolbar->isVisible())
             page->tapped(page->rect().center());
@@ -175,7 +175,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        auto *page = reader->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
         auto *toolbar = reader->findChild<QWidget *>("rrControlsTop");
         for (int preset : {1, 2}) {
             picker->setCurrentIndex(preset);
@@ -207,7 +207,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        auto *page = reader->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
         QVERIFY(page->clockVisible());
         page->tapped(page->rect().center());
         reader->findChild<QPushButton *>("rrSettings")->click();
@@ -223,7 +223,7 @@ private slots:
             QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
             QTRY_VERIFY_WITH_TIMEOUT(!f.state().value("busy").toBool(), 30000);
             auto *reader = f.window.readerWindow();
-            auto *page = reader->findChild<ReadingPage *>("rrPage");
+            auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
             page->tapped(page->rect().center());
             reader->findChild<QPushButton *>("rrBookmarks")->click();
             auto *list = reader->findChild<QWidget *>("rrBookmarkList");
@@ -314,7 +314,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state().value("busy").toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        auto *page = reader->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         auto click = [&](QWidget *target, QPoint position) {
             auto *canvas = f.window.findChild<QGraphicsView *>();
@@ -374,7 +374,7 @@ private slots:
             f.window.resize(size);
             QTest::qWait(200);
             auto *reader = f.window.readerWindow();
-            auto *page = reader->findChild<ReadingPage *>("rrPage");
+            auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
             QVERIFY(page);
             QVERIFY(f.canvasClick(page, page->rect().center()));
             auto *settings = reader->findChild<QPushButton *>("rrSettings");
@@ -449,7 +449,7 @@ private slots:
         picker->setFocus();
         QTest::keyClick(&f.window, Qt::Key_Right);
         QCOMPARE(f.state().value("page").toInt(), firstPage);
-        auto *page = f.window.readerWindow()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(f.window.readerWindow()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         QVERIFY(f.canvasClick(page, QPoint(page->width() * 5 / 6, page->height() / 2)));
         QTRY_VERIFY_WITH_TIMEOUT(f.state().value("page").toInt() > firstPage, 10000);
@@ -526,7 +526,7 @@ private slots:
         QVERIFY(!first.value("position").toString().isEmpty());
         auto *reader = f.window.readerWindow();
         QVERIFY(reader);
-        auto *page = reader->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         const int forwardX = first.value("page_progression_rtl").toBool() ? page->width() / 6 : page->width() * 5 / 6;
         QVERIFY(f.canvasClick(page, QPoint(forwardX, page->height() / 2)));
@@ -624,7 +624,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state().value("busy").toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        reader->findChild<ReadingPage *>("rrPage")->tapped(reader->rect().center());
+        dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"))->tapped(reader->rect().center());
         reader->findChild<QPushButton *>("rrNavText")->click();
         auto *font = reader->findChild<QPushButton *>("rrFont");
         QTRY_VERIFY(font->isVisible() && font->isEnabled());
@@ -662,7 +662,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state().value("busy").toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        auto *page = reader->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         QVERIFY(f.canvasClick(page, page->rect().center()));
         auto *text = reader->findChild<QPushButton *>("rrNavText");
@@ -746,7 +746,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state().value("busy").toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        auto *page = reader->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         QVERIFY(!page->clockVisible());
         QVERIFY(page->showHeader);
@@ -798,7 +798,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(f.window.idle(), 30000);
         f.window.openBook(f.book());
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
-        auto *reopened = f.window.readerWindow()->findChild<ReadingPage *>("rrPage");
+        auto *reopened = dynamic_cast<ReadingPage *>(f.window.readerWindow()->findChild<QWidget *>("rrPage"));
         QVERIFY(reopened);
         QVERIFY(reopened->clockVisible());
     }
@@ -809,7 +809,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state().value("busy").toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        reader->findChild<ReadingPage *>("rrPage")->tapped(reader->rect().center());
+        dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"))->tapped(reader->rect().center());
         reader->findChild<QPushButton *>("rrSettings")->click();
         for (bool hidden : {true, false, true}) {
             reader->findChild<QPushButton *>("rrSettingsUI")->click();
@@ -839,7 +839,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         QTRY_VERIFY_WITH_TIMEOUT(!f.state().value("busy").toBool(), 30000);
         auto *reader = f.window.readerWindow();
-        reader->findChild<ReadingPage *>("rrPage")->tapped(reader->rect().center());
+        dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"))->tapped(reader->rect().center());
         reader->findChild<QPushButton *>("rrSettings")->click();
         for (const auto &tab : {"Display", "Advanced", "UI", "Stats"}) {
             reader->findChild<QPushButton *>(QString("rrSettings") + tab)->click();
