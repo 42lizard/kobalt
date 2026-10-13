@@ -181,14 +181,21 @@ AppearancePanel::AppearancePanel(const AppearanceLayout &layout, const Appearanc
         ui::SegmentedRow row(pageLayout, pageRows, name.toLatin1().constData(),
                              strings::get(footer ? "reader.footer" : "reader.header"));
         auto &buttons = footer ? footerSizeButtons : headerSizeButtons;
-        for (const auto &value : {QString("off"), QString("small"), QString("medium"), QString("large")}) {
-            const QByteArray key = value == "off" ? QByteArray("common.off") : ("common.size_" + value).toLatin1();
-            const QByteArray compactKey = value == "off" ? key : key + "_short";
-            const QString label = strings::get(key.constData());
+        struct SizeChoice {
+            const char *value, *label, *compactLabel;
+        };
+        for (const auto &choice : {
+                 SizeChoice{"off", strings::key("common.off"), strings::key("common.off")},
+                 SizeChoice{"small", strings::key("common.size_small"), strings::key("common.size_small_short")},
+                 SizeChoice{"medium", strings::key("common.size_medium"), strings::key("common.size_medium_short")},
+                 SizeChoice{"large", strings::key("common.size_large"), strings::key("common.size_large_short")},
+             }) {
+            const QString value = QString::fromLatin1(choice.value);
+            const QString label = strings::get(choice.label);
             auto *button = row.add(name + "_" + value, label);
             button->setProperty("text_size", value);
             button->setProperty("full_label", label);
-            button->setProperty("compact_label", strings::get(compactKey.constData()));
+            button->setProperty("compact_label", strings::get(choice.compactLabel));
             button->setAccessibleName(label);
             button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
             button->setChecked(value == (footer ? inputs.footerSize : inputs.headerSize));
