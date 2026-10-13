@@ -142,7 +142,7 @@ private:
     QVector<QWidget *> topActions;
     kobalt::ui::Panel *general;
     std::unique_ptr<kobalt::LightControls> light;
-    kobalt::LightPanel *lightPopup;
+    kobalt::LightPanel *lightPopup = nullptr;
     QCheckBox *darkOption, *smoothOption, *progressOption, *animationOption, *edgeLightOption, *denseGraphOption,
         *pinStatsOption, *heavierTextOption;
     QPushButton *autoRotateOption, *clockOption, *clockHideOption;

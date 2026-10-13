@@ -540,6 +540,9 @@ void Reader::resumeAppearanceApply() {
 void Reader::applyEdgeLight() {
     page->brightnessEdge = preferences.value("edge_light_gestures").toBool(true) && services.lightAvailable();
     page->warmthEdge = page->brightnessEdge && warmthSupported;
+    if (lightPopup) {
+        lightPopup->setEdgeGesturesEnabled(page->brightnessEdge);
+    }
 }
 
 }

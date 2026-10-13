@@ -8,10 +8,26 @@
 #include "interfaces/reader/ui/style/styles.h"
 #include "platform/api/kobo_refresh.h"
 #include <QHideEvent>
+#include <QHBoxLayout>
+#include <QPainter>
+#include "interfaces/reader/ui/controls/icons.h"
 #include <utility>
 
 namespace kobalt {
 namespace m = ui::metrics;
+namespace {
+class SwipeIcon : public QWidget {
+public:
+    explicit SwipeIcon(QWidget *parent) : QWidget(parent) {
+        setFixedSize(m::text::heading, m::text::heading);
+    }
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        ui::paintOpeningIcon(painter, ui::ControlIcon::Swipe, rect(), palette().color(QPalette::WindowText));
+    }
+};
+}
 LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent, Qt::BottomEdge), light(light) {
     setObjectName("rrLightPanel");
     auto *rows = new QVBoxLayout(this);
@@ -20,7 +36,12 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
     automaticBrightness = new ui::DescribedOption(strings::get("light_panel.automatic_brightness"),
                                                   strings::get("light_panel.automatic_brightness_description"), this);
     automaticBrightness->setObjectName("rrAutomaticBrightness");
-    rows->addWidget(automaticBrightness);
+    auto automaticPresentation = automaticBrightness->presentation();
+    automaticPresentation.indicator = ui::DescribedOption::Indicator::Square;
+    automaticPresentation.labelPixels = m::chrome::labelText;
+    automaticPresentation.descriptionPixels = m::chrome::descriptionText;
+    automaticPresentation.indicatorSize = {m::chrome::checkSize, m::chrome::checkSize};
+    automaticBrightness->setPresentation(automaticPresentation);
     connect(automaticBrightness, &QCheckBox::clicked, this, [this](bool enabled) {
         result(this->light.setAutomaticBrightness(enabled));
         refreshValues();
@@ -33,11 +54,19 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
     brightnessValue = findChild<QLabel *>("rrBrightnessValue");
     warmthValue = findChild<QLabel *>("rrWarmthValue");
     warmthRow = warmthSlider->parentWidget();
+    rows->addWidget(automaticBrightness);
     swipeTip = new QLabel(this);
     swipeTip->setObjectName("rrLightSwipeTip");
     swipeTip->setWordWrap(true);
-    ui::readerStyle(swipeTip, ui::styles::font(m::control::captionValueText) + "color:palette(placeholder-text);");
-    rows->addWidget(swipeTip);
+    ui::readerStyle(swipeTip, ui::styles::font(m::text::secondary) +
+                                 "font-style:italic;color:palette(placeholder-text);");
+    swipeRow = new QWidget(this);
+    auto *tipLayout = new QHBoxLayout(swipeRow);
+    tipLayout->setContentsMargins(0, ui::px(4), 0, ui::px(10));
+    tipLayout->setSpacing(m::spacing::row);
+    tipLayout->addWidget(new SwipeIcon(swipeRow), 0, Qt::AlignTop);
+    tipLayout->addWidget(swipeTip, 1);
+    rows->insertWidget(0, swipeRow);
     error = new QLabel(strings::get("light_panel.could_not_save_light_settings"), this);
     error->setObjectName("rrLightError");
     error->setWordWrap(true);
@@ -101,10 +130,23 @@ bool LightPanel::open() {
         changed();
     return true;
 }
+void LightPanel::setEdgeGesturesEnabled(bool enabled) {
+    if (edgeGesturesEnabled == enabled) {
+        return;
+    }
+    edgeGesturesEnabled = enabled;
+    swipeRow->setVisible(enabled);
+    layoutPanel();
+}
 void LightPanel::layoutPanel() {
     layout()->activate();
-    setGeometry(placement ? placement(sizeHint().height())
-                          : QRect(0, m::panel::toolbarHeight, parentWidget()->width(), sizeHint().height()));
+    const int width = parentWidget()->width();
+    const int height = layout()->hasHeightForWidth() ? layout()->totalHeightForWidth(width) : sizeHint().height();
+    const QRect bounds = placement ? placement(height) : QRect(0, m::panel::toolbarHeight, width, height);
+    const bool moved = geometry() != bounds;
+    setGeometry(bounds);
+    if (moved && isVisible() && changed)
+        changed();
 }
 void LightPanel::result(bool success) {
     error->setVisible(!success);

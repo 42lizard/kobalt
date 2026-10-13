@@ -354,8 +354,11 @@ void Reader::buildToolbar() {
     warmthSupported = services.lightAvailable() && light->initialize() && light->hasWarmth();
     applyEdgeLight();
     lightPopup = new kobalt::LightPanel(*light, this);
+    lightPopup->setEdgeGesturesEnabled(page->brightnessEdge);
     lightPopup->changed = [lightButton, this] {
         lightButton->setChecked(lightPopup->isVisible());
+        if (navigation && lightPopup->isVisible())
+            navigation->stackPanel(lightPopup);
         syncNavigation();
     };
     lightPopup->placement = [this](int h) {

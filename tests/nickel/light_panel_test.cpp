@@ -119,8 +119,18 @@ private slots:
         auto *option =
             dynamic_cast<kobalt::ui::DescribedOption *>(panel.findChild<QCheckBox *>("rrAutomaticBrightness"));
         QVERIFY(option);
+        QCOMPARE(option->presentation().indicator, kobalt::ui::DescribedOption::Indicator::Square);
+        QCOMPARE(option->presentation().labelPixels,
+                 panel.findChild<QLabel *>("rrBrightnessCaption")->font().pixelSize());
+        QCOMPARE(option->presentation().labelPixels, int(kobalt::ui::metrics::chrome::labelText));
         QVERIFY(panel.rect().contains(option->geometry()));
         QVERIFY(option->height() >= option->heightForWidth(option->width()));
+        auto *tip = panel.findChild<QLabel *>("rrLightSwipeTip");
+        QVERIFY(tip->wordWrap());
+        QVERIFY(tip->font().italic());
+        QCOMPARE(tip->font().pixelSize(), int(kobalt::ui::metrics::text::secondary));
+        QVERIFY(tip->height() >= tip->heightForWidth(tip->width()));
+        QVERIFY(panel.rect().contains(QRect(tip->mapTo(&panel, QPoint()), tip->size())));
     }
     void externalSettingUpdatesWithoutWriting() {
         QWidget parent;
@@ -133,6 +143,25 @@ private slots:
         light.automatic = false;
         QTRY_VERIFY(!option->isChecked());
         QCOMPARE(light.changes, 0);
+    }
+    void swipeHintPlacementAndVisibility() {
+        QWidget parent;
+        parent.resize(768, 1024);
+        parent.show();
+        Light light;
+        kobalt::LightPanel panel(light, &parent);
+        QVERIFY(panel.open());
+        auto *tip = panel.findChild<QLabel *>("rrLightSwipeTip");
+        auto *brightness = panel.findChild<QSlider *>("rrBrightness");
+        QVERIFY(tip->isVisible());
+        QVERIFY(tip->mapTo(&panel, tip->rect().bottomLeft()).y() < brightness->parentWidget()->geometry().top());
+        panel.setEdgeGesturesEnabled(false);
+        QVERIFY(!tip->isVisible());
+        panel.hide();
+        QVERIFY(panel.open());
+        QVERIFY(!tip->isVisible());
+        panel.setEdgeGesturesEnabled(true);
+        QVERIFY(tip->isVisible());
     }
     void capabilityAndNativeState() {
         QWidget parent;
