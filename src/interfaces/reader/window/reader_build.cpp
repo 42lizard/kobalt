@@ -985,8 +985,16 @@ void Reader::connectLightGestures() {
         if (gestureWarmth) {
             // Like Nickel's slider, a manual change turns automatic warmth off.
             const int minimum = light->warmthMinimum(), range = light->warmthMaximum() - minimum;
-            const int value =
-                light->setWarmth(warmthInitial + qRound(kobalt::ui::BrightnessGesture::change(moved) * range / 100.));
+            if (range <= 0) {
+                return;
+            }
+            const double percent =
+                100.0 * (warmthInitial - minimum) / range + kobalt::ui::BrightnessGesture::change(moved);
+            const int snapped = qBound(0, qRound(percent / 10.) * 10, 100);
+            const int step = qMax(1, light->warmthStep());
+            const int level =
+                qBound(minimum, minimum + qRound(snapped * range / (100.0 * step)) * step, minimum + range);
+            const int value = light->setWarmth(snapped == 100 ? minimum + range : level);
             if (value < 0)
                 return;
             brightnessNotice->setLevel(true, qRound(100.0 * (value - minimum) / range));

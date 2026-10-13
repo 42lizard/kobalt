@@ -4933,11 +4933,29 @@ private slots:
         host.shutdown();
         QTRY_COMPARE_WITH_TIMEOUT(closed.count(), 2, 10000);
     }
+    void lightGesturesRestoreAndRejectBlockedStarts_data() {
+        QTest::addColumn<int>("minimum");
+        QTest::addColumn<int>("maximum");
+        QTest::addColumn<int>("step");
+        QTest::addColumn<int>("initial");
+        QTest::addColumn<int>("fortyPercent");
+        QTest::addColumn<int>("sixtyPercent");
+        QTest::newRow("percent") << 0 << 100 << 1 << 30 << 40 << 60;
+        QTest::newRow("native-temperature") << 1000 << 6000 << 500 << 2500 << 3000 << 4000;
+        QTest::newRow("closest-native-step") << 0 << 100 << 6 << 30 << 42 << 60;
+    }
     void lightGesturesRestoreAndRejectBlockedStarts() {
+        QFETCH(int, minimum);
+        QFETCH(int, maximum);
+        QFETCH(int, step);
+        QFETCH(int, initial);
+        QFETCH(int, fortyPercent);
+        QFETCH(int, sixtyPercent);
         struct State {
-            int warmth = 30, storedWarmth = 30, saves = 0, brightness = 50, originalBrightness = -1;
+            int warmth, storedWarmth, minimum, maximum, step;
+            int saves = 0, brightness = 50, originalBrightness = -1;
             bool automatic = true, failSave = false, suspended = false;
-        } state;
+        } state{initial, initial, minimum, maximum, step};
         class Light final : public LightControls {
         public:
             explicit Light(State &state) : state(state) {}
@@ -4951,20 +4969,20 @@ private slots:
                 return state.warmth;
             }
             int warmthMinimum() const override {
-                return 0;
+                return state.minimum;
             }
             int warmthMaximum() const override {
-                return 100;
+                return state.maximum;
             }
             int warmthStep() const override {
-                return 1;
+                return state.step;
             }
             bool automaticWarmth() const override {
                 return state.automatic;
             }
             int setWarmth(int value) override {
                 state.automatic = false;
-                return state.warmth = qBound(0, value, 100);
+                return state.warmth = qBound(state.minimum, value, state.maximum);
             }
             bool saveWarmth() override {
                 ++state.saves;
@@ -5027,7 +5045,7 @@ private slots:
         state.suspended = true;
         QVERIFY(!page->lightStarted(true));
         QVERIFY(!page->lightStarted(false));
-        QCOMPARE(state.warmth, 30);
+        QCOMPARE(state.warmth, initial);
         QCOMPARE(state.originalBrightness, -1);
         state.suspended = false;
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
@@ -5035,18 +5053,30 @@ private slots:
         QVERIFY(!page->lightStarted(false));
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
         QVERIFY(page->lightStarted(true));
+        page->lightChanged(4.0 / 150);
+        QCOMPARE(state.warmth, initial);
+        page->lightChanged(6.0 / 150);
+        QCOMPARE(state.warmth, fortyPercent);
         page->lightChanged(.2);
-        QVERIFY(state.warmth > 30);
+        QCOMPARE(state.warmth, sixtyPercent);
+        page->lightChanged(2);
+        QCOMPARE(state.warmth, maximum);
+        page->lightChanged(-2);
+        QCOMPARE(state.warmth, minimum);
+        page->lightChanged(-6.0 / 150);
+        QVERIFY(state.warmth < initial);
         QVERIFY(!state.automatic);
         QVERIFY(notice->isVisible());
         page->lightFinished(false);
-        QCOMPARE(state.warmth, 30);
+        QCOMPARE(state.warmth, initial);
         QVERIFY(state.automatic);
         QCOMPARE(state.saves, 0);
         QVERIFY(notice->isHidden());
         QVERIFY(page->lightStarted(false));
+        page->lightChanged(4.0 / 150);
+        QCOMPARE(state.brightness, 54);
         page->lightChanged(.2);
-        QVERIFY(state.brightness > 50);
+        QCOMPARE(state.brightness, 80);
         page->lightFinished(false);
         QCOMPARE(state.brightness, 50);
         QVERIFY(notice->isHidden());
@@ -5055,7 +5085,7 @@ private slots:
         page->lightChanged(.2);
         page->lightFinished(true);
         QCOMPARE(state.saves, 1);
-        QCOMPARE(state.storedWarmth, 30);
+        QCOMPARE(state.storedWarmth, initial);
         QVERIFY(!state.automatic);
         QTRY_VERIFY_WITH_TIMEOUT(notice->isHidden(), 5000);
         state.failSave = false;
