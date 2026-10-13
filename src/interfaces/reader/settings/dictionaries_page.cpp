@@ -32,8 +32,7 @@ public:
 protected:
     void paintEvent(QPaintEvent *) override {
         QPainter painter(this);
-        painter.setPen(ui::dividerColor(this));
-        painter.drawLine(0, height() - 1, width(), height() - 1);
+        ui::paintEdges(painter, rect(), Qt::BottomEdge, ui::dividerColor(this));
     }
 };
 class DictionaryHeader : public ui::ListHeader {
@@ -69,7 +68,7 @@ protected:
         painter.setRenderHint(QPainter::Antialiasing);
         const QRectF circle = QRectF(rect()).adjusted(1, 1, -1, -1);
         const QColor ink = palette().color(QPalette::WindowText);
-        painter.setPen(QPen(ink, 1));
+        painter.setPen(QPen(ink, m::control::border));
         painter.setBrush(Qt::NoBrush);
         painter.drawEllipse(circle);
         painter.setPen(Qt::NoPen);
@@ -320,10 +319,11 @@ void DictionariesPage::redraw() {
             action,
             ui::styles::outlined() +
                 QString(
-                    "QPushButton{font-size:%1px;min-height:%2px;max-height:%2px;min-width:%3px;max-width:%3px;padding:0;border:1px solid palette(window-text);}")
+                    "QPushButton{font-size:%1px;min-height:%2px;max-height:%2px;min-width:%3px;max-width:%3px;padding:0;border:%4px solid palette(window-text);}")
                     .arg(int(c::labelText))
                     .arg(ui::px(66))
-                    .arg(ui::px(220)));
+                    .arg(ui::px(220))
+                    .arg(m::control::border));
         if (!installed && !active) {
             ui::buttonIcon(action, ui::ControlIcon::Download);
             action->setIconSize(QSize(ui::px(28), ui::px(28)));

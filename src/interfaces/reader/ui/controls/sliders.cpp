@@ -56,7 +56,7 @@ void SettingSlider::paintEvent(QPaintEvent *) {
         painter.drawLine(positionForValue(marker), m::control::sliderMarkerTop, positionForValue(marker),
                          m::control::sliderMarkerTop + m::control::sliderMarkerHeight);
     }
-    painter.setPen(QPen(palette().color(QPalette::WindowText), 1));
+    painter.setPen(QPen(palette().color(QPalette::WindowText), m::control::border));
     painter.drawLine(m::control::sliderInset, height() / 2, width() - m::control::sliderInset, height() / 2);
     painter.fillRect(QRect(m::control::sliderInset, height() / 2 - m::control::sliderFillHeight / 2,
                            x - m::control::sliderInset, m::control::sliderFillHeight),
@@ -64,7 +64,7 @@ void SettingSlider::paintEvent(QPaintEvent *) {
     painter.setBrush(palette().color(QPalette::Window));
     painter.setPen(QPen(palette().color(QPalette::WindowText), m::control::border));
     painter.drawEllipse(QPoint(x, height() / 2), m::control::sliderRadius, m::control::sliderRadius);
-    painter.setPen(QPen(palette().color(QPalette::WindowText), 1));
+    painter.setPen(QPen(palette().color(QPalette::WindowText), m::control::border));
     painter.drawEllipse(QPoint(x, height() / 2), m::control::sliderInnerRadius, m::control::sliderInnerRadius);
 }
 bool SettingSlider::event(QEvent *event) {

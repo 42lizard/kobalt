@@ -178,12 +178,12 @@ int main(int argc, char **argv) {
                 const auto image = notice.grab().toImage();
                 const int middleX = image.width() / 2, middleY = image.height() / 2;
                 const auto ink = notice.palette().color(QPalette::WindowText);
-                for (int offset = 0; offset < 2; ++offset)
+                for (int offset = 0; offset < int(kobalt::ui::metrics::chrome::heavyRule); ++offset)
                     require(image.pixel(offset, middleY) == ink.rgba() &&
                                 image.pixel(image.width() - 1 - offset, middleY) == ink.rgba() &&
                                 image.pixel(middleX, offset) == ink.rgba() &&
                                 image.pixel(middleX, image.height() - 1 - offset) == ink.rgba(),
-                            "Light indicator is missing a two-pixel border on an edge");
+                            "Light indicator is missing its heavy border on an edge");
             }
         notice.setLevel(false, -1);
         require(value->text() == "0%", "Light indicator does not clamp low values");

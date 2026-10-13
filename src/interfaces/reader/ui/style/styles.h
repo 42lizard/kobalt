@@ -95,6 +95,7 @@ inline QString dropdownChoice(bool selected, bool divider) {
            QString("QPushButton{color:%1;text-align:left;padding:0 %2px;min-height:0;}")
                .arg(selected ? "palette(window)" : "palette(window-text)")
                .arg(metrics::choices::textInset) +
-           (divider ? "QPushButton{border-top:1px solid palette(mid);}" : "");
+           (divider ? QString("QPushButton{border-top:%1px solid palette(mid);}").arg(metrics::control::border)
+                    : QString());
 }
 }

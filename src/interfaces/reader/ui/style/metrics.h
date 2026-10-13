@@ -8,7 +8,7 @@
 
 namespace kobalt::ui::metrics {
 // Sizes are pixels on a 300 ppi screen and scale to the device's density; see
-// scale.h. Counts, times and one-pixel hairlines stay plain numbers. Keep these
+// scale.h. Counts and times stay plain numbers. Keep these
 // independent of Qt version and firmware. Icon paths use their own fixed
 // drawing coordinates; book typography and refresh rectangles are not UI metrics.
 namespace lightSwipe {
@@ -25,7 +25,7 @@ inline constexpr Px small{32}, secondary{30}, explanation{32}, body{36};
 inline constexpr Px choice{36}, heading{36}, opening{40}, typography{44}, pageHeading{48};
 }
 namespace control {
-inline constexpr int border = 1; // A hairline stays one pixel.
+inline constexpr Px border{2}; // Two pixels at 300 ppi, one at the Nia's 212 ppi.
 inline constexpr auto lightOutline = "#666666", darkOutline = "#bbbbbb";
 inline constexpr Px minimumHeight{60}, padding{4};
 inline constexpr Px captionValueText{24}, captionWidth{280}, valueWidth{84}, captionGap{8}, captionRight{12};

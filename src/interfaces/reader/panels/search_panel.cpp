@@ -304,8 +304,10 @@ void SearchPanel::redraw() {
         label->setTextFormat(Qt::RichText);
         ui::readerStyle(
             button,
-            "QPushButton{border:none;border-radius:0;border-bottom:1px solid palette(light);background:palette(window);min-height:0;padding:0;}"
-            " QPushButton:pressed{background:palette(midlight);}");
+            QString(
+                "QPushButton{border:none;border-radius:0;border-bottom:%1px solid palette(light);background:palette(window);min-height:0;padding:0;}"
+                " QPushButton:pressed{background:palette(midlight);}")
+                .arg(m::control::border));
         connect(button, &QPushButton::clicked, this, [this, row] {
             const int index = resultPage * pageSize + row;
             if (index < hits.size() && selected) {

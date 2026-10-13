@@ -359,13 +359,16 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
         ui::readerStyle(
             button,
             QString(
-                "QPushButton{font-size:%1px;min-height:%2px;max-height:%2px;border:0;border-bottom:1px solid %3;border-right:1px solid palette(window-text);border-radius:0;text-align:left;padding:0 %4px;background:palette(window);color:palette(window-text);} QPushButton:checked{background:palette(window-text);color:palette(window);}")
+                "QPushButton{font-size:%1px;min-height:%2px;max-height:%2px;border:0;border-bottom:%5px solid %3;border-right:%5px solid palette(window-text);border-radius:0;text-align:left;padding:0 %4px;background:palette(window);color:palette(window-text);} QPushButton:checked{background:palette(window-text);color:palette(window);}")
                 .arg(c::railText)
                 .arg(c::railRowHeight)
                 .arg(c::dividerLight)
-                .arg(c::railInset));
+                .arg(c::railInset)
+                .arg(m::control::border));
     }
-    ui::readerStyle(settingsPages, "QStackedWidget{border:0;border-left:1px solid palette(window-text);}");
+    ui::readerStyle(
+        settingsPages,
+        QString("QStackedWidget{border:0;border-left:%1px solid palette(window-text);}").arg(m::control::border));
     ui::readerStyle(description, ui::styles::font(c::labelText));
     ui::readerStyle(version, ui::styles::font(c::descriptionText));
     ui::readerStyle(commit, ui::styles::font(ui::px(21)));

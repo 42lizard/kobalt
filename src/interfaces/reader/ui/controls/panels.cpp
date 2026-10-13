@@ -32,7 +32,7 @@ void BrandIcon::paintEvent(QPaintEvent *) {
 }
 LightSwipeNotice::LightSwipeNotice(QWidget *parent)
     : Panel(parent, Edges(Qt::LeftEdge) | Qt::TopEdge | Qt::RightEdge | Qt::BottomEdge) {
-    setEdgeWidth(2);
+    setEdgeWidth(m::chrome::heavyRule);
     setAttribute(Qt::WA_TransparentForMouseEvents);
     setFocusPolicy(Qt::NoFocus);
     percentage = new QLabel(this);
@@ -203,7 +203,7 @@ void Panel::paintEvent(QPaintEvent *event) {
     QFrame::paintEvent(event);
     QPainter painter(this);
     paintEdges(painter, rect(), separators, palette().color(softEdges ? QPalette::Mid : QPalette::WindowText),
-               edgeWidth);
+               edgeWidth > 0 ? edgeWidth : int(m::control::border));
     paintEdges(painter, rect(), dividers, dividerColor(this), m::control::border);
 }
 }

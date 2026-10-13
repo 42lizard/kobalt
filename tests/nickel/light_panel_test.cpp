@@ -4,6 +4,8 @@
 #include "platform/api/light_controls.h"
 
 #include <QCheckBox>
+#include <QImage>
+#include "interfaces/reader/ui/controls/buttons.h"
 #include <QLabel>
 #include <QSlider>
 #include <QTest>
@@ -93,6 +95,64 @@ public:
 class LightPanelTest : public QObject {
     Q_OBJECT
 private slots:
+    void thinBordersFollowDensity_data() {
+        QTest::addColumn<int>("ppi");
+        QTest::addColumn<int>("border");
+        QTest::newRow("167-ppi") << 167 << 1;
+        QTest::newRow("200-ppi") << 200 << 1;
+        QTest::newRow("nia") << 212 << 1;
+        QTest::newRow("below-rounding-boundary") << 224 << 1;
+        QTest::newRow("rounding-boundary") << 225 << 2;
+        QTest::newRow("elipsa") << 227 << 2;
+        QTest::newRow("aura-hd") << 265 << 2;
+        QTest::newRow("invalid-density-fallback") << 0 << 2;
+        QTest::newRow("300-ppi") << 300 << 2;
+    }
+    void thinBordersFollowDensity() {
+        QFETCH(int, ppi);
+        QFETCH(int, border);
+        const int previous = kobalt::ui::density();
+        struct RestoreDensity {
+            int value;
+            ~RestoreDensity() {
+                kobalt::ui::setDensity(value);
+            }
+        } restore{previous};
+        kobalt::ui::setDensity(ppi == 300 ? 212 : 300);
+        kobalt::ui::Panel panel(nullptr,
+                                kobalt::ui::Edges(Qt::TopEdge) | Qt::BottomEdge | Qt::LeftEdge | Qt::RightEdge);
+        kobalt::ui::setDensity(ppi);
+        QCOMPARE(int(kobalt::ui::metrics::control::border), border);
+        panel.resize(40, 30);
+        auto colors = panel.palette();
+        colors.setColor(QPalette::Window, Qt::white);
+        colors.setColor(QPalette::WindowText, Qt::black);
+        panel.setPalette(colors);
+        const auto image = panel.grab().toImage();
+        for (int edge = 0; edge < border; ++edge) {
+            QCOMPARE(image.pixelColor(20, edge), QColor(Qt::black));
+            QCOMPARE(image.pixelColor(20, 29 - edge), QColor(Qt::black));
+            QCOMPARE(image.pixelColor(edge, 15), QColor(Qt::black));
+            QCOMPARE(image.pixelColor(39 - edge, 15), QColor(Qt::black));
+        }
+        QCOMPARE(image.pixelColor(20, border), QColor(Qt::white));
+        kobalt::ui::LightSwipeNotice notice(nullptr);
+        notice.setPalette(colors);
+        notice.resize(kobalt::ui::metrics::lightSwipe::width, kobalt::ui::metrics::lightSwipe::height);
+        const auto noticeImage = notice.grab().toImage();
+        const int noticeBorder = kobalt::ui::metrics::chrome::heavyRule;
+        for (int edge = 0; edge < noticeBorder; ++edge) {
+            QCOMPARE(noticeImage.pixelColor(notice.width() / 2, edge), QColor(Qt::black));
+            QCOMPARE(noticeImage.pixelColor(edge, notice.height() / 2), QColor(Qt::black));
+        }
+        QCOMPARE(noticeImage.pixelColor(notice.width() / 2, noticeBorder), QColor(Qt::white));
+        kobalt::ui::StepButton step(kobalt::ui::ControlIcon::Plus, nullptr);
+        step.setPalette(colors);
+        const auto buttonImage = step.grab().toImage();
+        for (int edge = 0; edge < border; ++edge)
+            QCOMPARE(buttonImage.pixelColor(step.width() / 2, edge), QColor(Qt::black));
+        QCOMPARE(buttonImage.pixelColor(step.width() / 2, border), QColor(Qt::white));
+    }
     void automaticControlFitsDensity_data() {
         QTest::addColumn<int>("ppi");
         QTest::addColumn<int>("width");

@@ -214,7 +214,8 @@ void StepButton::paintEvent(QPaintEvent *) {
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(QPen(palette().color(isEnabled() ? QPalette::WindowText : QPalette::Midlight), m::control::border));
     painter.setBrush(palette().color(isEnabled() && isDown() ? QPalette::WindowText : QPalette::Window));
-    painter.drawRect(QRectF(rect()).adjusted(.5, .5, -.5, -.5));
+    const qreal inset = int(m::control::border) / 2.0;
+    painter.drawRect(QRectF(rect()).adjusted(inset, inset, -inset, -inset));
     if (!isEnabled())
         painter.setOpacity(.4);
     (((isEnabled() && isDown()) != (palette().color(QPalette::Window) == Qt::black)) ? pressed : normal)
@@ -286,11 +287,7 @@ void CaptionButton::paintEvent(QPaintEvent *) {
         namespace c = m::chrome;
         QPainter painter(this);
         painter.fillRect(rect(), palette().color(isDown() ? QPalette::Midlight : QPalette::Window));
-        painter.setPen(dividerColor(this));
-        if (rule.testFlag(Qt::TopEdge))
-            painter.drawLine(0, 0, width(), 0);
-        if (rule.testFlag(Qt::BottomEdge))
-            painter.drawLine(0, height() - 1, width(), height() - 1);
+        paintEdges(painter, rect(), rule, dividerColor(this));
         painter.setPen(palette().color(QPalette::WindowText));
         QFont label = font();
         painter.setFont(label);

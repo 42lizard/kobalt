@@ -26,14 +26,15 @@ public:
 protected:
     void paintEvent(QPaintEvent *) override {
         QPainter painter(this);
-        painter.setPen(QPen(palette().color(QPalette::Mid), ui::metrics::control::border));
+        const int border = ui::metrics::control::border;
+        const auto ink = palette().color(QPalette::Mid);
         const int status = property("status_height").toInt();
         if (status)
-            painter.drawLine(0, status - 1, width(), status - 1);
-        painter.drawLine(width() - c::cellWidth - 1, status, width() - c::cellWidth - 1, height());
-        painter.drawLine(width() - 2 * c::cellWidth - 1, status, width() - 2 * c::cellWidth - 1, height());
+            painter.fillRect(0, status - border, width(), border, ink);
+        painter.fillRect(width() - c::cellWidth - border, status, border, height() - status, ink);
+        painter.fillRect(width() - 2 * c::cellWidth - border, status, border, height() - status, ink);
         if (property("formatting_warning").toBool()) {
-            painter.drawLine(width() - 3 * c::cellWidth - 1, status, width() - 3 * c::cellWidth - 1, height());
+            painter.fillRect(width() - 3 * c::cellWidth - border, status, border, height() - status, ink);
         }
         painter.fillRect(0, height() - toolbarBorder, width(), toolbarBorder, palette().color(QPalette::WindowText));
     }
@@ -76,8 +77,7 @@ protected:
         const auto ink = palette().color(QPalette::Text);
         painter.fillRect(rect(), active ? ink : paper);
         if (!active) {
-            painter.setPen(QPen(palette().color(QPalette::Mid), ui::metrics::control::border));
-            painter.drawLine(rect().topRight(), rect().bottomRight());
+            ui::paintEdges(painter, rect(), Qt::RightEdge, palette().color(QPalette::Mid));
         }
         if (!isEnabled())
             painter.setOpacity(.45);
