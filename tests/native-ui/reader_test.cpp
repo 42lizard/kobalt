@@ -2602,6 +2602,65 @@ private slots:
         // is still opening and rendering while the finger moves.
         QTest::newRow("preview-rendering") << true;
     }
+    void marginReflowDoesNotRepaintRotation_data() {
+        QTest::addColumn<QString>("stepName");
+        QTest::newRow("horizontal") << "rrWider";
+        QTest::newRow("vertical") << "rrVerticalMarginsMore";
+    }
+    void marginReflowDoesNotRepaintRotation() {
+        QFETCH(QString, stepName);
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavLayout")));
+        auto *step = host.window()->findChild<QPushButton *>(stepName);
+        auto *rotation = host.window()->findChild<QPushButton *>("rrOrientation1");
+        QVERIFY(step && rotation);
+        QTRY_VERIFY(rotation->isVisible() && rotation->isEnabled());
+        step->click();
+        QTRY_VERIFY(inspectReader(host)["preview_ready"].toBool() && !inspectReader(host)["preview_busy"].toBool());
+        QCoreApplication::processEvents();
+        PaintRegions paints;
+        auto *row = rotation->parentWidget();
+        row->installEventFilter(&paints);
+        for (auto *widget : row->findChildren<QWidget *>())
+            widget->installEventFilter(&paints);
+        struct Release {
+            ~Release() {
+                engineActivity().pause(false);
+            }
+        } release;
+        engineActivity().pause(true);
+        step->click();
+        QTRY_VERIFY(inspectReader(host)["preview_busy"].toBool());
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 0);
+        for (auto *button : row->findChildren<QPushButton *>()) {
+            const bool checked = button->isChecked();
+            QSignalSpy activated(button, &QPushButton::clicked);
+            QTest::mouseClick(button, Qt::LeftButton);
+            QTest::keyClick(button, Qt::Key_Space);
+            QCOMPARE(activated.count(), 0);
+            QCOMPARE(button->isChecked(), checked);
+        }
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 0);
+        engineActivity().pause(false);
+        QTRY_VERIFY(!inspectReader(host)["preview_busy"].toBool());
+        QCoreApplication::processEvents();
+        QCOMPARE(paints.count, 0);
+        QSignalSpy activated(rotation, &QPushButton::clicked);
+        QTest::mouseClick(rotation, Qt::LeftButton);
+        QCOMPARE(activated.count(), 1);
+    }
     void appearanceDragsDuringPreview() {
         QFETCH(bool, slow);
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);

@@ -708,6 +708,10 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
     for (auto *button : rotationButtons) {
         const int value = button->property("orientation").toInt();
         connect(button, &QPushButton::clicked, this, [this, value] {
+            if (rotationControlsBlocked()) {
+                syncReadingControls();
+                return;
+            }
             kobalt::diagnostic("reader-orientation-request",
                                {{"target_orientation", value},
                                 {"current_orientation", int(orientation->manual())},
@@ -733,6 +737,10 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
     }
     if (autoRotateOption)
         connect(autoRotateOption, &QPushButton::clicked, this, [this] {
+            if (rotationControlsBlocked()) {
+                syncReadingControls();
+                return;
+            }
             appearanceEdit.setError(this->orientation->setAutomatic(true)
                                         ? QString()
                                         : strings::get("reader.the_orientation_sensor_is_unavailable"));

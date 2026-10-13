@@ -390,12 +390,10 @@ void Reader::syncReadingControls() {
     updateGraph();
     updateOrientationBlock();
     for (auto *button : rotationButtons) {
-        button->setEnabled(!model->busy() && (!appearanceEdit.edited() || !appearanceEdit.preview()->busy()));
         button->setChecked(!orientation->automatic() &&
                            button->property("orientation").toInt() == int(orientation->manual()));
     }
     if (autoRotateOption) {
-        autoRotateOption->setEnabled(!model->busy() && (!appearanceEdit.edited() || !appearanceEdit.preview()->busy()));
         autoRotateOption->setChecked(orientation->automatic());
     }
     updateLinkReturn();

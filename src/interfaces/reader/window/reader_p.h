@@ -191,6 +191,7 @@ private:
     int searchOriginalPage = 0;
     kobalt::SearchHit pendingSearchHit;
     void updateOrientationBlock();
+    bool rotationControlsBlocked() const;
     void closeSearch();
     void openSearch();
     kobalt::LinkPanel *linkPanel = nullptr;

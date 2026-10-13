@@ -289,17 +289,25 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
     // While a panel's changes apply, its controls ignore input. Disabling
     // them instead would repaint the whole visible panel in disabled colors,
     // one more screen update before it closes.
-    if (appearanceEdit.applying() &&
-        (type == QEvent::MouseButtonPress || type == QEvent::MouseButtonRelease ||
-         type == QEvent::MouseButtonDblClick || type == QEvent::MouseMove || type == QEvent::TouchBegin ||
-         type == QEvent::TouchUpdate || type == QEvent::TouchEnd || type == QEvent::KeyPress ||
-         type == QEvent::KeyRelease)) {
+    const bool controlInput = type == QEvent::MouseButtonPress || type == QEvent::MouseButtonRelease ||
+                              type == QEvent::MouseButtonDblClick || type == QEvent::MouseMove ||
+                              type == QEvent::TouchBegin || type == QEvent::TouchUpdate || type == QEvent::TouchEnd ||
+                              type == QEvent::KeyPress || type == QEvent::KeyRelease || type == QEvent::Shortcut;
+    if (appearanceEdit.applying() && controlInput) {
         auto *target = qobject_cast<QWidget *>(watched);
         if (target &&
             (target == menu || target == general || menu->isAncestorOf(target) || general->isAncestorOf(target))) {
             event->accept();
             return true;
         }
+    }
+    // Reflow temporarily blocks rotation without repainting its buttons in
+    // disabled colors. Keep the selected orientation visible until it changes.
+    auto *rotationButton = qobject_cast<QPushButton *>(watched);
+    if (controlInput && rotationButton &&
+        (rotationButtons.contains(rotationButton) || rotationButton == autoRotateOption) && rotationControlsBlocked()) {
+        event->accept();
+        return true;
     }
     if (watched == menu && type == QEvent::Paint) {
         schedulePreviewWarm();
@@ -527,6 +535,10 @@ void Reader::closeEvent(QCloseEvent *event) {
     if (finished)
         finished(model->retained());
     QWidget::closeEvent(event);
+}
+
+bool Reader::rotationControlsBlocked() const {
+    return model->busy() || (appearanceEdit.edited() && appearanceEdit.preview()->busy());
 }
 
 void Reader::updateOrientationBlock() {
