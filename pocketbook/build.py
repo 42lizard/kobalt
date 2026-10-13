@@ -8,6 +8,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+from version import release_version
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--host', action='store_true')
 parser.add_argument('--jobs', type=int, default=2)
@@ -30,6 +32,11 @@ if args.host:
     import runpy
     runpy.run_path(str(ROOT / 'tests/fixtures/reader_fixture.py'))['book'](output / 'fixture.epub')
 options = json.loads((output / 'engine-options.json').read_text())
+version = release_version()
+manifest = output / 'assets/install/.adds/kobalt/assets/manifest.json'
+if not args.regression and json.loads(manifest.read_text())['version'] != version:
+    parser.error('Asset version differs from the build; rerun without --skip-dependencies')
+options.append(f'-DKOBALT_VERSION={version}')
 if args.firmware_libs:
     options.append(f'-DKOBALT_FIRMWARE_LIBS={args.firmware_libs.resolve()}')
 source = ROOT / ('tests' if args.regression else 'pocketbook')
