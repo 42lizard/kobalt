@@ -688,8 +688,8 @@ void ReaderCoordinator::load() {
     run.model->open(
         {run.identity, run.filePath, size, saved,
          useNative ? run.diskBaseline.location : run.nativePublication->location(), environment_.paths.layoutCache(),
-         run.sourceLease, kobalt::nativeResourceFactory(run.filePath, run.nativePublication->port(), run.sourceLease),
-         positionCodec(), environment_.paths.documentCache(), temporaryAppearance, originalAppearance},
+         run.sourceLease, run.nativePublication->resources(run.sourceLease), positionCodec(),
+         environment_.paths.documentCache(), temporaryAppearance, originalAppearance},
         [this](const kobalt::OpeningResult &outcome) {
             run.openingTimings["load_and_layout_ms"] = run.openingTimer.elapsed() - run.layoutStarted;
             if (!outcome.ready()) {

@@ -346,6 +346,9 @@ kobalt_check(reading-book SOURCES tests/model/reading_book.cpp LIBRARIES test-re
     ARGUMENTS "${KOBALT_TEST_FIXTURES}/text.epub")
 kobalt_check(reader-session SOURCES tests/model/reader_session.cpp LIBRARIES test-reader-runtime
     ARGUMENTS "${KOBALT_TEST_FIXTURES}/text.epub" "${KOBALT_TEST_FIXTURES}/publisher-non-linear.epub")
+kobalt_check(local-reader SOURCES tests/model/local_reader.cpp src/support/diagnostics.cpp LIBRARIES test-reading
+    ARGUMENTS "${KOBALT_TEST_FIXTURES}/local-cache.epub" "${KOBALT_TEST_FIXTURES}/color.epub")
+set_tests_properties(local-reader PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM}")
 kobalt_check(bookmark-session SOURCES tests/model/bookmark_session.cpp LIBRARIES test-reader-runtime
     ARGUMENTS "${KOBALT_TEST_FIXTURES}/text.epub")
 kobalt_check(engine-resource-cache SOURCES tests/model/resource_cache.cpp LIBRARIES test-reader-runtime)

@@ -94,7 +94,7 @@ The default build opens unencrypted local EPUBs selected through Nickel, regardl
 
 On firmware 4, sideloaded filenames and saved chapter prefixes preserve literal `#`, `?` and percent sequences such as `%20`.
 
-Loading a local book does not require Wi-Fi or an internet connection. On Kobo, Kobalt checks the local loopback interface before opening its resource service. It brings that interface up if needed and preserves its existing IPv4 address. It does not enable Wi-Fi or change other network interfaces.
+Loading a local book does not require Wi-Fi or an internet connection. Kobo, Android and desktop read unencrypted EPUB resources directly from the ZIP archive on the engine worker, without a loopback HTTP server. The existing source cache, resource and image limits, cancellation and access-revocation checks still apply. Each resource stream closes before its read finishes, and closing or exporting a book drains the worker before releasing the publication.
 
 Nickel stays responsible for authorization. Kobalt receives an opening only after Nickel accepts it, then reads the EPUB's ZIP entries directly. It checks the publication structure and lets CREngine load its reading sections before displaying the book. Protected content, source access failures and books the engine cannot load still offer fallback to Nickel. A store purchase keeps its existing book identity and uses the same progress, completion and sync integration as before. Direct loading does not turn it into a sideloaded book.
 

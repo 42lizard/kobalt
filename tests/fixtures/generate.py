@@ -23,6 +23,7 @@ def write(directory, source_root=ROOT):
     reader, dictionary = load('reader_fixture'), load('dictionary_fixture')
     links, publisher = load('link_fixture'), load('publisher_fixture')
     reader.book(directory / 'text.epub', nested=True)
+    reader.book(directory / 'local-cache.epub', nested=True, chapter_count=2, paragraphs=300)
     reader.book(directory / 'formatting-issues.epub', nested=True, formatting_issue='missing-css')
     reader.book(directory / 'formatting-entity.epub', nested=True, formatting_issue='html-entity')
     reader.book(directory / 'adobe-template.epub', nested=True, formatting_issue='adobe-template')

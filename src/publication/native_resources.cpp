@@ -32,6 +32,7 @@ struct TransferTimings {
 };
 thread_local bool transferring = false;
 thread_local std::vector<std::function<void()>> pendingReleases;
+std::atomic_bool networkReady{false};
 QObject *resourceNetwork() {
     // A nested event loop on the engine worker would run other queued engine
     // jobs during a transfer and corrupt CREngine's process-global font state.
@@ -46,6 +47,7 @@ QObject *resourceNetwork() {
             thread->wait();
         });
         thread->start();
+        networkReady.store(true);
         return worker;
     }();
     return network;
@@ -149,6 +151,10 @@ bool resourceSecretMatches(const QByteArray &candidate) {
     return difference == 0;
 }
 void releaseResourceConnections(std::function<void()> finished) {
+    if (!networkReady.load()) {
+        kobalt::qt::invoke(qApp, finished, Qt::QueuedConnection);
+        return;
+    }
     auto *network = resourceNetwork();
     kobalt::qt::invoke(
         network,
