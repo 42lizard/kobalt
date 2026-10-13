@@ -2,6 +2,8 @@
 
 ### What's changed
 
+- Added Automatic brightness for Kobo devices with an ambient light sensor. Manual brightness adjustments turn it off and stop a pending brightness animation from overwriting the chosen level. Cancelled gestures restore the original level and setting.
+
 - Publisher Fonts uses Libron for serif, Legible Next for sans-serif and IBM Plex Mono for monospace when the book has no embedded fonts. The default reading font remains a separate book override.
 
 - Added hyphenation dictionaries for Estonian, Finnish, Georgian, Hungarian, Latvian, Lithuanian, Polish, Slovak, Slovenian and Ukrainian.

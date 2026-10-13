@@ -1,5 +1,6 @@
 #include "interfaces/reader/ui/controls/sliders.h"
 #include "interfaces/reader/ui/controls/panels.h"
+#include "interfaces/reader/ui/controls/options.h"
 #include "support/strings.h"
 #include "light_panel.h"
 #include "platform/api/light_controls.h"
@@ -16,6 +17,14 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
     auto *rows = new QVBoxLayout(this);
     rows->setContentsMargins(m::panel::contentMargins);
     rows->setSpacing(m::control::rowGap);
+    automaticBrightness = new ui::DescribedOption(strings::get("light_panel.automatic_brightness"),
+                                                  strings::get("light_panel.automatic_brightness_description"), this);
+    automaticBrightness->setObjectName("rrAutomaticBrightness");
+    rows->addWidget(automaticBrightness);
+    connect(automaticBrightness, &QCheckBox::clicked, this, [this](bool enabled) {
+        result(this->light.setAutomaticBrightness(enabled));
+        refreshValues();
+    });
     brightnessSlider =
         ui::sliderRow(this, rows, "rrBrightness", "rrBrightnessValue", strings::get("light_panel.brightness"),
                       "rrBrightnessLess", "rrBrightnessMore", 0, 100, 1, {}, {}, "%");
@@ -40,8 +49,10 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
     // runs on release; interrupted drags restore the original level.
     connect(brightnessSlider, &QSlider::valueChanged, this, [this](int value) {
         brightnessValue->setText(QString::number(value) + '%');
-        if (!updating && this->light.beginGesture())
-            this->light.setGestureLevel(value);
+        if (!updating && this->light.beginGesture()) {
+            result(this->light.setGestureLevel(value) == value);
+            automaticBrightness->setChecked(this->light.automaticBrightness());
+        }
     });
     brightnessSlider->committed = [this](int) {
         this->light.finishGesture(true);
@@ -101,10 +112,12 @@ void LightPanel::result(bool success) {
 }
 void LightPanel::refreshValues() {
     updating = true;
+    automaticBrightness->setVisible(light.hasAutomaticBrightness());
     if (!brightnessSlider->interacting() && light.gesturing())
         light.finishGesture(false);
     if (!warmthSlider->interacting())
         finishWarmth(false);
+    automaticBrightness->setChecked(light.automaticBrightness());
     if (!brightnessSlider->interacting())
         brightnessSlider->setValue(light.brightness());
     brightnessValue->setText(QString::number(brightnessSlider->value()) + '%');

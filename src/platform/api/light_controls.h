@@ -3,11 +3,22 @@
 
 namespace kobalt {
 // One window owns one light controller. A cancelled gesture restores its
-// original value; a committed gesture persists through the host settings.
+// original value and automatic-brightness setting; a committed gesture
+// persists through the host settings. Manual brightness changes disable
+// automatic brightness on hosts that support it.
 class LightControls {
 public:
     virtual ~LightControls() = default;
     virtual bool initialize() = 0;
+    virtual bool hasAutomaticBrightness() const {
+        return false;
+    }
+    virtual bool automaticBrightness() const {
+        return false;
+    }
+    virtual bool setAutomaticBrightness(bool) {
+        return false;
+    }
     virtual bool hasWarmth() const = 0;
     virtual int warmth() const = 0;
     virtual int warmthMinimum() const = 0;

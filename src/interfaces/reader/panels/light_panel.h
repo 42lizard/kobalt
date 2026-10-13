@@ -3,6 +3,10 @@
 #include "interfaces/reader/ui/controls/panels.h"
 #include <QTimer>
 
+namespace kobalt::ui {
+class DescribedOption;
+}
+
 namespace kobalt {
 class LightControls;
 // The reader owns the light controller and destroys this panel before it.
@@ -22,6 +26,7 @@ private:
     ui::SettingSlider *brightnessSlider, *warmthSlider;
     QLabel *brightnessValue, *warmthValue, *swipeTip, *error;
     QWidget *warmthRow;
+    ui::DescribedOption *automaticBrightness;
     QTimer poll;
     bool updating = false, warmthAutomatic = false;
     int warmthOriginal = -1;

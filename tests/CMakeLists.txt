@@ -214,6 +214,16 @@ target_compile_definitions(nickel-lifecycle-test PRIVATE KOBALT_READER_HARDWARE
     KOBALT_CONFIG_DIR="/unused" KOBALT_SYSTEM_FONT_DIRECTORY="/unused")
 set_target_properties(nickel-lifecycle-test PROPERTIES ENABLE_EXPORTS TRUE)
 
+kobalt_widget_test(nickel-light-panel SOURCES "${KOBALT_TESTS}/nickel/light_panel_test.cpp"
+    "${KOBALT_ROOT}/src/interfaces/reader/panels/light_panel.cpp" LIBRARIES reader-widgets)
+
+kobalt_widget_test(nickel-light SOURCES "${KOBALT_TESTS}/nickel/native_light_test.cpp"
+    "${KOBALT_ROOT}/src/platform/nickel/qt5/native_light.cpp"
+    "${KOBALT_ROOT}/src/platform/nickel/common/native_light.h"
+    "${KOBALT_ROOT}/src/support/diagnostics.cpp" LIBRARIES Qt6::Widgets Threads::Threads ${CMAKE_DL_LIBS})
+target_compile_definitions(nickel-light-test PRIVATE KOBALT_READER_HARDWARE)
+set_target_properties(nickel-light-test PROPERTIES ENABLE_EXPORTS TRUE)
+
 # The ioctl adapter requires Linux framebuffer headers.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     kobalt_check(page-animation-native SOURCES tests/model/page_animation_native.cpp
