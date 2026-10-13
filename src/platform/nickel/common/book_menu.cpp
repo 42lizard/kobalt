@@ -18,7 +18,6 @@
 #include <memory>
 #include <QMenu>
 #include <QPointer>
-#include <QRegularExpression>
 #include <QVariantMap>
 #include <dlfcn.h>
 
@@ -114,12 +113,10 @@ static ReaderBookRoute bookRoute(const void *volume, QString *identity, QString 
         return Route::Protected;
 #endif
     auto filename = localReaderBookPath(id);
-    const bool purchased =
-        QRegularExpression("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-            .match(id)
-            .hasMatch();
-    if (purchased)
-        filename = "/mnt/onboard/.kobo/kepub/" + id;
+    const bool downloaded = filename.isEmpty();
+    if (downloaded) {
+        filename = downloadedReaderBookPath(id);
+    }
     if (filename.isEmpty() || !QFileInfo(filename).isFile()) {
         return Route::Unsupported;
     }
@@ -135,7 +132,7 @@ static ReaderBookRoute bookRoute(const void *volume, QString *identity, QString 
     if (!inspectPublication) {
         return Route::Direct;
     }
-    if (purchased) {
+    if (downloaded) {
         // Read only whether Nickel has protection metadata for this volume.
         // Never select key values or infer protection from purchase status or
         // a parser failure. Missing metadata is not proof of readable content;
