@@ -16,11 +16,22 @@
 namespace kobalt {
 namespace m = ui::metrics;
 namespace {
+class SwipeBand : public QWidget {
+public:
+    explicit SwipeBand(QWidget *parent) : QWidget(parent) {}
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.fillRect(rect(), QColor(ui::darkTheme(this) ? m::light::hintPaperDark : m::light::hintPaperLight));
+    }
+};
 class SwipeIcon : public QWidget {
 public:
     explicit SwipeIcon(QWidget *parent) : QWidget(parent) {
         setFixedSize(m::text::heading, m::text::heading);
     }
+
 protected:
     void paintEvent(QPaintEvent *) override {
         QPainter painter(this);
@@ -30,7 +41,12 @@ protected:
 }
 LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent, Qt::BottomEdge), light(light) {
     setObjectName("rrLightPanel");
-    auto *rows = new QVBoxLayout(this);
+    auto *outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, m::control::border, 0, 0);
+    outer->setSpacing(0);
+    auto *controls = new QWidget(this);
+    auto *rows = new QVBoxLayout(controls);
+    outer->addWidget(controls);
     rows->setContentsMargins(m::panel::contentMargins);
     rows->setSpacing(m::control::rowGap);
     automaticBrightness = new ui::DescribedOption(strings::get("light_panel.automatic_brightness"),
@@ -59,14 +75,17 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
     swipeTip->setObjectName("rrLightSwipeTip");
     swipeTip->setWordWrap(true);
     ui::readerStyle(swipeTip, ui::styles::font(m::text::secondary) +
-                                 "font-style:italic;color:palette(placeholder-text);");
-    swipeRow = new QWidget(this);
+                                  "font-style:italic;background:transparent;color:palette(placeholder-text);");
+    swipeRow = new SwipeBand(this);
+    swipeRow->setObjectName("rrLightSwipeBand");
+    ui::readerStyle(swipeRow, "QWidget{background:transparent;}");
     auto *tipLayout = new QHBoxLayout(swipeRow);
-    tipLayout->setContentsMargins(0, ui::px(4), 0, ui::px(10));
+    tipLayout->setContentsMargins(m::panel::contentMargins.left(), m::panel::contentMargins.top() + ui::px(4),
+                                  m::panel::contentMargins.right(), m::panel::contentMargins.bottom());
     tipLayout->setSpacing(m::spacing::row);
     tipLayout->addWidget(new SwipeIcon(swipeRow), 0, Qt::AlignTop);
     tipLayout->addWidget(swipeTip, 1);
-    rows->insertWidget(0, swipeRow);
+    outer->insertWidget(0, swipeRow);
     error = new QLabel(strings::get("light_panel.could_not_save_light_settings"), this);
     error->setObjectName("rrLightError");
     error->setWordWrap(true);

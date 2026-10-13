@@ -214,7 +214,8 @@ private slots:
         auto *tip = panel.findChild<QLabel *>("rrLightSwipeTip");
         auto *brightness = panel.findChild<QSlider *>("rrBrightness");
         QVERIFY(tip->isVisible());
-        QVERIFY(tip->mapTo(&panel, tip->rect().bottomLeft()).y() < brightness->parentWidget()->geometry().top());
+        QVERIFY(tip->mapTo(&panel, tip->rect().bottomLeft()).y() <
+                brightness->parentWidget()->mapTo(&panel, QPoint()).y());
         panel.setEdgeGesturesEnabled(false);
         QVERIFY(!tip->isVisible());
         panel.hide();

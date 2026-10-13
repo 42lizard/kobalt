@@ -73,6 +73,7 @@ inline QRect settings(const QSize &size) {
 }
 }
 namespace light {
+inline constexpr auto hintPaperLight = "#e6e6e6", hintPaperDark = "#222222";
 inline constexpr int pollMilliseconds = 500;
 }
 namespace settings {
