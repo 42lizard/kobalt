@@ -164,7 +164,7 @@ public:
         }
         result.issue = boundedDiagnostic(message, 256);
         result.resource = boundedDiagnostic(currentResource, 256);
-        const int offset = int(qBound<qint64>(0, currentOffset, currentSource.size()));
+        const int offset = int(qBound(qint64(0), currentOffset, qint64(currentSource.size())));
         const int start = qMax(0, offset - 120);
         result.excerpt = boundedDiagnostic(currentSource.mid(start, 240), 240);
         if (!currentSource.isEmpty()) {

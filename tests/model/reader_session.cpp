@@ -247,12 +247,12 @@ int run(int argc, char **argv) {
             opened.exec();
             warning.reset();
             openWarning(*retainedWarning);
-            QFile log(diagnostics.filePath("events.jsonl"));
+            QFile log(diagnostics.path() + "/events.jsonl");
             require(log.open(QIODevice::ReadOnly), "Cannot read formatting diagnostics");
             int warnings = 0;
             for (const auto &line : log.readAll().split('\n')) {
                 const auto entry = QJsonDocument::fromJson(line).object();
-                if (entry.value("event") != "opening-formatting-warning") {
+                if (entry.value("event").toString() != QStringLiteral("opening-formatting-warning")) {
                     continue;
                 }
                 require(entry.value("resource").toString().endsWith(".xhtml") &&

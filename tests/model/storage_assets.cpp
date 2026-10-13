@@ -1,6 +1,7 @@
 #include "assets/assets.h"
 #include "storage/reader_storage.h"
 #include "storage/bookmark_store.h"
+#include "support/qt_compat.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -126,7 +127,7 @@ int main(int argc, char **argv) {
                             .object();
         auto entries = manifest["files"].toArray();
         entries.append(
-            QJsonObject{{"path", "fonts/damaged.ttf"}, {"size", 4}, {"sha256", QString(64, QLatin1Char('0'))}});
+            qt::object({{"path", "fonts/damaged.ttf"}, {"size", 4}, {"sha256", QString(64, QLatin1Char('0'))}}));
         manifest["files"] = entries;
         write(partial + "/manifest.json", QJsonDocument(manifest).toJson());
         write(partial + "/fonts/damaged.ttf", "damn");
