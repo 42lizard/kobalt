@@ -56,7 +56,6 @@
 #include <QWindow>
 #include <QEventLoop>
 #include <QJsonArray>
-#include <QScreen>
 #include <QLabel>
 #include <QAbstractSlider>
 #include <QSlider>
@@ -1315,9 +1314,10 @@ private slots:
         host.window()->setWindowModality(Qt::ApplicationModal);
         // Keep the same fullscreen size before and after wake so page numbers stay comparable.
         host.window()->showFullScreen();
-        QTRY_COMPARE(host.window()->size(), QGuiApplication::primaryScreen()->geometry().size());
+        QTRY_VERIFY(host.window()->isFullScreen());
         QTRY_COMPARE(QApplication::activeModalWidget(), host.window());
         QTRY_VERIFY(!host.session()->busy());
+        const QSize readingSize = host.window()->size();
         host.session()->go(0);
         QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 0);
         host.window()->pageButton(1);
@@ -1329,6 +1329,7 @@ private slots:
         host.window()->sleepViewReady();
         host.window()->wakeReader();
         QVERIFY(host.window()->isVisible());
+        QTRY_COMPARE(host.window()->size(), readingSize);
         host.window()->pageButton(1);
         QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 2);
         host.window()->pageButton(-1);
