@@ -111,6 +111,9 @@ kobalt_check(layout-compatibility SOURCES tests/model/layout_compatibility.cpp s
 kobalt_check(layout-cache SOURCES tests/model/layout_cache.cpp src/storage/layout_cache.cpp
     src/publication/layout_compatibility.cpp src/publication/resource_cache.cpp LIBRARIES Qt6::Core)
 kobalt_check(resource-cache SOURCES tests/model/resource_cache.cpp src/publication/resource_cache.cpp LIBRARIES Qt6::Core)
+kobalt_check(local-resources SOURCES tests/model/local_resources.cpp src/publication/local_resources.cpp
+    src/publication/resource_cache.cpp src/publication/image_policy.cpp src/publication/publication.cpp
+    src/publication/zip_resource.cpp LIBRARIES Qt6::Core ZLIB::ZLIB Threads::Threads)
 kobalt_check(zip-resource SOURCES tests/model/zip_resource.cpp src/publication/zip_resource.cpp LIBRARIES Qt6::Core ZLIB::ZLIB)
 kobalt_check(diagnostics SOURCES tests/model/diagnostics.cpp src/support/diagnostics.cpp LIBRARIES Qt6::Core)
 kobalt_check(engine-activity SOURCES tests/model/engine_activity.cpp LIBRARIES Threads::Threads)

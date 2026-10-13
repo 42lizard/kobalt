@@ -204,6 +204,7 @@
 "error.publication_exceeds_the_memory_limit" = "Publication exceeds the memory limit";
 "error.publication_layout_inspection_is_incomplete" = "Publication layout inspection is incomplete";
 "error.publication_member_name_is_not_utf_8" = "Publication member name is not UTF-8";
+"error.publication_package_xml_is_invalid" = "The EPUB package contains invalid XML.";
 "error.publication_requires_right_to_left_page_navigation" = "Publication requires right-to-left page navigation";
 "error.publication_session_resource_mismatch" = "Publication session resource mismatch";
 "error.publication_transfer_is_incomplete" = "Publication transfer is incomplete";
