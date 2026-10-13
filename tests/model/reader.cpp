@@ -1116,6 +1116,11 @@ int main(int argc, char **argv) {
                 require(fallback.goTo(chapters[0].position), "Cannot navigate to the selected chapter destination");
                 require(fallback.goTo(anchor), "Cannot restore the position after chapter navigation");
             }
+            if (heading.contains('\n')) {
+                require(fallback.platformPosition(positions, &error) == "c.xhtml" && error.isEmpty() &&
+                            fallback.position() == anchor,
+                        "Normalized heading prevented chapter-only native progress");
+            }
         }
     }
     kobalt::ReaderModel native(kobalt::test::readerFonts());
@@ -1789,10 +1794,20 @@ int main(int argc, char **argv) {
         require(css.platformPosition(positions, &error) == location, "Unicode export changed the offset");
     }
     require(css.goTo("/body/DocFragment[2]/body/p[1]/text().4"), "Cannot select a node without an ID");
-    require(css.platformPosition(positions, &error).isEmpty() && !error.isEmpty(), "Missing ID was approximated");
+    const auto unlabelledAnchor = css.position();
+    require(css.platformPosition(positions, &error) == chapter2 && error.isEmpty() &&
+                css.position() == unlabelledAnchor,
+            "Missing source ID prevented chapter-only native progress or moved the local position");
     require(css.goTo("/body/DocFragment[2]/body/p[4]/text().1"), "Cannot select whitespace fixture");
-    require(css.platformPosition(positions, &error).isEmpty() && !error.isEmpty(),
-            "Normalized whitespace was exported as an exact source offset");
+    const auto normalizedAnchor = css.position();
+    require(css.platformPosition(positions, &error) == chapter2 && error.isEmpty() &&
+                css.position() == normalizedAnchor,
+            "Normalized whitespace prevented chapter-only progress or changed the local position");
+    require(css.goTo("/body/DocFragment[2]/body/p[6]/span[1]/span[1]/text().0"),
+            "Cannot select the duplicate-ID fixture");
+    const auto ambiguousAnchor = css.position();
+    require(css.platformPosition(positions, &error).isEmpty() && !error.isEmpty() && css.position() == ambiguousAnchor,
+            "Ambiguous source IDs were saved as a native position");
     const auto styledPage = css.image(0);
     int firstInk = styledPage.width();
     for (int y = 0; y < styledPage.height(); ++y)
