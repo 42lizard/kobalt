@@ -143,6 +143,10 @@ NativeLifecycle::NativeLifecycle(QObject *parent) : QObject(parent) {
     const auto b = connect(power(), SIGNAL(resumedFromSleep()), this, SLOT(resumed()), Qt::DirectConnection);
     const auto c = connect(usb(), SIGNAL(doneProcessing()), this, SLOT(processingDone()), Qt::DirectConnection);
     const auto d = connect(usb(), SIGNAL(aboutToUnplug()), this, SLOT(unplugging()), Qt::DirectConnection);
+    const auto plugManager = symbol<QObject *(*)()>("_ZN11PlugManager14sharedInstanceEv");
+    if (plugManager) {
+        connect(plugManager(), SIGNAL(plugged()), this, SLOT(usbPlugged()), Qt::DirectConnection);
+    }
     connected_ = a && b && c && d;
     if (connected_) {
         active = this;
@@ -154,6 +158,19 @@ NativeLifecycle::NativeLifecycle(QObject *parent) : QObject(parent) {
     connect(testTimer, &QTimer::timeout, this, &NativeLifecycle::testCommand);
     testTimer->start(100);
 #endif
+}
+void NativeLifecycle::usbPlugged() {
+    expectingUsbPrompt = true;
+    qt::later(5000, this, [this] {
+        expectingUsbPrompt = false;
+    });
+    // Nickel's signal can be called directly inside its library, bypassing a
+    // PLT hook. Wait until its slots have created the confirmation dialog.
+    qt::later(0, this, [this] {
+        if (usbPrompt && !storageBlocked() && !poweringOff) {
+            usbPrompt();
+        }
+    });
 }
 void NativeLifecycle::aboutToSleep() {
     asleep = true;

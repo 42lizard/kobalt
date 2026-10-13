@@ -18,6 +18,18 @@ signals:
     void resumedFromSleep();
 };
 
+class PlugManager : public QObject {
+    Q_OBJECT
+public:
+    static PlugManager *sharedInstance();
+signals:
+    void plugged();
+};
+PlugManager *PlugManager::sharedInstance() {
+    static PlugManager manager;
+    return &manager;
+}
+
 class PlugWorkflowManager : public QObject {
     Q_OBJECT
 public:
@@ -108,6 +120,18 @@ private slots:
 
     void cleanup() {
         kobalt::engineActivity().pause(false);
+    }
+
+    void usbPromptObservesTheNativeSignalAfterItsSlotsFinish() {
+        kobalt::NativeLifecycle lifecycle(nullptr);
+        bool prompt = false;
+        lifecycle.usbPrompt = [&] {
+            prompt = true;
+        };
+        emit PlugManager::sharedInstance() -> plugged();
+        QVERIFY(lifecycle.usbPromptExpected());
+        QVERIFY(!prompt);
+        QTRY_VERIFY(prompt);
     }
 
     void usbWorkflowWaitsForSaveAndRelease() {
