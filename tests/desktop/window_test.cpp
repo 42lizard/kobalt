@@ -853,8 +853,11 @@ private slots:
                     const auto image = grab.toImage();
                     const int pixelRatio = qRound(grab.devicePixelRatioF());
                     const int x = image.width() / 2;
-                    QCOMPARE(image.pixelColor(x, image.height() - pixelRatio), ui::dividerColor(row));
-                    QCOMPARE(image.pixelColor(x, image.height() - 2 * pixelRatio), palette.color(QPalette::Window));
+                    const int borderPixels = int(ui::metrics::control::border) * pixelRatio;
+                    for (int offset = 1; offset <= borderPixels; ++offset) {
+                        QCOMPARE(image.pixelColor(x, image.height() - offset), ui::dividerColor(row));
+                    }
+                    QCOMPARE(image.pixelColor(x, image.height() - borderPixels - 1), palette.color(QPalette::Window));
                 }
                 row->setPalette(original);
             }
