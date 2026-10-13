@@ -25,7 +25,7 @@ protected:
 private:
     LightControls &light;
     ui::SettingSlider *brightnessSlider, *warmthSlider;
-    QLabel *brightnessValue, *warmthValue, *swipeTip, *error;
+    QLabel *brightnessValue, *warmthValue, *swipeTip;
     QWidget *warmthRow, *swipeRow;
     ui::DescribedOption *automaticBrightness;
     QTimer poll;
@@ -34,6 +34,5 @@ private:
     void finishWarmth(bool save);
     void refreshValues();
     void layoutPanel();
-    void result(bool success);
 };
 }

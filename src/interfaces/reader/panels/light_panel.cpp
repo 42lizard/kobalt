@@ -59,7 +59,7 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
     automaticPresentation.indicatorSize = {m::chrome::checkSize, m::chrome::checkSize};
     automaticBrightness->setPresentation(automaticPresentation);
     connect(automaticBrightness, &QCheckBox::clicked, this, [this](bool enabled) {
-        result(this->light.setAutomaticBrightness(enabled));
+        this->light.setAutomaticBrightness(enabled);
         refreshValues();
     });
     brightnessSlider =
@@ -87,11 +87,6 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
     tipLayout->addWidget(new SwipeIcon(swipeRow), 0, Qt::AlignTop);
     tipLayout->addWidget(swipeTip, 1);
     outer->insertWidget(0, swipeRow);
-    error = new QLabel(strings::get("light_panel.could_not_save_light_settings"), this);
-    error->setObjectName("rrLightError");
-    error->setWordWrap(true);
-    rows->addWidget(error);
-    error->hide();
     // Automatic warmth and its bedtime stay in Nickel's settings. Moving the
     // warmth slider turns automatic warmth off, as Nickel's slider does.
     // Brightness changes reach the device while dragging. Native persistence
@@ -99,7 +94,7 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
     connect(brightnessSlider, &QSlider::valueChanged, this, [this](int value) {
         brightnessValue->setText(QString::number(value) + '%');
         if (!updating && this->light.beginGesture()) {
-            result(this->light.setGestureLevel(value) == value);
+            this->light.setGestureLevel(value);
             automaticBrightness->setChecked(this->light.automaticBrightness());
         }
     });
@@ -113,7 +108,7 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
                 warmthOriginal = this->light.warmth();
                 warmthAutomatic = this->light.automaticWarmth();
             }
-            result(this->light.setWarmth(value) == value);
+            this->light.setWarmth(value);
         }
         const int range = warmthSlider->maximum() - warmthSlider->minimum();
         warmthValue->setText(
@@ -140,7 +135,6 @@ LightPanel::~LightPanel() {
 bool LightPanel::open() {
     if (!light.initialize())
         return false;
-    error->hide();
     refreshValues();
     layoutPanel();
     show();
@@ -167,10 +161,6 @@ void LightPanel::layoutPanel() {
     setGeometry(bounds);
     if (moved && isVisible() && changed)
         changed();
-}
-void LightPanel::result(bool success) {
-    error->setVisible(!success);
-    layoutPanel();
 }
 void LightPanel::refreshValues() {
     updating = true;
@@ -221,7 +211,7 @@ void LightPanel::finishWarmth(bool save) {
         return;
     const int original = std::exchange(warmthOriginal, -1);
     if (save)
-        result(light.saveWarmth());
+        light.saveWarmth();
     else {
         // The native slider disables automatic warmth on manual adjustment.
         // A cancelled touch must restore both the light and that preference.

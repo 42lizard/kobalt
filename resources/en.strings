@@ -247,7 +247,6 @@
 "light_panel.automatic_brightness" = "Automatic brightness";
 "light_panel.automatic_brightness_description" = "Uses the ambient light sensor. Manual adjustments turn this off.";
 "light_panel.brightness" = "Brightness";
-"light_panel.could_not_save_light_settings" = "Could not save light settings";
 "light_panel.warmth" = "Warmth";
 
 /* link_panel */

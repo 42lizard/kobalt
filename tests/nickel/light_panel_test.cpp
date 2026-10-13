@@ -20,6 +20,7 @@ public:
     int changes = 0, level = 50, original = -1;
     bool originalAutomatic = false, warmthEnabled = false;
     int warmthLevel = 0, warmthMin = 0, warmthMax = 100, warmthIncrement = 1;
+    int roundWarmthTo = 1, roundBrightnessTo = 1;
     bool initialize() override {
         return true;
     }
@@ -56,7 +57,8 @@ public:
         return false;
     }
     int setWarmth(int value) override {
-        return warmthLevel = qBound(warmthMin, value, warmthMax);
+        return warmthLevel = qBound(
+                   warmthMin, warmthMin + qRound(double(value - warmthMin) / roundWarmthTo) * roundWarmthTo, warmthMax);
     }
     bool saveWarmth() override {
         return true;
@@ -75,7 +77,7 @@ public:
         if (automatic && !setAutomaticBrightness(false)) {
             return -1;
         }
-        return level = value;
+        return level = qRound(double(value) / roundBrightnessTo) * roundBrightnessTo;
     }
     void finishGesture(bool save) override {
         if (original < 0) {
@@ -97,6 +99,25 @@ public:
 class LightPanelTest : public QObject {
     Q_OBJECT
 private slots:
+    void roundedNativeLevelsDoNotAddErrorRow() {
+        QWidget parent;
+        parent.resize(1072, 1448);
+        parent.show();
+        Light light;
+        light.warmthEnabled = true;
+        light.roundWarmthTo = light.roundBrightnessTo = 5;
+        kobalt::LightPanel panel(light, &parent);
+        QVERIFY(panel.open());
+        const QRect before = panel.geometry();
+        panel.findChild<QSlider *>("rrWarmth")->setValue(32);
+        QCOMPARE(light.warmthLevel, 30);
+        QVERIFY(!panel.findChild<QLabel *>("rrLightError"));
+        QCOMPARE(panel.geometry(), before);
+        panel.findChild<QSlider *>("rrBrightness")->setValue(53);
+        QCOMPARE(light.level, 55);
+        QVERIFY(!panel.findChild<QLabel *>("rrLightError"));
+        QCOMPARE(panel.geometry(), before);
+    }
     void lightMarkersRespectNativeSteps() {
         QWidget parent;
         parent.resize(1072, 1448);
@@ -278,7 +299,7 @@ private slots:
         QVERIFY(panel.open());
         QVERIFY(!option->isVisible());
     }
-    void failedToggleShowsErrorAndRetainsState() {
+    void failedToggleRetainsStateWithoutErrorRow() {
         QWidget parent;
         parent.resize(768, 1024);
         parent.show();
@@ -289,7 +310,7 @@ private slots:
         auto *option = panel.findChild<QCheckBox *>("rrAutomaticBrightness");
         option->click();
         QVERIFY(option->isChecked());
-        QVERIFY(panel.findChild<QLabel *>("rrLightError")->isVisible());
+        QVERIFY(!panel.findChild<QLabel *>("rrLightError"));
         QCOMPARE(light.level, 50);
     }
     void manualSliderAndCancellation() {
