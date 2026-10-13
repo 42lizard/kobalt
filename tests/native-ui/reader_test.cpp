@@ -1313,7 +1313,9 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         host.window()->setWindowFlags(Qt::Window);
         host.window()->setWindowModality(Qt::ApplicationModal);
-        host.window()->show();
+        // Keep the same fullscreen size before and after wake so page numbers stay comparable.
+        host.window()->showFullScreen();
+        QTRY_COMPARE(host.window()->size(), QGuiApplication::primaryScreen()->geometry().size());
         QTRY_COMPARE(QApplication::activeModalWidget(), host.window());
         QTRY_VERIFY(!host.session()->busy());
         host.session()->go(0);
