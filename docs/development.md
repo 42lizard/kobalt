@@ -74,6 +74,14 @@ Run `python3 tools/run_tests.py --mini --offline --jobs 2` to test the mini asse
 
 `tools/assets.py` lists the bundled dictionaries for Kobo, Android, macOS and host tests. Full and mini builds keep the same dictionaries. Copy new XML patterns from the checksum-pinned CREngine archive in `dependencies/manifest.json`; keep their filenames so CREngine can select them by language. Review the original source license, update `resources/notices/Hyphenation-patterns`, `resources/acknowledgments.json` and `ACKNOWLEDGEMENTS.md`, and test language selection and pattern loading before adding a dictionary. Do not assume that every dictionary in the engine has the same license.
 
+## Performance and resource use
+
+Design for low-power ARM cores and Kobo devices with 256 MB of RAM shared with the operating system and Nickel. Control peak memory as well as steady-state use. When adding a cache or temporary buffer, define its size limit, ownership and release conditions. Account for overlapping allocations during book opening, reflow and resource decoding.
+
+Avoid redundant paints and display refreshes while preserving required visual updates. E-paper refresh time depends on the device, waveform and refresh policy. Repeated state updates should not repaint unchanged content. Keep painting and display submission separate, and follow the existing refresh policy for the interaction.
+
+For changes to page turns, rendering, resource loading or caches, compare the affected path before and after with the same book, settings, build configuration and test environment. Check elapsed time, peak memory and paint or refresh counts where relevant. Keep measurements in ignored build output and report the conditions and any unavailable measurements. Host measurements can identify regressions, but do not establish device performance or refresh quality.
+
 ## C++ style
 
 Use clang-format 18.1.8 with the checked-in `.clang-format`. It uses four spaces, attached braces, a 120-column target and separate lines for operations. Comment text and include order stay unchanged. Use braces for new branches and loops. The formatter does not insert or remove braces. Keep public ownership and failure contracts in headers when callers need them. Extract helpers when they make the sequence easier to follow; file size alone does not require a split.
