@@ -134,6 +134,8 @@ extern "C" __attribute__((visibility("default"))) void kobalt_usb_connect(void *
         nativeUsbConnect(manager);
 }
 NativeLifecycle::NativeLifecycle(QObject *parent) : QObject(parent) {
+    wakeRetry.setSingleShot(true);
+    connect(&wakeRetry, &QTimer::timeout, this, &NativeLifecycle::finishWake);
     const auto power = symbol<QObject *(*)()>("_ZN22N3PowerWorkflowManager14sharedInstanceEv");
     const auto usb = symbol<QObject *(*)()>("_ZN19PlugWorkflowManager14sharedInstanceEv");
     if (!power || !usb || !nativeUsbWorkflow || !nativeCanSuspend || !nativeUsbConnect || !nativeAboutUsbConnect ||
@@ -173,6 +175,7 @@ void NativeLifecycle::usbPlugged() {
     });
 }
 void NativeLifecycle::aboutToSleep() {
+    wakeRetry.stop();
     asleep = true;
     engineActivity().pause(!draining && !storageBlocked());
     diagnostic("sleep-start");
@@ -183,18 +186,33 @@ void NativeLifecycle::aboutToSleep() {
     savingBeforeSleep = false;
 }
 void NativeLifecycle::resumed() {
-    // Nickel may still be finishing its resume/PIN handler on this stack.
-    kobalt::qt::later(0, this, [this] {
-        if (poweringOff || removalPending || nativeSleeping())
-            return;
-        asleep = false;
-        if (storageBlocked())
-            return;
-        engineActivity().pause(false);
-        diagnostic("sleep-end");
-        if (wake)
-            wake();
-    });
+    // Leave Nickel's resume stack before restoring the reader.
+    wakeRetry.start(0);
+}
+void NativeLifecycle::finishWake() {
+    if (poweringOff || removalPending) {
+        return;
+    }
+    const auto &api = powerApi();
+    const auto *power = api.available() ? api.manager() : nullptr;
+    if (!power || api.sleeping(power)) {
+        return;
+    }
+    if (suspended()) {
+        // Sleep, PIN and USB views can outlast their native transition signal.
+        // Retry only while awake; another sleep signal cancels the timer.
+        wakeRetry.start(25);
+        return;
+    }
+    asleep = false;
+    if (storageBlocked()) {
+        return;
+    }
+    engineActivity().pause(false);
+    diagnostic("sleep-end");
+    if (wake) {
+        wake();
+    }
 }
 bool NativeLifecycle::canSuspend() {
     return !active ||
@@ -339,9 +357,8 @@ void NativeLifecycle::processingDone() {
     diagnostic("usb-storage-ready");
     if (restartAfterRemoval())
         return;
-    if (asleep || nativeSleeping()) {
+    if (nativeSleeping()) {
         engineActivity().pause(true);
-        return;
     }
     resumed();
 }

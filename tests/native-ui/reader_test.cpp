@@ -1261,6 +1261,34 @@ private slots:
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
         QTRY_VERIFY(!indicator->isVisible());
     }
+    void pageTurnsResumeWhenReaderIsShownAfterSleep() {
+        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        host.window()->setWindowFlags(Qt::Window);
+        host.window()->setWindowModality(Qt::ApplicationModal);
+        host.window()->show();
+        QTRY_COMPARE(QApplication::activeModalWidget(), host.window());
+        QTRY_VERIFY(!host.session()->busy());
+        host.session()->go(0);
+        QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 0);
+        host.window()->pageButton(1);
+        QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 1);
+        host.window()->sleepReader();
+        host.window()->pageButton(1);
+        host.window()->pageButton(-1);
+        QCOMPARE(host.session()->page(), 1);
+        host.window()->sleepViewReady();
+        host.window()->wakeReader();
+        QVERIFY(host.window()->isVisible());
+        host.window()->pageButton(1);
+        QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 2);
+        host.window()->pageButton(-1);
+        QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 1);
+    }
+
     void remoteKeyActivityRequiresActiveReading() {
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
         CloseHost cleanup{host};

@@ -232,6 +232,76 @@ private slots:
         QVERIFY(!lifecycle.connected());
     }
 
+    void delayedUnlockResumesWithoutAnotherPowerSignal_data() {
+        QTest::addColumn<bool>("usbConnected");
+        QTest::newRow("sleep-overlay") << false;
+        QTest::newRow("usb-remount-after-sleep") << true;
+    }
+    void delayedUnlockResumesWithoutAnotherPowerSignal() {
+        QFETCH(bool, usbConnected);
+        kobalt::NativeLifecycle lifecycle(nullptr);
+        QVERIFY(lifecycle.connected());
+        auto *power = N3PowerWorkflowManager::sharedInstance();
+        auto *usb = PlugWorkflowManager::sharedInstance();
+        int wakes = 0;
+        lifecycle.wake = [&] {
+            ++wakes;
+        };
+        if (usbConnected) {
+            lifecycle.prepareUsb = [](std::function<void()> ready) {
+                ready();
+            };
+            QVERIFY(kobalt::NativeLifecycle::interceptUsb(usb));
+            QVERIFY(lifecycle.storageBlocked());
+        }
+        power->asleep = power->sleepVisible = true;
+        emit power->aboutToSleep();
+        power->asleep = false;
+        emit power->resumedFromSleep();
+        QTest::qWait(20);
+        QCOMPARE(wakes, 0);
+        QVERIFY(lifecycle.blocked());
+        if (usbConnected) {
+            emit usb->aboutToUnplug();
+            emit usb->doneProcessing();
+            QVERIFY(!lifecycle.storageBlocked());
+        }
+        // The native overlay closes after the resume signal has returned.
+        power->sleepVisible = false;
+        QTRY_COMPARE_WITH_TIMEOUT(wakes, 1, 300);
+        QVERIFY(!lifecycle.blocked());
+        QVERIFY(!kobalt::NativeLifecycle::suspended());
+    }
+
+    void wakeWaitsForUsbViewToCloseAfterRemount() {
+        kobalt::NativeLifecycle lifecycle(nullptr);
+        QVERIFY(lifecycle.connected());
+        auto *power = N3PowerWorkflowManager::sharedInstance();
+        auto *usb = PlugWorkflowManager::sharedInstance();
+        int wakes = 0;
+        lifecycle.wake = [&] {
+            ++wakes;
+        };
+        lifecycle.prepareUsb = [](std::function<void()> ready) {
+            ready();
+        };
+        usb->visible = true;
+        QVERIFY(kobalt::NativeLifecycle::interceptUsb(usb));
+        power->asleep = true;
+        emit power->aboutToSleep();
+        power->asleep = false;
+        emit power->resumedFromSleep();
+        QTest::qWait(20);
+        emit usb->aboutToUnplug();
+        emit usb->doneProcessing();
+        QTest::qWait(20);
+        QVERIFY(kobalt::NativeLifecycle::suspended());
+        QCOMPARE(wakes, 0);
+        usb->visible = false;
+        QTRY_COMPARE_WITH_TIMEOUT(wakes, 1, 300);
+        QVERIFY(!lifecycle.blocked());
+    }
+
     void sleepAndPinPreventPrematureResume() {
         kobalt::NativeLifecycle lifecycle(nullptr);
         QVERIFY(lifecycle.connected());

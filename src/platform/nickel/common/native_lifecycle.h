@@ -2,6 +2,7 @@
 #include "usb_removal.h"
 #include <QObject>
 #include <QPointer>
+#include <QTimer>
 #include <functional>
 
 namespace kobalt {
@@ -71,6 +72,8 @@ private:
     bool storageReady = false, remounting = false;
     QPointer<QObject> pendingGadget, pendingWorkflow;
     void finishUsb();
+    void finishWake();
+    QTimer wakeRetry;
     quint64 generation = 0;
     UsbRemoval usbRemoval;
     bool removalPending = false;
