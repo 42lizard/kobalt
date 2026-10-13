@@ -23,6 +23,8 @@ The source code is included, but the Android and Mac versions are not ready for 
 
 - The macOS development app uses the same reader in a resizable window for testing books. For more information, take a look at [the documentation](docs/development.md#macos).
 
+- This fork also includes an experimental PocketBook InkPad Color 3 host. It opens local unprotected EPUBs and keeps its own reading state. See [PocketBook development](docs/development.md#pocketbook). Device acceptance is still pending.
+
 ## Compatibility and installation
 
 ### Install on Kobo

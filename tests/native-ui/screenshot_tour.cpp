@@ -431,7 +431,7 @@ public:
         return result->rects.first().center();
     }
     void hold(QPoint point) {
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         point += QPoint(0, page->topHeight());
         QTest::mousePress(page, Qt::LeftButton, Qt::NoModifier, point);
         QTest::qWait(ui::metrics::lookup::holdMilliseconds + 50);
@@ -1148,7 +1148,7 @@ public:
             capture("empty", "rrBookmarkList");
             tap("rrBookmarkListClose");
             pageTap();
-            auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+            auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
             clickAt(page->mapTo(canvas->surface(), page->bookmarkCorner().center()), page);
             settled();
             capture("ribbon");

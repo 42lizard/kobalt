@@ -26,7 +26,15 @@ Qt::ScreenOrientation shownOrientation(const QScreen *screen) {
 
 ReaderOrientation::ReaderOrientation(QOrientationSensor *sensor, std::function<void(Qt::ScreenOrientation)> turn,
                                      std::function<void(bool)> rotationOwnership)
-    : rotationOwnership(std::move(rotationOwnership)), sensor(sensor), turn(std::move(turn)) {
+    : rotationOwnership(std::move(rotationOwnership)),
+#ifndef KOBALT_NO_SENSORS
+      sensor(sensor),
+#endif
+      turn(std::move(turn)) {
+#ifdef KOBALT_NO_SENSORS
+    Q_ASSERT(!sensor);
+    Q_UNUSED(sensor);
+#endif
     debounce.setSingleShot(true);
     debounce.setInterval(250);
     connect(&debounce, &QTimer::timeout, this, [this] {
@@ -50,8 +58,10 @@ void ReaderOrientation::start(Qt::ScreenOrientation orientation) {
     if (rotationOwnership) {
         rotationOwnership(true);
     }
+#ifndef KOBALT_NO_SENSORS
     if (sensor)
         sensor->addFilter(this);
+#endif
     const bool automatic = automaticRotation;
     apply(manualOrientation);
     setAutomatic(automatic);
@@ -62,12 +72,14 @@ void ReaderOrientation::stop() {
     active = false;
     debounce.stop();
     pending = Qt::PrimaryOrientation;
+#ifndef KOBALT_NO_SENSORS
     if (sensor) {
         sensor->removeFilter(this);
         if (startedSensor)
             sensor->stop();
     }
     startedSensor = false;
+#endif
     // PrimaryOrientation is not the orientation Nickel showed; see shownOrientation().
     if (nativeOrientation != Qt::PrimaryOrientation)
         apply(nativeOrientation);
@@ -86,6 +98,7 @@ void ReaderOrientation::rotate() {
 bool ReaderOrientation::setAutomatic(bool enabled) {
     debounce.stop();
     pending = Qt::PrimaryOrientation;
+#ifndef KOBALT_NO_SENSORS
     automaticRotation = enabled && sensor;
     if (!automaticRotation && sensor && startedSensor) {
         sensor->stop();
@@ -102,6 +115,9 @@ bool ReaderOrientation::setAutomatic(bool enabled) {
         if (sensor->reading())
             filter(sensor->reading());
     }
+#else
+    automaticRotation = false;
+#endif
     return !enabled || automaticRotation;
 }
 void ReaderOrientation::setBlocked(bool value) {
@@ -109,6 +125,7 @@ void ReaderOrientation::setBlocked(bool value) {
     if (!blocked && pending != Qt::PrimaryOrientation && !debounce.isActive())
         debounce.start(0);
 }
+#ifndef KOBALT_NO_SENSORS
 bool ReaderOrientation::filter(QOrientationReading *reading) {
     if (!active)
         return true;
@@ -142,6 +159,7 @@ bool ReaderOrientation::filter(QOrientationReading *reading) {
     // Nickel keeps its connection. It receives readings again after stop().
     return false;
 }
+#endif
 void ReaderOrientation::deliver() {
     if (!active || !automaticRotation || blocked || pending == Qt::PrimaryOrientation)
         return;

@@ -672,11 +672,16 @@ private slots:
                                       "rrSettingsStats", "rrSettingsAbout"};
         for (int index = 0; index < tabNames.size(); ++index)
             QCOMPARE(panel->settingsTabButtons[index]->objectName(), tabNames[index]);
-        for (auto *option : panel->findChildren<ui::DescribedOption *>())
-            QVERIFY(option->presentation().indicator == ui::DescribedOption::Indicator::Square);
+        int optionCount = 0;
+        for (auto *widget : panel->findChildren<QWidget *>()) {
+            if (auto *option = dynamic_cast<ui::DescribedOption *>(widget)) {
+                ++optionCount;
+                QVERIFY(option->presentation().indicator == ui::DescribedOption::Indicator::Square);
+            }
+        }
         QCOMPARE(panel->smoothOption->presentation().minimumRowHeight, int(ui::metrics::chrome::listActionHeight));
         QVERIFY(!panel->findChild<QPushButton *>("rrManageDictionaries"));
-        QCOMPARE(panel->findChildren<ui::DescribedOption *>().size(), 10);
+        QCOMPARE(optionCount, 10);
         QCOMPARE(panel->bionicOption->parentWidget(), panel->settingsPages->widget(reader::DisplaySettings));
         QVERIFY(!panel->animationOption->isEnabled());
         QVERIFY(!panel->edgeLightOption->isEnabled());
@@ -831,7 +836,8 @@ private slots:
         QTRY_VERIFY(!host.session()->busy());
         QVERIFY(context);
         QVERIFY(bool(changed));
-        auto *indicator = host.window()->findChild<ui::BluetoothIndicator *>("rrMenuBluetooth");
+        auto *indicator =
+            dynamic_cast<ui::BluetoothIndicator *>(host.window()->findChild<QWidget *>("rrMenuBluetooth"));
         auto *battery = host.window()->findChild<QWidget *>("rrMenuBattery");
         QVERIFY(indicator);
         QVERIFY(battery);
@@ -1246,7 +1252,7 @@ private slots:
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         QTRY_VERIFY(!host.session()->busy());
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         const auto first = host.session()->state().value("position").toString();
         const bool rtl = host.session()->state().value("page_progression_rtl").toBool();
@@ -1954,7 +1960,7 @@ private slots:
         canvas.show();
         canvas.setUpdatesEnabled(true);
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         QVERIFY(page->topHeight() > 0);
         ui::Panel panel(host.window());
@@ -1998,7 +2004,7 @@ private slots:
         QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 2);
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() - 80, nativeSize.height() / 2)));
         QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 1);
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         // Exercise the direction delivered by the page's swipe recognizer.
         page->swiped(-1);
@@ -2080,7 +2086,7 @@ private slots:
             QTRY_COMPARE_WITH_TIMEOUT(opened.count(), count + 1, 30000);
             QTRY_VERIFY(!host.session()->busy());
             QCOMPARE(host.session()->state()["bionic_reading"].toString(), QString("bold"));
-            auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+            auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
             QVERIFY(page);
             QCOMPARE(page->showHeader, path != firstPath);
             QCOMPARE(page->showClock, path != firstPath);
@@ -2133,7 +2139,7 @@ private slots:
             QCOMPARE(weight->value(), 0);
             QVERIFY(!host.window()->findChild<QPushButton *>("rrHeavier")->isEnabled());
             QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFont")));
-            auto *sample = host.window()->findChild<ui::SampleLabel *>("rrFontChoice1Title");
+            auto *sample = dynamic_cast<ui::SampleLabel *>(host.window()->findChild<QWidget *>("rrFontChoice1Title"));
             QVERIFY(sample);
             QTRY_VERIFY(sample->isVisible());
             QCOMPARE(sample->sampleAppearance().bionic, QString::fromLatin1(value));
@@ -2153,7 +2159,8 @@ private slots:
             QVERIFY(weight->isEnabled());
             QCOMPARE(weight->value(), 3);
             QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFont")));
-            auto *normalSample = host.window()->findChild<ui::SampleLabel *>("rrFontChoice1Title");
+            auto *normalSample =
+                dynamic_cast<ui::SampleLabel *>(host.window()->findChild<QWidget *>("rrFontChoice1Title"));
             QVERIFY(normalSample);
             QTRY_VERIFY(normalSample->isVisible());
             QCOMPARE(normalSample->sampleAppearance().bionic, QString("off"));
@@ -2640,7 +2647,7 @@ private slots:
         auto *indicator = host.window()->findChild<QPushButton *>("rrLinkIndicator");
         auto *reveal = host.window()->findChild<QPushButton *>("rrRevealLinks");
         auto *panel = host.window()->findChild<QWidget *>("rrLinkDiscovery");
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(indicator && reveal && panel && page);
         QVERIFY(!host.session()->pageLinks().isEmpty());
         QVERIFY(!indicator->isVisible());
@@ -2763,7 +2770,7 @@ private slots:
         }
         QVERIFY2(!target.isEmpty(), "The links book has no passage link on its first page");
         const auto origin = host.session()->state().value("position").toString();
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         const QPoint linkPoint = page->mapTo(canvas.surface(), target.center() + QPoint(0, page->topHeight()));
         const auto holdLink = [&] {
@@ -3113,7 +3120,7 @@ private slots:
         canvas.setUpdatesEnabled(true);
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         QTRY_VERIFY(!host.session()->busy());
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         // Use a page with no bookmark from earlier tests, away from the last
         // page, where leaving the book asks whether it is finished.
@@ -3198,7 +3205,7 @@ private slots:
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         QTRY_VERIFY(!host.session()->busy());
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         QVERIFY(clickAt(canvas, page->mapTo(canvas.surface(), page->bookmarkCorner().center())));
         QWidget *error = nullptr;
@@ -3233,7 +3240,7 @@ private slots:
         // A page turn resolves the bookmark pages for this layout.
         QVERIFY(host.session()->go(1));
         QTRY_VERIFY(!host.session()->busy());
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         QTRY_VERIFY(!page->bookmarked);
         const auto corner = page->mapTo(canvas.surface(), page->bookmarkCorner().center());
@@ -3266,7 +3273,7 @@ private slots:
         canvas.setUpdatesEnabled(true);
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         QTRY_VERIFY(!host.session()->busy());
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         QVERIFY(host.session()->pages() > 6);
         QVERIFY(host.session()->go(2));
@@ -3503,7 +3510,7 @@ private slots:
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         QTRY_VERIFY(!host.session()->busy());
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         QVERIFY(!page->bookmarked);
         QVERIFY(clickAt(canvas, page->mapTo(canvas.surface(), page->bookmarkCorner().center())));
@@ -3750,7 +3757,7 @@ private slots:
         const auto stored = [&] {
             return storage::readJson(file).value("bookmarks").toArray().size();
         };
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         const int start = host.session()->page();
         // Far from the bookmarks that earlier tests leave near the start.
@@ -3917,7 +3924,7 @@ private slots:
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         QTRY_VERIFY(!host.session()->busy());
-        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        auto *page = dynamic_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         auto *notice = host.window()->findChild<QWidget *>("rrBrightnessNotice");
         QVERIFY(page);
         QVERIFY(notice);
@@ -3977,12 +3984,12 @@ private slots:
         auto *settings = host.window()->findChild<QPushButton *>("rrSettings");
         QVERIFY(settings);
         QVERIFY(click(canvas, settings));
-        auto *refresh = host.window()->findChild<ui::CaptionButton *>("rrScreenRefresh");
+        auto *refresh = dynamic_cast<ui::CaptionButton *>(host.window()->findChild<QWidget *>("rrScreenRefresh"));
         QVERIFY(refresh);
         const auto saved = storage::readJson(testPaths().preferences());
         const QString caption = refresh->caption();
         QVERIFY(click(canvas, refresh));
-        auto *popup = host.window()->findChild<ui::ModalOverlay *>("rrScreenRefreshPopup");
+        auto *popup = dynamic_cast<ui::ModalOverlay *>(host.window()->findChild<QWidget *>("rrScreenRefreshPopup"));
         QVERIFY(popup);
         QVERIFY(popup->isVisible());
         QVERIFY(clickAt(canvas, popup->mapTo(canvas.surface(), QPoint(2, 2))));
@@ -4026,7 +4033,7 @@ private slots:
         QTRY_VERIFY(!host.session()->busy());
         QVERIFY(clickAt(reopened, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
         QVERIFY(click(reopened, host.window()->findChild<QPushButton *>("rrSettings")));
-        refresh = host.window()->findChild<ui::CaptionButton *>("rrScreenRefresh");
+        refresh = dynamic_cast<ui::CaptionButton *>(host.window()->findChild<QWidget *>("rrScreenRefresh"));
         QVERIFY(refresh);
         QCOMPARE(refresh->caption(), labels.last().toUpper());
         QVERIFY(click(reopened, host.window()->findChild<QPushButton *>("rrSettings")));

@@ -1,6 +1,10 @@
 #pragma once
 #include <QJsonObject>
+#ifndef KOBALT_NO_SENSORS
 #include <QOrientationSensor>
+#else
+class QOrientationSensor;
+#endif
 #include <QPointer>
 #include <QTimer>
 #include <functional>
@@ -15,7 +19,12 @@ namespace kobalt {
 // PrimaryOrientation only without a screen.
 Qt::ScreenOrientation shownOrientation(const QScreen *screen);
 
-class ReaderOrientation : public QObject, private QOrientationFilter {
+class ReaderOrientation : public QObject
+#ifndef KOBALT_NO_SENSORS
+    ,
+                          private QOrientationFilter
+#endif
+{
 public:
     // Ownership begins before the first turn and ends after restoring the native
     // orientation. Repeated start/stop calls do not repeat ownership callbacks.
@@ -30,7 +39,11 @@ public:
     bool setAutomatic(bool enabled);
     void setBlocked(bool blocked);
     bool automaticAvailable() const {
+#ifndef KOBALT_NO_SENSORS
         return !sensor.isNull();
+#else
+        return false;
+#endif
     }
     bool automatic() const {
         return automaticRotation;
@@ -42,7 +55,9 @@ public:
 
 private:
     std::function<void(bool)> rotationOwnership;
+#ifndef KOBALT_NO_SENSORS
     QPointer<QOrientationSensor> sensor;
+#endif
     std::function<void(Qt::ScreenOrientation)> turn;
     QTimer debounce;
     Qt::ScreenOrientation manualOrientation = Qt::PortraitOrientation;
@@ -50,7 +65,9 @@ private:
     Qt::ScreenOrientation currentOrientation = Qt::PortraitOrientation;
     Qt::ScreenOrientation pending = Qt::PrimaryOrientation;
     bool active = false, blocked = false, automaticRotation = false, startedSensor = false;
+#ifndef KOBALT_NO_SENSORS
     bool filter(QOrientationReading *reading) override;
+#endif
     void deliver();
     void apply(Qt::ScreenOrientation value) {
         currentOrientation = value;

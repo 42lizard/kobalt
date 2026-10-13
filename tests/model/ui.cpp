@@ -839,7 +839,7 @@ int main(int argc, char **argv) {
         };
         note.open(details, QRect(80, 100, 150, 40), readingArea);
         QApplication::processEvents();
-        auto *text = note.findChild<kobalt::ui::PagedText *>("rrLinkText");
+        auto *text = dynamic_cast<kobalt::ui::PagedText *>(note.findChild<QWidget *>("rrLinkText"));
         auto *open = note.findChild<QPushButton *>("rrLinkOpen");
         auto *next = note.findChild<QPushButton *>("rrLinkNext");
         require(readingArea.contains(note.geometry()), "Lower note overlaps the reading footer");
@@ -1367,7 +1367,7 @@ int main(int argc, char **argv) {
         choices[3].label = "Atkinson Hyperlegible Next";
         choices[3].value = "Libron";
         picker.showChoices("Font", choices, {}, ChoiceScreen::Mode::Fonts);
-        auto *longName = picker.findChild<SampleLabel *>("font3Title");
+        auto *longName = dynamic_cast<SampleLabel *>(picker.findChild<QWidget *>("font3Title"));
         require(longName && longName->isVisible(), "Long font name is missing from the grid");
         const auto namePixels = longName->parentWidget()->grab().toImage().copy(longName->geometry());
         int nameBands = 0;
@@ -1413,7 +1413,7 @@ int main(int argc, char **argv) {
             bottom = button->geometry().bottom() + 1;
         }
         require(picker.findChild<QPushButton *>("headerLarge")->isChecked(), "Size selector lost its selected value");
-        auto *current = picker.findChild<ListRow *>("headerLarge");
+        auto *current = dynamic_cast<ListRow *>(picker.findChild<QWidget *>("headerLarge"));
         require(current && current->titleLabel()->font().pixelSize() == int(metrics::text::body),
                 "Size selector text is smaller than its control");
         const auto selectedImage = current->grab().toImage();
@@ -2357,7 +2357,7 @@ int main(int argc, char **argv) {
         reader.resize(size);
         dictionary.open("word", result, QRect(100, 100, 40, 40));
         app.processEvents();
-        auto *definition = dictionary.findChild<kobalt::ui::PagedText *>("rrDefinition");
+        auto *definition = dynamic_cast<kobalt::ui::PagedText *>(dictionary.findChild<QWidget *>("rrDefinition"));
         auto *definitionPager = dictionary.findChild<QPushButton *>("rrDictionaryNext")->parentWidget();
         require(definitionPager && definitionPager->isVisible(), "Long definition lacks its pager");
         const QRect definitionGeometry = definition->geometry();

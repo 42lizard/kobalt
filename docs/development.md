@@ -18,6 +18,28 @@ For a binary release, provide the corresponding source and dependency sources wi
 
 Build the standalone app with `python3 android/build.py` from this public checkout. Debug builds use the repository's shared debug keystore and the `com.nicoverbruggen.kobalt.debug` app ID. Release builds keep `com.nicoverbruggen.kobalt` and require an external release key for signing. It uses the shared reader components and `src/platform/android/` host services. It does not link Nickel. [Android setup](../android/README.md) includes the complete toolchain environment, debug and release builds, signing with a PKCS#12 key, APK verification and installation. Run its environment exports in the same terminal as the build commands.
 
+## PocketBook
+
+The experimental `pocketbook/` target reuses the standalone reader libraries,
+Android's Qt-only controller and start screen, and desktop's fallback services.
+Its InkView adapter and native Qt platform integration live in
+`src/platform/pocketbook/`. It does not link Nickel. The target is the InkPad
+Color 3 (PB743K3) with U743k3.6.10.2854 and its Qt 6.8.2 runtime.
+
+Use the SDK container and firmware preparation steps in the parent
+[PocketBook repository](https://github.com/42lizard/pocketbook/tree/experiment/kobalt-pocketbook/apps/kobalt).
+Inside that container, `python3 external/kobalt/pocketbook/build.py --host`
+builds the host and runs the EPUB open/page/close/reopen check. Omit `--host`
+and supply `--firmware-libs DIR` for ARM. The directory must contain the real
+Qt 6.8.2 libraries extracted from the target firmware. These are link inputs,
+never package contents. CREngine keeps its private static text libraries;
+Qt uses the firmware's shared FreeType. Qt Sensors is disabled only for this
+host because that module is absent from the inspected firmware.
+
+`cmake/StandaloneReader.cmake` is shared by the desktop and PocketBook builds.
+The existing desktop behavior and sensor support remain enabled by default.
+The public PocketBook workflow test lives in `tests/pocketbook/window_test.cpp`.
+
 ## macOS
 
 Build a local testing app on macOS 14 or later. Install the Xcode command-line tools and Python 3.9 or later. CMake, Ninja, `pkg-config` and `patch` must be on `PATH`. To keep the additional build tools inside the checkout:

@@ -110,7 +110,8 @@ def build_qt(output, jobs, cache=DEFAULT_CACHE, offline=False):
     return install
 
 
-def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False, text_only=False):
+def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False, text_only=False,
+                 png_override=None, autotools_host=None, cmake_options=()):
     """Build the pinned text dependencies and optionally CREngine for the host."""
     prefix = output / 'deps'
     specs = json.loads((ROOT / 'dependencies/manifest.json').read_text())
@@ -123,14 +124,14 @@ def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False, text_only
         environment['MACOSX_DEPLOYMENT_TARGET'] = '14.0'
     pkgconfig = prefix / 'lib/pkgconfig'
     pkgconfig.mkdir(parents=True, exist_ok=True)
-    png, png_include, png_version = bundled_png(qt) if not text_only else (None, None, None)
+    png, png_include, png_version = (png_override or bundled_png(qt)) if not text_only else (None, None, None)
     (pkgconfig / 'zlib.pc').write_text('Name: zlib\nDescription: Host zlib\nVersion: 1\nLibs: -lz\n')
     if png:
         (pkgconfig / 'libpng.pc').write_text(f'Name: libpng\nDescription: PNG from the Qt SDK\nVersion: {png_version}\n'
                                              f'Libs: {png} -lz\nCflags: -I{png_include}\n')
     common = ['-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_POSITION_INDEPENDENT_CODE=ON',
               '-DBUILD_SHARED_LIBS=OFF', '-DCMAKE_INSTALL_LIBDIR=lib', f'-DCMAKE_INSTALL_PREFIX={prefix}',
-              f'-DCMAKE_PREFIX_PATH={prefix}', '-DCMAKE_POLICY_VERSION_MINIMUM=3.5']
+              f'-DCMAKE_PREFIX_PATH={prefix}', '-DCMAKE_POLICY_VERSION_MINIMUM=3.5', *cmake_options]
     if platform.system() == 'Darwin':
         common += ['-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0', f'-DCMAKE_OSX_ARCHITECTURES={platform.machine()}']
 
@@ -148,14 +149,14 @@ def build_engine(qt, output, jobs, cache=DEFAULT_CACHE, offline=False, text_only
                '-DFT_DISABLE_BROTLI=ON', *png_options)
     dependency('harfbuzz-' + sources['harfbuzz'].name, sources['harfbuzz'], '-DHB_BUILD_UTILS=OFF', '-DHB_BUILD_SUBSET=OFF', '-DHB_BUILD_RASTER=OFF',
         '-DHB_BUILD_VECTOR=OFF', '-DHB_BUILD_GPU=OFF', '-DHB_HAVE_FREETYPE=ON')
-    build_autotools(sources['fribidi'], output / 'fribidi-autotools', prefix, jobs, environment=environment)
+    build_autotools(sources['fribidi'], output / 'fribidi-autotools', prefix, jobs, host=autotools_host, environment=environment)
     if text_only:
         return ['-DKOBALT_TEST_ENGINE=OFF', f'-DKOBALT_TEST_DEPENDENCIES={prefix}', '-DKOBALT_TEST_PNG=']
     dependency('utf8proc', sources['utf8proc'], '-DUTF8PROC_ENABLE_TESTING=OFF')
     dependency('jpeg', sources['libjpeg-turbo'], '-DENABLE_SHARED=OFF', '-DENABLE_STATIC=ON',
                '-DWITH_TURBOJPEG=OFF', '-DWITH_TOOLS=OFF', '-DWITH_TESTS=OFF')
     dependency('xxhash', sources['xxhash'] / 'cmake_unofficial', '-DXXHASH_BUILD_XXHSUM=OFF')
-    build_autotools(sources['libunibreak'], output / 'libunibreak-autotools', prefix, jobs, environment=environment)
+    build_autotools(sources['libunibreak'], output / 'libunibreak-autotools', prefix, jobs, host=autotools_host, environment=environment)
     extensions = sources['koreader-base'] / 'thirdparty/lunasvg'
     svg = patched(sources['lunasvg'], [extensions / name for name in ('cmake_tweaks.patch', 'extended.patch', 'pkgconfig.patch')], output)
     dependency('lunasvg-build-' + svg.name.rsplit('-', 1)[-1], svg, f'-DXTENDED_DIR={extensions / "xtended"}',
