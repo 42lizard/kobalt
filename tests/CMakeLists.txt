@@ -147,8 +147,11 @@ kobalt_check(resource-provider SOURCES tests/model/resource_provider.cpp src/pub
 
 # Reader widgets without an engine.
 set(KOBALT_DEPENDENCY_PREFIX "${KOBALT_TEST_DEPENDENCIES}")
-add_library(reader-fonts STATIC "${KOBALT_ROOT}/src/assets/assets.cpp" "${KOBALT_ROOT}/src/assets/bundled_fonts.cpp")
-target_link_libraries(reader-fonts PUBLIC Qt6::Gui)
+add_library(reader-fonts STATIC "${KOBALT_ROOT}/src/assets/assets.cpp" "${KOBALT_ROOT}/src/assets/bundled_fonts.cpp"
+    "${KOBALT_ROOT}/src/assets/system_fonts.cpp")
+target_link_libraries(reader-fonts PUBLIC Qt6::Gui PRIVATE ZLIB::ZLIB)
+kobalt_check(system-fonts SOURCES tests/model/system_fonts.cpp LIBRARIES reader-fonts
+    ARGUMENTS "${KOBALT_TEST_FIXTURES}/font.ttf")
 include("${KOBALT_ROOT}/cmake/EngineSources.cmake")
 kobalt_test_options(reader-fonts)
 include("${KOBALT_ROOT}/cmake/ReaderComponents.cmake")
@@ -288,7 +291,7 @@ function(kobalt_engine_check name)
     target_include_directories(${name}-check SYSTEM PRIVATE ${engine_headers})
 endfunction()
 kobalt_check(dictionary-store SOURCES tests/model/dictionary_store.cpp LIBRARIES test-reading)
-kobalt_engine_check(font-sources ARGUMENTS "${KOBALT_TEST_FIXTURES}/font.ttf")
+kobalt_engine_check(font-sources ARGUMENTS "${KOBALT_TEST_FIXTURES}/font.ttf" "${KOBALT_TEST_FIXTURES}/text.epub")
 kobalt_engine_check(reader LIBRARIES test-positions
     ARGUMENTS "${KOBALT_TEST_FIXTURES}/text.epub" "${KOBALT_TEST_FIXTURES}/color.epub")
 kobalt_engine_check(search ARGUMENTS "${KOBALT_TEST_FIXTURES}/dictionary.epub")

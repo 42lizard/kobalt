@@ -231,17 +231,33 @@ qint64 privateInterfaceFontBytes() {
         bytes += source.size();
     return bytes;
 }
-PrivateFontRegistration registerPrivateInterfaceFont(const QString &path, const QString &expectedFamily) {
+PrivateFontRegistration registerPrivateInterfaceFont(const QString &path, const QString &expectedFamily,
+                                                     bool forcePrivate) {
     auto &state = fonts();
     if (!state.library) {
         return PrivateFontRegistration::Failed;
     }
     const QString registrationKey = path + '\n' + expectedFamily;
+    QString key = state.registeredPaths.value(path);
+    if (forcePrivate && !key.isEmpty()) {
+        bool changed = false;
+        for (auto &entries : state.registered) {
+            for (auto &entry : entries) {
+                if (entry.file == key && !entry.privateOnly) {
+                    entry.privateOnly = true;
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            state.registrations.clear();
+            state.layouts.clear();
+        }
+    }
     const auto cached = state.registrations.constFind(registrationKey);
     if (cached != state.registrations.cend()) {
         return cached.value();
     }
-    QString key = state.registeredPaths.value(path);
     if (key.isEmpty()) {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > 64 * 1024 * 1024) {
@@ -276,14 +292,14 @@ PrivateFontRegistration registerPrivateInterfaceFont(const QString &path, const 
     if (!first || first->num_faces <= 0 || first->num_faces > 256) {
         return PrivateFontRegistration::Failed;
     }
-    bool privateOnly = first->num_faces > 1;
+    bool privateOnly = forcePrivate || first->num_faces > 1;
     QVector<QPair<QString, RegisteredFace>> pending;
     for (int index = 0; index < first->num_faces; ++index) {
         const auto face = state.face(key, index);
         if (!face) {
             return PrivateFontRegistration::Failed;
         }
-        const bool unsafe = first->num_faces > 1 || QByteArray(FT_Get_Font_Format(face)) != "TrueType";
+        const bool unsafe = forcePrivate || first->num_faces > 1 || QByteArray(FT_Get_Font_Format(face)) != "TrueType";
         privateOnly = privateOnly || unsafe;
         const QString family = QString::fromUtf8(face->family_name);
         const RegisteredFace entry{key, index, bool(face->style_flags & FT_STYLE_FLAG_BOLD),

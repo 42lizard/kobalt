@@ -37,9 +37,9 @@ execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/too
     --manifest "${CMAKE_CURRENT_BINARY_DIR}/asset-manifest.json" --version "${KOBALT_VERSION}"
     ${KOBALT_ASSET_OPTIONS}
     COMMAND_ERROR_IS_FATAL ANY)
-add_library(reader-fonts STATIC src/assets/bundled_fonts.cpp src/assets/assets.cpp)
+add_library(reader-fonts STATIC src/assets/bundled_fonts.cpp src/assets/assets.cpp src/assets/system_fonts.cpp)
 set_target_properties(reader-fonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(reader-fonts PUBLIC Qt${KOBALT_QT_MAJOR}::Gui)
+target_link_libraries(reader-fonts PUBLIC Qt${KOBALT_QT_MAJOR}::Gui PRIVATE z)
 include(cmake/ReaderComponents.cmake)
 kobalt_publication_library(reader-publication)
 

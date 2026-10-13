@@ -28,6 +28,7 @@ struct ReadingFont {
 struct FontSources {
     QStringList bundled;
     QString systemDirectory, sideloadDirectory, removableRoot;
+    QStringList systemFiles = {};
     bool operator==(const FontSources &other) const;
 };
 struct EngineFontInputs {

@@ -294,7 +294,10 @@ QString Reader::bookFace() {
 
 void Reader::registerPickerFonts(const QString &family) {
     const auto registerFont = [this](const QString &path, bool copyForQt, const QString &family) {
-        const auto registration = ui::registerPrivateInterfaceFont(path, family);
+        // Qt 5.2 loads another copy when registering a reading font. Its
+        // private preview face is already loaded, so keep samples on that path.
+        const auto registration =
+            ui::registerPrivateInterfaceFont(path, family, QT_VERSION < QT_VERSION_CHECK(5, 3, 0));
         if (registration == ui::PrivateFontRegistration::Native)
             registerPickerFont(path, copyForQt, registeredFontPaths, registeredFonts);
     };

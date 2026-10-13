@@ -9,7 +9,8 @@
 namespace kobalt {
 bool FontSources::operator==(const FontSources &other) const {
     return bundled == other.bundled && systemDirectory == other.systemDirectory &&
-           sideloadDirectory == other.sideloadDirectory && removableRoot == other.removableRoot;
+           sideloadDirectory == other.sideloadDirectory && removableRoot == other.removableRoot &&
+           systemFiles == other.systemFiles;
 }
 bool EngineFontInputs::operator==(const EngineFontInputs &other) const {
     return sources == other.sources && fallbackFiles == other.fallbackFiles &&
@@ -109,6 +110,9 @@ QVector<ReadingFont> discoverReadingFonts(const FontSources &sources) {
     for (const auto &path : sources.bundled)
         if (core(path))
             add(path, FontOrigin::Recommended);
+    for (const auto &path : sources.systemFiles) {
+        add(path, FontOrigin::BuiltIn);
+    }
     for (const auto &source : {qMakePair(sources.systemDirectory, FontOrigin::BuiltIn),
                                qMakePair(sources.sideloadDirectory, FontOrigin::Sideloaded)}) {
         if (source.first.isEmpty())

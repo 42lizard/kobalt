@@ -72,6 +72,37 @@ inline void checkPrivateInterfaceText(const kobalt::AssetBundle &assets) {
     readingAlias.setPixelSize(32);
     require(!needsPrivateText(QStringLiteral("Hox"), readingAlias), "Covered TrueType reading text changed backend");
     require(needsPrivateText(QStringLiteral("第一章"), readingAlias), "Reading font did not use private CJK fallback");
+    require(registerPrivateInterfaceFont(assets.file("fonts/IBMPlexSans-Regular.ttf"), "Reading Test Alias", true) ==
+                    PrivateFontRegistration::Private &&
+                needsPrivateText(QStringLiteral("Hox"), readingAlias),
+            "Forced private painting reused a cached native registration");
+    require(registerPrivateInterfaceFont(assets.file("fonts/IBMPlexSans-Regular.ttf"), "Reading Test Alias") ==
+                PrivateFontRegistration::Private,
+            "A later registration put a private preview back on the native backend");
+    QTemporaryDir readingDirectory;
+    require(readingDirectory.isValid(), "Cannot create private reading-font fixture");
+    const auto readingPath = readingDirectory.path() + "/reading.ttf";
+    require(QFile::copy(assets.file("fonts/IBMPlexSans-Regular.ttf"), readingPath),
+            "Cannot copy private reading-font fixture");
+    const auto fontFamilies = [] {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        return QFontDatabase::families();
+#else
+        return QFontDatabase().families();
+#endif
+    };
+    const auto familiesBefore = fontFamilies();
+    require(registerPrivateInterfaceFont(readingPath, "Retained Reading Test", true) ==
+                PrivateFontRegistration::Private,
+            "TrueType preview requested native Qt registration");
+    require(fontFamilies() == familiesBefore, "Private reading registration changed Qt's font database");
+    require(QFile::remove(readingPath), "Cannot remove private reading-font fixture");
+    QFont retainedReading("Retained Reading Test");
+    retainedReading.setPixelSize(32);
+    const auto retainedSample = renderPrivateText(QStringLiteral("Hox"), retainedReading);
+    require(needsPrivateText(QStringLiteral("Hox"), retainedReading) && !retainedSample.image.isNull() &&
+                retainedSample.missingGlyphs == 0,
+            "Private TrueType preview could not render after its source file was removed");
     require(registerPrivateInterfaceFont(assets.root() + "/missing-font.ttf", "Missing") ==
                 PrivateFontRegistration::Failed,
             "Missing reading font was accepted");
