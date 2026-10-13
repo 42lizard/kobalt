@@ -256,12 +256,17 @@ bool Reader::event(QEvent *event) {
                         !busyNotice->isVisible() && !syncDialog && !finishDialog && !bookmarkErrorDialog &&
                         !formattingWarningDialog && !services.suspended() &&
                         page->image.text("kobalt.animation_text_only") == "true");
-        // Text and Layout hold only text and line controls. Changes inside
-        // them can use a partial refresh; see the display flush.
+        // These panels hold text and line controls. Changes inside them can
+        // use a partial refresh; showing the whole panel keeps its policy.
+        QWidget *partialPanel = nullptr;
+        if (lightPopup->isVisible()) {
+            partialPanel = lightPopup;
+        } else if (appearanceEdit.panelOpen() && menu->isVisible() && !busyNotice->isVisible() &&
+                   !choices->isVisible()) {
+            partialPanel = menu;
+        }
         setProperty("reader_partial_controls",
-                    appearanceEdit.panelOpen() && menu->isVisible() && !busyNotice->isVisible() && !choices->isVisible()
-                        ? QRect(menu->mapTo(this, QPoint()), menu->size())
-                        : QRect());
+                    partialPanel ? QRect(partialPanel->mapTo(this, QPoint()), partialPanel->size()) : QRect());
     }
     return QWidget::event(event);
 }

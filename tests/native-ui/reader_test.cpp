@@ -5180,6 +5180,24 @@ private slots:
         QVERIFY(!host.window()->property("reader_full_flash").toBool());
         QTRY_VERIFY_WITH_TIMEOUT(notice->isHidden(), 5000);
         QVERIFY(host.window()->property("reader_full_flash").toBool());
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavLight")));
+        auto *lightPanel = host.window()->findChild<QWidget *>("rrLightPanel");
+        QVERIFY(lightPanel && lightPanel->isVisible());
+        host.window()->setProperty("reader_full_flash", false);
+        QEvent update(QEvent::UpdateRequest);
+        QApplication::sendEvent(host.window(), &update);
+        QCOMPARE(host.window()->property("reader_partial_controls").toRect(), lightPanel->geometry());
+        const QRect lightBounds = lightPanel->geometry();
+        auto *slider = lightPanel->findChild<QSlider *>("rrWarmth");
+        const int inset = ui::metrics::control::sliderInset;
+        const QPoint middle(inset + (slider->width() - 2 * inset) / 2, slider->height() / 2);
+        QTest::mousePress(slider, Qt::LeftButton, Qt::NoModifier, middle);
+        QTest::mouseMove(slider, middle + QPoint(ui::px(30), 0));
+        QVERIFY(!host.window()->property("reader_full_flash").toBool());
+        QCOMPARE(lightPanel->geometry(), lightBounds);
+        QTest::mouseRelease(slider, Qt::LeftButton, Qt::NoModifier, middle);
+        QVERIFY(!host.window()->property("reader_full_flash").toBool());
     }
     void screenRefreshChoicePersistsAndDismisses() {
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
