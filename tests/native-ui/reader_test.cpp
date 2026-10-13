@@ -5052,6 +5052,10 @@ private slots:
         QVERIFY(!page->lightStarted(true));
         QVERIFY(!page->lightStarted(false));
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        host.window()->setProperty("reader_full_flash", false);
+        QVERIFY(page->lightStarted(true));
+        page->lightFinished(false);
+        QVERIFY(!host.window()->property("reader_full_flash").toBool());
         QVERIFY(page->lightStarted(true));
         page->lightChanged(4.0 / 150);
         QCOMPARE(state.warmth, initial);
@@ -5065,6 +5069,7 @@ private slots:
         QCOMPARE(state.warmth, minimum);
         page->lightChanged(-6.0 / 150);
         QVERIFY(state.warmth < initial);
+        QVERIFY(!host.window()->property("reader_full_flash").toBool());
         QVERIFY(!state.automatic);
         QVERIFY(notice->isVisible());
         page->lightFinished(false);
@@ -5072,14 +5077,19 @@ private slots:
         QVERIFY(state.automatic);
         QCOMPARE(state.saves, 0);
         QVERIFY(notice->isHidden());
+        QVERIFY(host.window()->property("reader_full_flash").toBool());
+        host.window()->setProperty("reader_full_flash", false);
         QVERIFY(page->lightStarted(false));
         page->lightChanged(4.0 / 150);
         QCOMPARE(state.brightness, 54);
         page->lightChanged(.2);
         QCOMPARE(state.brightness, 80);
+        QVERIFY(!host.window()->property("reader_full_flash").toBool());
         page->lightFinished(false);
         QCOMPARE(state.brightness, 50);
         QVERIFY(notice->isHidden());
+        QVERIFY(host.window()->property("reader_full_flash").toBool());
+        host.window()->setProperty("reader_full_flash", false);
         state.failSave = true;
         QVERIFY(page->lightStarted(true));
         page->lightChanged(.2);
@@ -5087,13 +5097,24 @@ private slots:
         QCOMPARE(state.saves, 1);
         QCOMPARE(state.storedWarmth, initial);
         QVERIFY(!state.automatic);
+        QVERIFY(!host.window()->property("reader_full_flash").toBool());
         QTRY_VERIFY_WITH_TIMEOUT(notice->isHidden(), 5000);
+        QVERIFY(host.window()->property("reader_full_flash").toBool());
         state.failSave = false;
         QVERIFY(page->lightStarted(true));
         page->lightChanged(.1);
         page->lightFinished(true);
         QCOMPARE(state.saves, 2);
         QCOMPARE(state.storedWarmth, state.warmth);
+        QTRY_VERIFY_WITH_TIMEOUT(notice->isHidden(), 5000);
+        host.window()->setProperty("reader_full_flash", false);
+        QVERIFY(page->lightStarted(false));
+        page->lightChanged(4.0 / 150);
+        QCOMPARE(state.brightness, 54);
+        page->lightFinished(true);
+        QVERIFY(!host.window()->property("reader_full_flash").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(notice->isHidden(), 5000);
+        QVERIFY(host.window()->property("reader_full_flash").toBool());
     }
     void screenRefreshChoicePersistsAndDismisses() {
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);

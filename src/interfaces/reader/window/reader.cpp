@@ -268,6 +268,11 @@ bool Reader::event(QEvent *event) {
 
 bool Reader::eventFilter(QObject *watched, QEvent *event) {
     const auto type = event->type();
+    if (watched == brightnessNotice && type == QEvent::Hide && isVisible() && !lifecycleHidden && !closing &&
+        !exportRunning && !exitPending && !services.suspended()) {
+        requestFlash("light-swipe");
+        page->update();
+    }
     // Kobo screens have no hover. Qt still sends hover events when a touch
     // moves between widgets, and repaints any widget that tracks hover, which
     // refreshes unchanged pixels. No reader widget draws a hover state.
