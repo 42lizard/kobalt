@@ -2107,6 +2107,8 @@ private slots:
         QTRY_VERIFY(host.window()->findChild<QWidget *>("rrFontDefaultDialog"));
         QTest::mouseRelease(canvas.windowHandle(), Qt::LeftButton, Qt::NoModifier, point);
         QCOMPARE(host.session()->state()["font_face"], selected);
+        QVERIFY(!host.window()->findChild<QPushButton *>("rrFontDefaultSans"));
+        QVERIFY(!host.window()->findChild<QPushButton *>("rrFontDefaultMonospace"));
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFontDefaultCancel")));
         QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrFontDefaultDialog"));
         QVERIFY(!storage::readJson(testPaths().preferences()).contains("default_font_face"));
@@ -2164,7 +2166,7 @@ private slots:
         QCOMPARE(inspectReader(host)["preview_settings"], previewBeforeHelp);
         auto *detail = host.window()->findChild<QLabel *>("rrFontChoice0Detail");
         QVERIFY(detail);
-        QVERIFY(detail->text().contains("USES " + kobalt::test::alternateReadingLabel().toUpper()));
+        QVERIFY(detail->text().contains("USES LIBRON"));
         QCOMPARE(detail->font().pixelSize(), ui::px(18));
         QCOMPARE(QFontInfo(detail->font()).family(), QFontInfo(ui::captionFont(ui::px(18))).family());
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrFontClose")));

@@ -45,6 +45,8 @@ def write(directory, source_root=ROOT):
     publisher.book(directory / 'publisher-non-linear.epub', svg_spine=False)
     publisher.equations_book(directory / 'equations.epub')
     publisher.embedded_fonts_book(directory / 'embedded-fonts.epub', Path(source_root) / 'resources/fonts/IBMPlexSans-Regular.ttf')
+    publisher.font_families_book(directory / 'font-families.epub')
+    publisher.font_families_book(directory / 'font-families-embedded.epub', Path(source_root) / 'resources/fonts/IBMPlexSans-Regular.ttf')
     publisher.german_book(directory / 'publisher-de.epub')
     publisher.russian_book(directory / 'publisher-ru.epub')
     publisher.hyphenation_books(directory)

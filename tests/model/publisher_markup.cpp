@@ -51,18 +51,98 @@ int main(int argc, char **argv) {
                 qPrintable(error));
         require(model.embeddedFontCount() == 0, "Unembedded book reported publisher fonts");
         const auto lead = find(model, "Linear text continues");
-        require(!lead.isEmpty() && model.goTo(lead.first().start) &&
-                    model.textFontFace() == kobalt::test::alternateReadingFace(),
-                "Publisher Fonts ignored the custom fallback");
+        require(!lead.isEmpty() && model.goTo(lead.first().start) && model.textFontFace() == "Libron",
+                "The default book override changed Publisher Fonts");
         require(model.applyAppearance(kobalt::qt::object({{"default_font_face", "Libron"}})),
-                "Cannot restore publisher fallback");
+                "Cannot change default book override");
         require(model.state()["font_face"].toString().isEmpty(), "Default change replaced Publisher Fonts selection");
-        require(model.textFontFace() == "Libron", "Publisher fallback did not change");
+        require(model.textFontFace() == "Libron", "Default book override changed the fixed publisher fallback");
         const auto path =
             QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteDir().filePath("embedded-fonts.epub").toLocal8Bit();
         require(model.open(read(path.constData()), size, kobalt::qt::object({{"font_face", ""}}), &error),
                 qPrintable(error));
         require(model.embeddedFontCount() == 1, "Embedded count included styles, local aliases or missing fonts");
+    }
+
+    {
+        const auto path =
+            QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteDir().filePath("font-families.epub").toLocal8Bit();
+        kobalt::ReaderModel model(kobalt::test::readerFonts());
+        require(model.open(read(path.constData()), size, kobalt::qt::object({{"font_face", ""}}), &error),
+                qPrintable(error));
+        const auto checkFace = [&](const QString &word, const QString &expected) {
+            const auto hits = find(model, word);
+            require(hits.size() == 1, qPrintable(word + " has " + QString::number(hits.size()) + " search hits"));
+            require(model.goTo(hits.first().start), qPrintable("Cannot locate " + word));
+            require(model.textFontFace() == expected,
+                    qPrintable(word + " used " + model.textFontFace() + " instead of " + expected));
+        };
+        checkFace("Serifmarker", "Libron");
+        checkFace("Sansmarker", model.fontFaces().contains(kobalt::publisherSansFontFace)
+                                    ? QString(kobalt::publisherSansFontFace)
+                                    : QString("IBM Plex Sans"));
+        checkFace("Monomarker", "IBM Plex Mono");
+        checkFace("Namedmarker", "IBM Plex Sans");
+        require(
+            model.applyAppearance(kobalt::qt::object({{"default_font_face", kobalt::test::alternateReadingFace()}})),
+            "Cannot change the default book override");
+        checkFace("Serifmarker", "Libron");
+        checkFace("Sansmarker", model.fontFaces().contains(kobalt::publisherSansFontFace)
+                                    ? QString(kobalt::publisherSansFontFace)
+                                    : QString("IBM Plex Sans"));
+        checkFace("Monomarker", "IBM Plex Mono");
+        checkFace("Namedmarker", "IBM Plex Sans");
+        const auto saved = model.state();
+        require(model.open(read(path.constData()), size, saved, &error), qPrintable(error));
+        checkFace("Serifmarker", "Libron");
+        checkFace("Sansmarker", model.fontFaces().contains(kobalt::publisherSansFontFace)
+                                    ? QString(kobalt::publisherSansFontFace)
+                                    : QString("IBM Plex Sans"));
+        require(model.applyAppearance(kobalt::qt::object({{"font_face", kobalt::test::alternateReadingFace()}})),
+                "Cannot select an explicit reading font");
+        QVector<QImage> explicitPages;
+        for (int page = 0; page < model.pages(); ++page) {
+            explicitPages.append(model.image(page));
+        }
+        checkFace("Serifmarker", kobalt::test::alternateReadingFace());
+        checkFace("Sansmarker", kobalt::test::alternateReadingFace());
+        checkFace("Namedmarker", kobalt::test::alternateReadingFace());
+        require(model.applyAppearance(kobalt::qt::object({{"default_font_face", "Libron"}})),
+                "Cannot change the default alongside an explicit reading font");
+        require(model.pages() == explicitPages.size(), "Default changes repaginated an explicit override");
+        for (int page = 0; page < model.pages(); ++page) {
+            require(model.image(page) == explicitPages[page], "Default changes replaced an explicit override");
+        }
+        require(model.open(read(path.constData()), size,
+                           kobalt::qt::object({{"font_face", "Missing face"},
+                                               {"default_font_face", kobalt::test::alternateReadingFace()}}),
+                           &error),
+                qPrintable(error));
+        require(model.fontFace() == kobalt::test::alternateReadingFace(),
+                "Missing explicit reading font ignored the default book override");
+        const auto embeddedPath = QFileInfo(QString::fromLocal8Bit(argv[1]))
+                                      .absoluteDir()
+                                      .filePath("font-families-embedded.epub")
+                                      .toLocal8Bit();
+        require(model.open(read(embeddedPath.constData()), size, kobalt::qt::object({{"font_face", ""}}), &error),
+                qPrintable(error));
+        require(model.embeddedFontCount() == 1, "Embedded fixture did not register its font");
+        QVector<QImage> originalPages;
+        for (int page = 0; page < model.pages(); ++page) {
+            originalPages.append(model.image(page));
+        }
+        require(
+            model.applyAppearance(kobalt::qt::object({{"default_font_face", kobalt::test::alternateReadingFace()}})),
+            "Cannot save defaults while publisher fonts are present");
+        require(model.pages() == originalPages.size(), "Defaults repaginated a book with embedded fonts");
+        for (int page = 0; page < model.pages(); ++page) {
+            require(model.image(page) == originalPages[page], "Defaults changed a book with embedded fonts");
+        }
+        require(model.go(0), "Cannot locate embedded book preview");
+        kobalt::ReaderModel preview(kobalt::test::readerFonts());
+        require(preview.openPreview(model, size, &error), qPrintable(error));
+        require(preview.embeddedFontCount() == 1 && preview.image(0) == model.image(0),
+                "Preview lost the full publication's embedded-font gate");
     }
 
     {

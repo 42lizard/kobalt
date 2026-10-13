@@ -2,6 +2,8 @@
 
 ### What's changed
 
+- Publisher Fonts uses Libron for serif, Legible Next for sans-serif and IBM Plex Mono for monospace when the book has no embedded fonts. The default reading font remains a separate book override.
+
 - Added hyphenation dictionaries for Estonian, Finnish, Georgian, Hungarian, Latvian, Lithuanian, Polish, Slovak, Slovenian and Ukrainian.
 
 - Page buttons now page Chapters, Bookmarks, search results and licenses instead of being ignored. This can be managed via the "Hide non-linear fragments" setting.

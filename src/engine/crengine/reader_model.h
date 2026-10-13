@@ -24,6 +24,8 @@ namespace kobalt {
 namespace nickel {
 class NickelPositionCodec;
 }
+// Fixed sans-serif fallback for publisher books without embedded fonts.
+inline constexpr auto publisherSansFontFace = "NV Legible Next";
 // Bundled face for the generic monospace family.
 inline constexpr auto monospaceFontFace = "IBM Plex Mono";
 // Bundled faces, in order, for characters that the reading font lacks.
@@ -253,6 +255,7 @@ private:
     bool openSource(std::shared_ptr<ReaderSource> source, QSize size, const QJsonObject &saved, QString *error,
                     OpeningProgress progress = {}, OpeningResult *result = nullptr);
     void trim();
+    void applyPublisherFontFallbacks();
     void applyStyleSheet();
     void configure(QSize size, const QJsonObject &saved);
 };

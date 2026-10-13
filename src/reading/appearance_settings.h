@@ -45,7 +45,8 @@ bool same(const QJsonObject &a, const QJsonObject &b);
 QJsonObject typographyDefaults();
 // Empty for every identity except the benchmark-owned EPUB.
 QJsonObject benchmarkTypography(const QString &identity);
-// A global default changes new books and publisher fallback, not a saved selection.
+// A global default selects the override for new books, not Publisher Fonts.
+// Existing saved book selections stay unchanged.
 void applyFontDefault(QJsonObject &saved, const QJsonObject &preferences);
 }
 }

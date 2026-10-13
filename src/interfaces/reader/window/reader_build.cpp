@@ -1124,10 +1124,11 @@ void Reader::showFontPicker() {
     if (defaultIndex < 0)
         defaultFace = kobalt::defaultFontFace;
     const int embedded = state.value("embedded_font_count").toInt();
-    items[0].detail = embedded > 0 ? (embedded == 1 ? strings::get("reader.one_embedded_font")
-                                                    : strings::get("reader.embedded_fonts").arg(embedded))
-                                   : strings::get("reader.no_embedded_fonts") + '\n' +
-                                         strings::get("reader.uses_default_font").arg(fontDisplayName(defaultFace));
+    items[0].detail = embedded > 0
+                          ? (embedded == 1 ? strings::get("reader.one_embedded_font")
+                                           : strings::get("reader.embedded_fonts").arg(embedded))
+                          : strings::get("reader.no_embedded_fonts") + '\n' +
+                                strings::get("reader.uses_default_font").arg(fontDisplayName(kobalt::defaultFontFace));
     if (items.size() > 1)
         items[1].detail = (defaultFace == kobalt::defaultFontFace ? strings::get("reader.default_font") : QString());
     if (defaultIndex > 1)

@@ -468,7 +468,7 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
                           lString8(QString("|||||%1|||").arg(monospaceFontFace).toUtf8().constData()));
     engine_->propsApply(properties);
     engine_->setViewMode(DVM_PAGES, 1);
-    engine_->setDefaultFontFace(lString8((face_.isEmpty() ? defaultFace_ : face_).toUtf8().constData()));
+    engine_->setDefaultFontFace(lString8((face_.isEmpty() ? QString(defaultFontFace) : face_).toUtf8().constData()));
     engine_->setFontSize(pixels_);
     // CSS sets the line height; the engine must not multiply it again.
     engine_->setDefaultInterlineSpace(100);
@@ -652,7 +652,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
         properties->setInt(PROP_FONT_BASE_WEIGHT, LVRendGetBaseFontWeight());
         engine_->propsApply(properties);
         engine_->requestRender();
-        engine_->setDefaultFontFace(lString8((face.isEmpty() ? defaultFace_ : face).toUtf8().constData()));
+        applyPublisherFontFallbacks();
         engine_->setPageMargins(lvRect(margin, topMargin, margin, bottomMargin));
         engine_->setFontSize(pixels);
         engine_->setDefaultInterlineSpace(100);
@@ -705,6 +705,17 @@ bool ReaderModel::setOpticalSize(double points) {
 }
 bool ReaderModel::setHyphenation(const QString &mode) {
     return applyAppearance(kobalt::qt::object({{"hyphenation", mode}}));
+}
+void ReaderModel::applyPublisherFontFallbacks() {
+    const bool useFallbacks = face_.isEmpty() && embeddedFontCount() == 0;
+    const auto sansFace = fontFaces().contains(publisherSansFontFace) ? publisherSansFontFace : "IBM Plex Sans";
+    const auto families = useFallbacks ? QString("|%1|%2|||%3|||").arg(defaultFontFace, sansFace, monospaceFontFace)
+                                       : QString("|||||%1|||").arg(monospaceFontFace);
+    auto properties = LVCreatePropsContainer();
+    properties->setString(PROP_FONT_FAMILY_FACES, lString8(families.toUtf8().constData()));
+    engine_->propsApply(properties);
+    const auto fallback = QString::fromLatin1(defaultFontFace);
+    engine_->setDefaultFontFace(lString8((face_.isEmpty() ? fallback : face_).toUtf8().constData()));
 }
 void ReaderModel::applyStyleSheet() {
     QString overrides = "html,body,DocFragment { margin:0 !important; padding:0 !important; }\n";
@@ -1077,6 +1088,9 @@ QString ReaderModel::textFontFace() const {
     return font.isNull() ? QString() : QString::fromUtf8(font->getTypeFace().c_str());
 }
 int ReaderModel::embeddedFontCount() const {
+    if (source_ && source_->embeddedFonts >= 0) {
+        return source_->embeddedFonts;
+    }
     if (!engine_ || !engine_->getDocument())
         return 0;
     auto *document = engine_->getDocument();
