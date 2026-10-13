@@ -136,6 +136,8 @@ Kobalt also reports reading sessions and page turns to Nickel, so Nickel's readi
 
 ## Reading interface
 
+Normal page turns include non-linear EPUB sections, including covers marked as non-linear. Settings > Advanced > Hide non-linear fragments skips other non-linear sections during page turns. It is off by default. Links, Chapters and page-number navigation can still open hidden sections; page turns within a section already open remain available.
+
 Reader buttons keep their keyboard focus behavior without drawing a native focus frame. A held bottom tab uses the same continuous fill as a selected tab.
 
 The Light panel includes an edge-swipe tip below its controls. It explains brightness on the left edge and adds warmth on the right edge only when the device supports adjustable warmth. Layout uses Horizontal margins and Vertical margins; slider labels wrap when needed on smaller screens. Both margin controls use steps of 3 in the unchanged 0 to 120 range, measured at 300 ppi and scaled for the screen.

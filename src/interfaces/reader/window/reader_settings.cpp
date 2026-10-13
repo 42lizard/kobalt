@@ -77,6 +77,7 @@ void Reader::openSettings() {
     settingsError->hide();
     darkOption->setChecked(model->state().value("dark_mode").toBool(false));
     smoothOption->setChecked(model->state().value("smooth_images").toBool(true));
+    hideNonlinearOption->setChecked(model->state().value("hide_nonlinear_fragments").toBool(false));
     progressOption->setChecked(page->showProgress);
     animationOption->setChecked(preferences.value("page_animations").toBool(false));
     bionicOption->setChecked(model->state().value("bionic_reading").toString("off") == "bold");
@@ -127,6 +128,7 @@ void Reader::applySettings() {
     next["bionic_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
     next["dark_mode"] = darkOption->isChecked();
     next["smooth_images"] = smoothOption->isChecked();
+    next["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
     next["show_progress_bar"] = progressOption->isChecked();
     next["page_animations"] = animationOption->isChecked();
     next["show_link_indicator"] = linkIndicatorOption->isChecked();
@@ -180,6 +182,7 @@ void Reader::applySettings() {
         appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview()->requestedState() : model->state();
     settings["dark_mode"] = darkOption->isChecked();
     settings["smooth_images"] = smoothOption->isChecked();
+    settings["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
     settings["bionic_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
     if (restoringDefaults) {
         const auto defaults = kobalt::appearance::typographyDefaults();

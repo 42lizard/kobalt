@@ -884,6 +884,7 @@ void Reader::buildSettings() {
     pinStatsOption = settings->pinStatsOption;
     heavierTextOption = settings->heavierTextOption;
     linkIndicatorOption = settings->linkIndicatorOption;
+    hideNonlinearOption = settings->hideNonlinearOption;
     bionicOption = settings->bionicOption;
     refreshButton = settings->refreshButton;
     resetDefaults = settings->resetDefaults;

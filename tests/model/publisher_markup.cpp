@@ -155,7 +155,17 @@ int main(int argc, char **argv) {
         require(second.contains("Note two stands alone.") && !second.contains("Closingword"),
                 "A note ran past the next heading");
 
-        // Page turns skip the footnote aside and the non-linear spine item.
+        require(!model.state().value("hide_nonlinear_fragments").toBool(),
+                "Non-linear fragments are hidden by default");
+        for (int page = 0; page < model.pages(); ++page) {
+            require(model.turnTarget(page, 1) == qMin(page + 1, model.pages() - 1),
+                    "Default forward paging skipped a physical page");
+            require(model.turnTarget(page, -1) == qMax(page - 1, 0), "Default backward paging skipped a physical page");
+        }
+        require(model.applyAppearance(kobalt::qt::object({{"hide_nonlinear_fragments", true}})),
+                "Cannot enable hiding non-linear fragments");
+        require(model.state().value("hide_nonlinear_fragments").toBool(), "Hiding setting was not retained");
+        // Hiding skips the footnote aside and the non-linear spine item.
         int page = 0;
         QStringList seen;
         bool checkedSkippedCache = false;
@@ -194,6 +204,9 @@ int main(int argc, char **argv) {
         const auto aside = find(model, "Asidetext");
         require(aside.size() == 1 && model.goTo(aside.first().start), "The footnote aside cannot be opened directly");
         require(model.turnTarget(model.page(), 1) != model.page(), "A turn inside a non-linear section is stuck");
+        require(model.applyAppearance(kobalt::qt::object({{"hide_nonlinear_fragments", false}})),
+                "Cannot disable hiding non-linear fragments");
+        require(model.turnTarget(1, -1) == 0, "Cannot turn back to the first physical page");
         require(model.state().value("dom_version").toInt() > 20260000, "A new book does not record its DOM version");
     }
     {

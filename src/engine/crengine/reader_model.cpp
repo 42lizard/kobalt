@@ -385,6 +385,7 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     size_ = size;
     darkMode_ = saved.value("dark_mode").toBool(false);
     smoothImages_ = saved.value("smooth_images").toBool(true);
+    hideNonlinearFragments_ = saved.value("hide_nonlinear_fragments").toBool(false);
     pixels_ = qBound(minimumFontPixels(), saved.value("font_pixels").toInt(defaultFontPixels()), maximumFontPixels());
     spacing_ = qBound(100, saved.value("line_spacing").toInt(defaultLineSpacing), maximumLineSpacing);
     margin_ = qBound(0, saved.value("margin_pixels").toInt(defaultMarginPixels()), maximumMarginPixels());
@@ -546,8 +547,9 @@ int ReaderModel::turnTarget(int from, int delta) const {
     int page = from;
     for (int turns = qAbs(delta); turns > 0; --turns) {
         int next = page + step;
-        // Stay in the linear text or in the non-linear section already open.
-        while (next >= 0 && next < pages() && engine_->getPageFlow(next) != 0 && engine_->getPageFlow(next) != flow)
+        // When hiding, stay in the linear text or the non-linear section already open.
+        while (hideNonlinearFragments_ && next >= 0 && next < pages() && engine_->getPageFlow(next) != 0 &&
+               engine_->getPageFlow(next) != flow)
             next += step;
         if (next < 0 || next >= pages())
             break;
@@ -604,6 +606,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     const auto hyphenation = settings.value("hyphenation").toString(hyphenation_);
     const bool dark = settings.value("dark_mode").toBool(darkMode_);
     const bool smooth = settings.value("smooth_images").toBool(smoothImages_);
+    const bool hideNonlinear = settings.value("hide_nonlinear_fragments").toBool(hideNonlinearFragments_);
     if (!engine_ || pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 ||
         spacing > maximumLineSpacing || margin < 0 || margin > maximumMarginPixels() || topMargin < 0 ||
         topMargin > maximumMarginPixels() || bottomMargin < 0 || bottomMargin > maximumMarginPixels() || weight < 0 ||
@@ -621,7 +624,8 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
                         face != face_ || defaultFace != defaultFace_ || margin != margin_ || topMargin != topMargin_ ||
                         bottomMargin != bottomMargin_ || alignment != alignment_ || hyphenation != hyphenation_;
     const bool resized = size != size_;
-    if (!styled && !resized && weight == weight_ && dark == darkMode_ && smooth == smoothImages_)
+    if (!styled && !resized && weight == weight_ && dark == darkMode_ && smooth == smoothImages_ &&
+        hideNonlinear == hideNonlinearFragments_)
         return true;
     const QString anchor = position();
     OpeningCallback callback(engine_, std::move(progress));
@@ -641,6 +645,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     darkMode_ = dark;
     activateFontParameters();
     smoothImages_ = smooth;
+    hideNonlinearFragments_ = hideNonlinear;
     if (styled) {
         setExtraFontWeight(0);
         auto properties = LVCreatePropsContainer();
@@ -1105,6 +1110,7 @@ QJsonObject ReaderModel::state() const {
                                {"hyphenation", hyphenation_},
                                {"dark_mode", darkMode_},
                                {"smooth_images", smoothImages_},
+                               {"hide_nonlinear_fragments", hideNonlinearFragments_},
                                {"dom_version", domVersion_},
                                {"page_progression_rtl", engine_ && engine_->getDocument()->getProps()->getStringDef(
                                                                        "doc.page-progression-direction") == U"rtl"},

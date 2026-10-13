@@ -85,8 +85,8 @@ public:
     QJsonObject resourceStats() const;
     bool openPreview(ReaderModel &source, QSize size, QString *error);
     bool go(int page);
-    // The page that `delta` page turns from `from` reach. Turns skip non-linear
-    // sections unless `from` is in that section. Returns `from` at either end.
+    // The page that `delta` page turns from `from` reach. When hiding is enabled,
+    // skip other non-linear sections. Returns `from` at either end.
     int turnTarget(int from, int delta) const;
     bool goTo(const QString &position);
     QString platformPosition(const PositionCodec &codec, QString *error) const;
@@ -242,7 +242,7 @@ private:
     int domVersion_ = 0;
     QString hyphenation_ = "off";
     bool darkMode_ = false;
-    bool smoothImages_ = true;
+    bool smoothImages_ = true, hideNonlinearFragments_ = false;
     QMap<int, QImage> cache_;
     // One retired page, owned only by this model. Never retain client images.
     QImage spareImage_;

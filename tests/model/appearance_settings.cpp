@@ -10,18 +10,19 @@ using namespace kobalt;
 int main() {
     // Appearance settings decide the layout. The list must stay complete, because a
     // missing key would let a retained layout survive a changed setting.
-    require(appearance::keys.size() == 16, "The appearance keys changed without this check");
+    require(appearance::keys.size() == 17, "The appearance keys changed without this check");
 
     const auto from = qt::object({{"font_pixels", 40},
                                   {"line_spacing", QJsonValue(QJsonValue::Null)},
                                   {"font_face", "Libron"},
                                   {"dark_mode", true},
+                                  {"hide_nonlinear_fragments", true},
                                   {"show_header", false}});
     auto to =
         qt::object({{"font_pixels", 30}, {"margin_pixels", 12}, {"hyphenation", "on"}, {"page_animations", true}});
     appearance::copy(to, from);
     require(to.value("font_pixels").toInt() == 40 && to.value("font_face").toString() == "Libron" &&
-                to.value("dark_mode").toBool(),
+                to.value("dark_mode").toBool() && to.value("hide_nonlinear_fragments").toBool(),
             "Copy lost an appearance value");
     // A null value stays null, and a key the source lacks is removed, so the
     // engine applies its own default instead of an old value.
@@ -99,6 +100,10 @@ int main() {
     auto newDefault = from;
     newDefault["default_font_face"] = QStringLiteral("NV Ancizar Serif");
     require(!appearance::same(newDefault, from), "Default changes did not invalidate the layout");
+
+    auto hidden = from;
+    hidden["hide_nonlinear_fragments"] = false;
+    require(!appearance::same(hidden, from), "Non-linear paging changes did not invalidate the retained model");
 
     const auto global = qt::object(
         {{"show_clock", true}, {"header_text_size", "small"}, {"bionic_reading", "bold"}, {"page_animations", true}});

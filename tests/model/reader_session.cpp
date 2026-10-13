@@ -966,6 +966,14 @@ int run(int argc, char **argv) {
                 if (!absolute->busy())
                     opened.quit();
             };
+            require(absolute->go(nonLinearPage - 1), "Cannot go before the non-linear section");
+            opened.exec();
+            require(absolute->nextPage() == nonLinearPage, "Default paging skipped a non-linear section");
+            require(absolute->turn(1), "Cannot turn into the non-linear section");
+            opened.exec();
+            require(absolute->page() == nonLinearPage, "Default turn skipped a non-linear section");
+            absolute->apply(kobalt::qt::object({{"hide_nonlinear_fragments", true}}));
+            opened.exec();
             require(absolute->go(0), "Cannot go to the first physical page");
             opened.exec();
             while (absolute->nextPage() <= nonLinearPage) {

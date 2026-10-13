@@ -130,6 +130,10 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
     linkIndicatorOption = check(advancedPage, "rrShowLinkIndicator", strings::get("reader.show_link_indicator"),
                                 strings::get("reader.link_indicator_description"));
     advancedRows->addWidget(linkIndicatorOption);
+    hideNonlinearOption =
+        check(advancedPage, "rrHideNonlinearFragments", strings::get("reader.hide_nonlinear_fragments"),
+              strings::get("settings.hide_nonlinear_fragments_description"));
+    advancedRows->addWidget(hideNonlinearOption);
     const bool lightSupported = inputs.lightSupported;
     edgeLightOption = check(advancedPage, "rrEdgeLight", strings::get("reader.edge_light"),
                             !lightSupported          ? strings::get("settings.unsupported_description")
@@ -311,9 +315,9 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
         settingsTabButtons[index == NativeUiSettings ? 5 : index]->setChecked(true);
     });
     settingsTabButtons.first()->setChecked(true);
-    QVector<ui::DescribedOption *> options = {linkIndicatorOption, darkOption,    progressOption,  bionicOption,
-                                              animationOption,     smoothOption,  edgeLightOption, heavierTextOption,
-                                              denseGraphOption,    pinStatsOption};
+    QVector<ui::DescribedOption *> options = {hideNonlinearOption, linkIndicatorOption, darkOption,    progressOption,
+                                              bionicOption,        animationOption,     smoothOption,  edgeLightOption,
+                                              heavierTextOption,   denseGraphOption,    pinStatsOption};
     if (inputs.desktopUi)
         options << hideStatusOption << hideDeviceOptionsOption;
     for (auto *option : options) {
