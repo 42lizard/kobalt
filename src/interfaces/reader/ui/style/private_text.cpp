@@ -22,6 +22,7 @@
 #include FT_FREETYPE_H
 #include FT_OUTLINE_H
 #include FT_FONT_FORMATS_H
+#include FT_TRUETYPE_TABLES_H
 #include <fribidi.h>
 #include <hb-ft.h>
 #include <hb.h>
@@ -348,7 +349,10 @@ bool needsPrivateText(const QString &text, const QFont &font) {
     return false;
 }
 static PrivateText layoutPrivateText(const QString &input, const QFont &font, int weight,
-                                     const QVector<QPair<int, int>> &boldRanges, bool rasterize) {
+                                     const QVector<QPair<int, int>> &boldRanges, bool rasterize,
+                                     const QVector<QPair<int, int>> &underlineRanges = {},
+                                     PrivateTextEmphasis emphasis = PrivateTextEmphasis::Synthetic,
+                                     Qt::LayoutDirection direction = Qt::LayoutDirectionAuto) {
     QString text = input;
     if (font.capitalization() == QFont::AllUppercase) {
         text = text.toUpper();
@@ -368,6 +372,10 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
     for (const auto &range : boldRanges) {
         cacheKey += ':' + QString::number(range.first) + ',' + QString::number(range.second);
     }
+    cacheKey += ":underline:" + QString::number(int(emphasis)) + ':' + QString::number(int(direction));
+    for (const auto &range : underlineRanges) {
+        cacheKey += ':' + QString::number(range.first) + ',' + QString::number(range.second);
+    }
     cacheKey += ':' + text;
     if (const auto *cached = fonts().layouts.object(cacheKey)) {
         return *cached;
@@ -382,13 +390,18 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
     }
     QVector<FriBidiLevel> levels(count);
     QVector<FriBidiStrIndex> logicalToVisual(count);
-    FriBidiParType base = FRIBIDI_PAR_ON;
+    FriBidiParType base = direction == Qt::RightToLeft   ? FRIBIDI_PAR_RTL
+                          : direction == Qt::LeftToRight ? FRIBIDI_PAR_LTR
+                                                         : FRIBIDI_PAR_ON;
     if (!fribidi_log2vis(characters.constData(), count, &base, nullptr, logicalToVisual.data(), nullptr,
                          levels.data())) {
         return result;
     }
     std::vector<Run> runs;
     const auto primary = primaryFace(font);
+    QFont boldFont = font;
+    boldFont.setWeight(QFont::Bold);
+    const auto boldPrimary = emphasis == PrivateTextEmphasis::FontFace ? primaryFace(boldFont) : primary;
     QVector<FT_Face> characterFaces(count, nullptr);
     QTextBoundaryFinder boundaries(QTextBoundaryFinder::Grapheme, text);
     boundaries.toStart();
@@ -409,9 +422,16 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
             }
             return true;
         };
-        FT_Face face = primary;
+        FT_Face requested = primary;
+        for (const auto &range : boldRanges) {
+            if (start >= range.first && start < range.first + range.second) {
+                requested = boldPrimary;
+                break;
+            }
+        }
+        FT_Face face = requested;
         if (!covers(face)) {
-            face = faceFor(cluster.first(), QChar::script(cluster.first()), primary);
+            face = faceFor(cluster.first(), QChar::script(cluster.first()), requested);
             if (!covers(face)) {
                 QStringList files = fonts().pending.keys();
                 for (const auto &file : fonts().sources.keys())
@@ -454,8 +474,10 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
     });
     const int pixels = font.pixelSize() > 0 ? font.pixelSize() : 32;
     QVector<Glyph> glyphs;
+    QVector<QRect> underlines;
     QRect bounds;
     qint64 pen = 0;
+    int maximumLineDescent = 0;
     uint previousCluster = uint(-1);
     for (const auto &run : runs) {
         if (FT_Set_Pixel_Sizes(run.face, qMax(1, pixels * (font.stretch() > 0 ? font.stretch() : 100) / 100), pixels)) {
@@ -463,6 +485,18 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
         }
         result.height =
             qMax(result.height, int((run.face->size->metrics.ascender - run.face->size->metrics.descender + 63) / 64));
+        int lineAscent = int((run.face->size->metrics.ascender + 63) / 64);
+        int lineDescent = int((-run.face->size->metrics.descender + 63) / 64);
+        // Older Qt uses the horizontal header for document line boxes. Keep
+        // excerpt baselines and spacing when FreeType selects OS/2 typo metrics.
+        const auto *header = static_cast<const TT_HoriHeader *>(FT_Get_Sfnt_Table(run.face, ft_sfnt_hhea));
+        if (header && header->Ascender > 0 && header->Descender <= 0) {
+            lineAscent = int((FT_MulFix(header->Ascender, run.face->size->metrics.y_scale) + 63) / 64);
+            lineDescent = int((-FT_MulFix(header->Descender, run.face->size->metrics.y_scale) + 63) / 64);
+        }
+        result.lineAscent = qMax(result.lineAscent, lineAscent);
+        maximumLineDescent = qMax(maximumLineDescent, lineDescent);
+        result.lineHeight = result.lineAscent + maximumLineDescent;
         hb_font_t *hbFont = hb_ft_font_create_referenced(run.face);
         hb_ft_font_set_load_flags(hbFont, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
         hb_buffer_t *buffer = hb_buffer_create();
@@ -471,8 +505,8 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
         hb_buffer_set_direction(buffer, run.level & 1 ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
         hb_feature_t features[3];
         hb_feature_from_string(font.kerning() ? "kern=1" : "kern=0", -1, &features[0]);
-        const bool separateLetters =
-            !boldRanges.isEmpty() || (font.letterSpacingType() == QFont::AbsoluteSpacing && font.letterSpacing() != 0);
+        const bool separateLetters = !boldRanges.isEmpty() || !underlineRanges.isEmpty() ||
+                                     (font.letterSpacingType() == QFont::AbsoluteSpacing && font.letterSpacing() != 0);
         if (separateLetters) {
             hb_feature_from_string("liga=0", -1, &features[1]);
             hb_feature_from_string("clig=0", -1, &features[2]);
@@ -495,8 +529,28 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
                     break;
                 }
             }
+            if (emphasis == PrivateTextEmphasis::FontFace && (run.face->style_flags & FT_STYLE_FLAG_BOLD)) {
+                bold = false;
+            }
             if (!info[i].codepoint) {
                 ++result.missingGlyphs;
+            }
+            if (rasterize) {
+                for (const auto &range : underlineRanges) {
+                    if (utf16Offsets[int(info[i].cluster)] >= range.first &&
+                        utf16Offsets[int(info[i].cluster)] < range.first + range.second) {
+                        const int position = qMax(
+                            1, int(-FT_MulFix(run.face->underline_position, run.face->size->metrics.y_scale) / 64));
+                        const int thickness = qMax(
+                            1,
+                            int((FT_MulFix(run.face->underline_thickness, run.face->size->metrics.y_scale) + 63) / 64));
+                        const QRect underline(int(pen / 64), position, qMax(1, int((positions[i].x_advance + 63) / 64)),
+                                              thickness);
+                        bounds = bounds.united(underline);
+                        underlines.append(underline);
+                        break;
+                    }
+                }
             }
             if (rasterize && pen < 16384 * 64 &&
                 !FT_Load_Glyph(run.face, info[i].codepoint, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP)) {
@@ -562,10 +616,14 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
         return result;
     }
     result.image = QImage(bounds.size(), QImage::Format_ARGB32_Premultiplied);
+    result.origin = bounds.topLeft();
     result.image.fill(Qt::transparent);
     QPainter painter(&result.image);
     for (const auto &glyph : glyphs) {
         painter.drawImage(glyph.position - bounds.topLeft(), glyph.mask);
+    }
+    for (const auto &underline : underlines) {
+        painter.fillRect(underline.translated(-bounds.topLeft()), Qt::black);
     }
     painter.end();
     const int cost = qMax(1, (result.image.bytesPerLine() * result.image.height() + cacheKey.size() * 2 + 1023) / 1024);
@@ -575,11 +633,18 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
     return result;
 }
 PrivateText renderPrivateText(const QString &text, const QFont &font, int weight,
-                              const QVector<QPair<int, int>> &boldRanges) {
-    return layoutPrivateText(text, font, weight, boldRanges, true);
+                              const QVector<QPair<int, int>> &boldRanges,
+                              const QVector<QPair<int, int>> &underlineRanges, PrivateTextEmphasis emphasis,
+                              Qt::LayoutDirection direction) {
+    return layoutPrivateText(text, font, weight, boldRanges, true, underlineRanges, emphasis, direction);
 }
-int measurePrivateText(const QString &text, const QFont &font, const QVector<QPair<int, int>> &boldRanges) {
-    return layoutPrivateText(text, font, -1, boldRanges, false).advance;
+int measurePrivateText(const QString &text, const QFont &font, const QVector<QPair<int, int>> &boldRanges,
+                       PrivateTextEmphasis emphasis, Qt::LayoutDirection direction) {
+    return layoutPrivateText(text, font, -1, boldRanges, false, {}, emphasis, direction).advance;
+}
+PrivateText measurePrivateTextLayout(const QString &text, const QFont &font, const QVector<QPair<int, int>> &boldRanges,
+                                     PrivateTextEmphasis emphasis, Qt::LayoutDirection direction) {
+    return layoutPrivateText(text, font, -1, boldRanges, false, {}, emphasis, direction);
 }
 QSize measurePrivateTextSize(const QString &text, const QFont &font) {
     const auto measured = layoutPrivateText(text, font, -1, {}, false);

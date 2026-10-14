@@ -12,7 +12,6 @@
 #include <QGuiApplication>
 #include <QInputMethod>
 #include <QPainter>
-#include <QTextDocument>
 #include <QtMath>
 
 namespace kobalt {
@@ -234,17 +233,13 @@ void SearchPanel::redraw() {
     if (!rowHeight || measuredWidth != width()) {
         measuredWidth = width();
         // Room for two excerpt lines, or for a long bold match on its own.
-        QTextDocument measure;
-        measure.setDocumentMargin(0);
-        measure.setDefaultFont(font);
-        measure.setTextWidth(textWidth);
         QStringList sample;
         for (int line = 0; line < m::search::excerptLines; ++line)
             sample.append("M");
-        measure.setHtml(excerptBlock.arg(sample.join("<br>")));
-        qreal lines = measure.size().height();
-        measure.setHtml(excerptBlock.arg("<b><u>" + submittedQuery.toHtmlEscaped() + "</u></b>"));
-        lines = qMax(lines, measure.size().height());
+        qreal lines = ui::excerptTextHeight(excerptBlock.arg(sample.join("<br>")), font, textWidth);
+        lines =
+            qMax(lines, ui::excerptTextHeight(excerptBlock.arg("<b><u>" + submittedQuery.toHtmlEscaped() + "</u></b>"),
+                                              font, textWidth));
         rowHeight = qMax(int(m::list::threeLines), m::search::excerptTop + qCeil(lines) + m::search::rowBottom);
     }
     const bool returning = canReturn && !hits.isEmpty();
@@ -349,17 +344,12 @@ void SearchPanel::redraw() {
                                     (after.isEmpty() ? QString() : after.toHtmlEscaped() + QStringLiteral("…")));
         };
         // Trim context, never the match, using the same rich-text width as the label.
-        QTextDocument document;
-        document.setDocumentMargin(0);
-        document.setDefaultFont(font);
-        document.setTextWidth(labels[row]->width());
-        document.setHtml(excerpt());
-        while (document.size().height() > labels[row]->height() && (!before.isEmpty() || !after.isEmpty())) {
+        while (ui::excerptTextHeight(excerpt(), font, labels[row]->width()) > labels[row]->height() &&
+               (!before.isEmpty() || !after.isEmpty())) {
             if (before.size() >= after.size())
                 before.remove(0, before.at(0).isHighSurrogate() ? 2 : 1);
             else
                 after.chop(after.at(after.size() - 1).isLowSurrogate() ? 2 : 1);
-            document.setHtml(excerpt());
         }
         // Engine context can already end mid-word; keep whole words at the outer ends.
         if (!before.isEmpty()) {
