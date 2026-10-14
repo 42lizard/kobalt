@@ -13,6 +13,7 @@ namespace appearance {
 inline constexpr std::array<const char *, 7> layoutKeys{
     "show_header", "show_footer", "header_text_size", "footer_text_size", "show_clock", "orientation", "auto_rotate"};
 // Book layout takes precedence over legacy global layout values.
+// Converts the legacy global Bionic Reading key unless Bold Reading is already set.
 QJsonObject readerPreferences(const QJsonObject &global, const QJsonObject &book);
 QJsonObject globalPreferences(QJsonObject preferences);
 // The saved settings that decide how the book is laid out and drawn. A

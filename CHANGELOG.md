@@ -2,6 +2,8 @@
 
 ### What's changed
 
+- Renamed Bionic Reading to Bold Reading. Upgrades from Beta 2 keep its saved setting.
+
 - Fixed native progress and sleep-cover updates for KEPUB pages without source element IDs or with normalized text. Nickel receives the start of the current chapter when the exact position cannot be mapped; Kobalt keeps the exact position locally.
 
 - Fixed opening and bookmarking DRM-free books downloaded through compatible sync servers that use numeric or other non-UUID book IDs. Existing bookmark folders remain available.
@@ -14,7 +16,7 @@
 
 - Added hyphenation dictionaries for Estonian, Finnish, Georgian, Hungarian, Latvian, Lithuanian, Polish, Slovak, Slovenian and Ukrainian.
 
-- Page buttons now page Chapters, Bookmarks, search results and licenses instead of being ignored. This can be managed via the "Hide non-linear fragments" setting.
+- Page buttons now page Chapters, Bookmarks, search results and licenses instead of being ignored.
 
 - Long chapters in the Stats chart fill the chart height without a visible line through the bars when chapters are very long relative to other chapters.
 

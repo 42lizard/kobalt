@@ -116,6 +116,29 @@ int main() {
     require(!persistedGlobal.contains("show_clock") && !persistedGlobal.contains("header_text_size") &&
                 persistedGlobal["page_animations"].toBool(),
             "Global save mixed book layout with overflow settings");
+    for (const auto *mode : {"bold", "off", "synthetic"}) {
+        const auto legacy = qt::object({{"bionic_reading", mode}, {"page_animations", true}});
+        const auto migrated = appearance::readerPreferences(legacy, book);
+        require(migrated.value("bold_reading").toString() == mode && !migrated.contains("bionic_reading") &&
+                    migrated.value("page_animations").toBool(),
+                "Legacy global Bionic reading did not migrate to Bold reading");
+        require(appearance::readerPreferences(migrated, book) == migrated,
+                "Bold reading migration changed an existing choice");
+        const auto persisted = appearance::globalPreferences(migrated);
+        require(persisted.value("bold_reading").toString() == mode && !persisted.contains("bionic_reading"),
+                "Global save lost migrated Bold reading or kept the legacy key");
+    }
+    for (const auto &value : {QJsonValue(QStringLiteral("bold")), QJsonValue(QStringLiteral("off")),
+                              QJsonValue(QJsonValue::Null), QJsonValue(QStringLiteral("invalid"))}) {
+        const auto legacyMode = value.toString() == "bold" ? "off" : "bold";
+        const auto existing = qt::object({{"bold_reading", value}, {"bionic_reading", legacyMode}});
+        const auto migrated = appearance::readerPreferences(existing, book);
+        require(migrated.value("bold_reading") == value && !migrated.contains("bionic_reading"),
+                "Legacy Bionic reading replaced an explicit Bold reading choice");
+    }
+    require(!appearance::readerPreferences({}, qt::object({{"bionic_reading", "bold"}})).contains("bold_reading") &&
+                !appearance::readerPreferences({}, {}).contains("bold_reading"),
+            "A book-specific legacy setting or a fresh profile enabled global Bold reading");
     for (const auto density : {212, 227, 265, 300}) {
         readingPpi.store(density);
         require(defaultFontPixels() == halfPointPixels(22), "Default text size is not 11 points");
