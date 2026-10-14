@@ -26,6 +26,10 @@ For UI changes, inspect affected screenshots in light and dark mode at the docum
 
 Report source inspection, host tests, platform integration checks and physical-device checks separately. Host tests do not establish Nickel ABI compatibility or physical-device display behavior.
 
+## Note on Nickel 6.x
+
+Firmware 6 Nickel can abort with heap corruption while its process exits, after `ServiceLocator::~ServiceLocator`, with `malloc_consolidate(): unaligned fastbin chunk detected` or `corrupted double-linked list`. This happens with any NickelHook plugin loaded, including one with no hooks and no Kobalt code. The cause is not known. It happens only at process exit, after Kobalt has saved its state. Since Nickel 6.x isn't considered stable yet, treat it as a known issue, not as a regression or a release blocker, unless a change makes it happen before exit or more often.
+
 ## Platforms
 
 - Intended release platforms are Kobo with Qt5 or Qt6, and Android. This does not mean every target is ready for release; see the README for current availability.
