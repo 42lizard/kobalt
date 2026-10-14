@@ -8,7 +8,7 @@ Only the user may edit the root `README.md`. Agents must not modify it. If a cha
 
 ## Worktrees and branches
 
-For new implementation work, use a separate Git worktree on a separate branch based on `main`. When continuing existing work, use its existing worktree and branch unless the user requests otherwise. When the work is complete and verified, prepare it for merging back into `main`. This workflow does not authorize staging, committing or merging without the user's explicit instruction.
+For new implementation work, use a separate Git worktree on a separate branch based on `main` (or `develop` if it exists and is ahead). When continuing existing work, use its existing worktree and branch unless the user requests otherwise. When the work is complete and verified, prepare it for merging back into that branch. This workflow does not authorize staging, committing or merging without the user's explicit instruction.
 
 ## Key constraints
 
