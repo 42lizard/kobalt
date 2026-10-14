@@ -37,9 +37,13 @@ Firmware 6 Nickel can abort with heap corruption while its process exits, after 
 - Tolino has partial support through Qt6 but is not a supported release target.
 - iOS/iPadOS, PocketBook and jailbroken Kindle are under consideration and are not supported.
 
-## Release version
+## Release validation
 
-When preparing a release, update the root `VERSION` file to the release tag, such as `v1.0-beta.2`, in the same change as its `CHANGELOG.md` entry. Check that both match before tagging. Untagged builds use `VERSION`; tagged CI builds use the triggering tag.
+Before a release is tagged, do the following:
+
+- Make sure the changelog contains all new user-facing changes (not technical decisions, minor changes).
+- When preparing a release, update the root `VERSION` file to the release tag, such as `v1.0-beta.2`, in the same change as its `CHANGELOG.md` entry. Check that both match before tagging. Untagged builds use `VERSION`; tagged CI builds use the triggering tag.
+- Assemble the screenshot pass for the previous tag and compare it to the new release. Did all the differences match expected changes in the codebase, or did something unexpected change?
 
 ## Acknowledgements
 
