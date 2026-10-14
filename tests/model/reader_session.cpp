@@ -214,7 +214,7 @@ int run(int argc, char **argv) {
             QTemporaryDir diagnostics;
             require(diagnostics.isValid(), "Cannot create warning diagnostics directory");
             initializeDiagnostics(diagnostics.path());
-            const auto warningPath = QFileInfo(path).dir().filePath("formatting-issues.epub");
+            const auto warningPath = QFileInfo(path).dir().filePath("formatting-unsupported-writing.epub");
             servedPath = warningPath;
             auto warning = std::make_unique<ReaderSession>(test::readerFonts(), test::readerPlaceholder());
             const auto openWarning = [&](ReaderSession &reader) {
@@ -256,8 +256,8 @@ int run(int argc, char **argv) {
                     continue;
                 }
                 require(entry.value("resource").toString().endsWith(".xhtml") &&
-                            entry.value("issue").toString().contains("missing") &&
-                            entry.value("excerpt").toString().contains("stylesheet"),
+                            entry.value("issue").toString().contains("writing") &&
+                            entry.value("excerpt").toString().contains("vertical-lr"),
                         "Formatting warning log lost its cause, resource or excerpt");
                 require(entry.value("retained_book_hit").toBool() == (warnings == 1),
                         "Retained warning log lost its origin");
