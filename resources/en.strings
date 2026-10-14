@@ -196,9 +196,7 @@
 "error.no_section_to_preview" = "No section to preview";
 "error.no_supported_native_reading_position" = "No supported native reading position";
 "error.opening_interrupted" = "Opening interrupted";
-"error.position_has_no_publication_element_id" = "Position has no publication element ID";
 "error.position_has_no_source_chapter" = "Position has no source chapter";
-"error.position_has_no_source_element_id" = "Position has no source element ID";
 "error.position_has_no_source_path" = "Position has no source path";
 "error.publication_declares_vertical_writing" = "This book uses an unsupported writing mode.";
 "error.publication_exceeds_the_memory_limit" = "Publication exceeds the memory limit";

@@ -90,7 +90,7 @@ private:
                     if (contentRejected) {
                         contentRejected->store(true);
                     }
-                    return fail("error.publication_package_xml_is_invalid");
+                    return fail(strings::key("error.publication_package_xml_is_invalid"));
                 }
             }
             return true;
@@ -146,7 +146,7 @@ private:
             if (contentRejected) {
                 contentRejected->store(true);
             }
-            return fail("error.publication_package_xml_is_invalid");
+            return fail(strings::key("error.publication_package_xml_is_invalid"));
         }
         return true;
     }

@@ -165,12 +165,17 @@ int main(int argc, char **argv) {
         require(cache->size("data.bin") < 0 && cache->failure() == ResourceCache::Failure::Transfer,
                 "Invalid resource CRC was accepted");
     }
-    for (const auto &xml : {QByteArray(), QByteArray("<package>")}) {
+    strings::showKeys(false);
+    const auto xmlError = strings::get("error.publication_package_xml_is_invalid");
+    require(xmlError != QStringLiteral("error.publication_package_xml_is_invalid"),
+            "Malformed package XML has no display message");
+    for (const auto &xml : {QByteArray(), QByteArray("<package>"), QByteArray("<package><broken></package>")}) {
         files["book.opf"] = xml;
         write();
         rejected->store(false);
         auto cache = localResourceFactory(path, std::make_shared<SourceLease>())(sizes(), {}, rejected);
         require(cache->size("book.opf") < 0 && rejected->load(), "Malformed package XML was accepted");
+        require(cache->error() == xmlError, "Malformed package XML lost its display message");
     }
     files["book.opf"] = "<package/>";
     {
