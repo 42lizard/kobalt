@@ -446,22 +446,12 @@ void Reader::openPendingDestination() {
     }
 }
 
-// Stats shows Nickel's counts, or chapter lengths in pages when Nickel has
-// none, as soon as they arrive, whether or not a page refresh follows.
+// Stats uses the shared source count on every platform. A failed count keeps
+// the chapter navigation and the existing page-length fallback available.
 void Reader::updateGraph() {
-    const auto *chapters = book->chapters();
-    const kobalt::ReadingChapterData unavailable;
-    const auto &data = chapters ? chapters->data() : unavailable;
-    const auto graph = model->chapterGraph();
-    // Without Nickel's word counts, chart the chapters by their length in pages.
-    const auto pageLengths = chapters && data.error.isEmpty()
-                                 ? QVector<kobalt::ChapterLink>()
-                                 : kobalt::chapterPageLengths(model->chapters(), model->pages());
-    if (!chapters || !pageLengths.isEmpty())
-        chapterGraph->setData(pageLengths, model->contentsSelection(), true, {});
-    else
-        chapterGraph->setData(graph, model->graphSelection(), data.ready && graph.size() == data.graph.size(),
-                              data.error);
+    const bool counted = model->totalWords() >= 0;
+    const auto graph = counted ? model->chapterGraph() : kobalt::chapterPageLengths(model->chapters(), model->pages());
+    chapterGraph->setData(graph, counted ? model->graphSelection() : model->contentsSelection(), true, {});
     const auto contents = model->chapters();
     const int next = model->contentsSelection().next;
     int nextPages = 0;
@@ -498,13 +488,9 @@ void Reader::updateMenuStatus() {
 
 // Session minutes, the word count and times at the session's pace for Stats.
 void Reader::updateReadingStats() {
-    const auto *chapters = book->chapters();
-    const kobalt::ReadingChapterData unavailable;
-    const auto &data = chapters ? chapters->data() : unavailable;
     const auto reading = book->readingMilliseconds();
     const int chapterLeft = model->chapterPages() > 0 ? model->chapterPages() - model->chapterPage() + 1 : -1;
-    chapterGraph->setReading(int(reading / 60000), data.ready && data.error.isEmpty() ? data.totalWords : -1,
-                             book->pace().estimate(chapterLeft, reading),
+    chapterGraph->setReading(int(reading / 60000), model->totalWords(), book->pace().estimate(chapterLeft, reading),
                              book->pace().estimate(model->pages() - model->page(), reading));
 }
 

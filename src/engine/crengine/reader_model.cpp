@@ -376,6 +376,7 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     anchor_.clear();
     contents_.clear();
     graph_.clear();
+    totalWords_ = -1;
     contentsIndex_ = {};
     graphIndex_ = {};
     nativeLocation_ = saved.value("imported_native_location").toString();

@@ -17,6 +17,7 @@ struct ReaderFrame {
     qint64 damageFrom = 0;
     QJsonObject state, resources;
     QString title, author, error;
+    qint64 totalWords = -1;
     QString nativePosition, nativePositionError;
     QImage cover;
     QStringList fonts;
@@ -257,6 +258,9 @@ public:
     }
     ChapterSelection graphSelection() const {
         return frame.graphSelection;
+    }
+    qint64 totalWords() const {
+        return frame.totalWords;
     }
     void setChapters(QVector<ChapterTarget> contents, QVector<ChapterTarget> graph);
 

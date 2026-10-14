@@ -434,6 +434,77 @@ private slots:
         }
 #endif
     }
+    void sharedWordCountsReachStats_data() {
+        QTest::addColumn<bool>("platformProgress");
+        QTest::addColumn<bool>("dark");
+        QTest::addColumn<int>("ppi");
+        for (bool platform : {false, true}) {
+            for (bool dark : {false, true}) {
+                for (int ppi : {212, 300}) {
+                    const auto name =
+                        QString("%1-%2-%3").arg(platform ? "bridge" : "local").arg(dark ? "dark" : "light").arg(ppi);
+                    QTest::newRow(qPrintable(name)) << platform << dark << ppi;
+                }
+            }
+        }
+    }
+    void sharedWordCountsReachStats() {
+        QFETCH(bool, platformProgress);
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        const auto previousDensity = ui::density();
+        const auto previousPpi = readingPpi.load();
+        struct Restore {
+            int density, ppi;
+            ~Restore() {
+                ui::setDensity(density);
+                readingPpi.store(ppi);
+            }
+        } restore{previousDensity, previousPpi};
+        ui::setDensity(ppi);
+        readingPpi.store(ppi);
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        auto paths = testPaths();
+        paths.directory = root.path();
+        QVERIFY(storage::writeJson(paths.preferences(), {{"dark_mode", dark}}));
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        if (platformProgress) {
+            host.progress = std::make_shared<test::HostProgress>();
+        }
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(qEnvironmentVariable("KOBALT_FIXTURES") + "/word-counts.epub", nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        QCOMPARE(host.session()->totalWords(), qint64(40));
+        const auto chapters = host.session()->chapterGraph();
+        QCOMPARE(chapters.size(), 5);
+        const qint64 expected[]{23, 0, 6, 0, 9};
+        for (int i = 0; i < chapters.size(); ++i) {
+            QCOMPARE(chapters[i].words, expected[i]);
+        }
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavStats")));
+        auto *detail = host.window()->findChild<QLabel *>("rrGraphBookDetail");
+        QVERIFY(detail);
+        QTRY_VERIFY(detail->isVisible());
+        QCOMPARE(detail->text(), strings::get("stats.words").arg("40"));
+        QVERIFY(capture(canvas, host, QString("shared-words-%1").arg(QTest::currentDataTag())));
+        const auto anchor = host.session()->state().value("position");
+        auto settings = host.session()->state();
+        settings["font_pixels"] = 60;
+        host.session()->apply(settings);
+        QTRY_VERIFY_WITH_TIMEOUT(!host.session()->busy(), 30000);
+        QCOMPARE(host.session()->totalWords(), qint64(40));
+        QCOMPARE(host.session()->state().value("position"), anchor);
+        QCOMPARE(host.session()->chapterGraph().last().words, qint64(9));
+        QCOMPARE(detail->text(), strings::get("stats.words").arg("40"));
+    }
     void navigationCompositionAndRelease() {
         QWidget owner;
         auto *toolbar = new ui::Panel(&owner, Qt::BottomEdge);

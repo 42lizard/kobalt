@@ -180,3 +180,12 @@ endforeach()
 add_executable(refresh-scope-check tests/nickel/refresh_scope.cpp ${KOBALT_REFRESH_SOURCE})
 target_link_libraries(refresh-scope-check PRIVATE Qt${KOBALT_QT_MAJOR}::Widgets ${CMAKE_DL_LIBS})
 target_compile_options(refresh-scope-check PRIVATE -Wall -Wextra -Werror "-iquote${KOBALT_ROOT}/src")
+
+option(KOBALT_WORD_COUNT_BENCHMARK "Build the word-count measurement program" OFF)
+if(KOBALT_WORD_COUNT_BENCHMARK)
+    add_executable(word-count-benchmark tests/model/word_count_benchmark.cpp)
+    target_link_libraries(word-count-benchmark PRIVATE reader-model)
+    target_compile_options(word-count-benchmark PRIVATE -Wall -Wextra -Werror
+        "-iquote${KOBALT_ROOT}/src" "-iquote${KOBALT_ROOT}/tests/support")
+    target_compile_definitions(word-count-benchmark PRIVATE KOBALT_VERSION="${KOBALT_VERSION}")
+endif()

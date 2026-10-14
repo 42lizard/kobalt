@@ -1287,20 +1287,13 @@ int main(int argc, char **argv) {
         kobalt::ui::setDensity(300);
         graph.setProgress("Last chapter", 1, 1, 0, 0, 1);
         require(text("rrGraphNextChapter") == get("stats.last_chapter"), "Last chapter still names a next chapter");
-        QVector<kobalt::ChapterTarget> spine{{"One", "one", 0, 0}, {"Two", "two", 0, 0}};
-        QVector<kobalt::ChapterTarget> counted{
-            {"One", "one", 0, 100}, {"One TOC", "one", 0, 40}, {"Nested", "one#part", 1, 60}, {"Two", "two", 0, 200}};
-        require(kobalt::spineWordCount(spine, counted) == 300, "Book words double-counted overlapping TOC intervals");
-        // Without Nickel's counts, Stats charts chapters by their length in pages.
+        // Without shared counts, Stats charts chapters by their length in pages.
         const auto lengths = kobalt::chapterPageLengths(
             {{"One", "a", 0}, {"Two", "b", 4}, {"Part", "c", 4}, {"Lost", "d", -1}, {"End", "e", 9}}, 12);
         require(lengths.size() == 5 && lengths[0].words == 4 && lengths[1].words == 5 && lengths[2].words == 5 &&
                     lengths[3].words == 0 && lengths[4].words == 3,
                 "Page lengths did not follow the chapter starts");
         require(kobalt::chapterPageLengths({{"Lost", "a", -1}}, 12).isEmpty(), "Chapters without pages gave a chart");
-        spine[0].location = "one#part";
-        require(kobalt::spineWordCount(spine, counted) == -1,
-                "Fragment-only spine fallback supplied an unsafe word total");
         graph.setData({}, {}, true, {});
         require(message->isVisible() &&
                     message->text() == kobalt::strings::get("chapter_graph.no_chapter_lengths_available") &&

@@ -64,6 +64,7 @@ void captureChapters(ReaderFrame &result, ReaderModel &model) {
     result.state["chapter_pages"] = chapter.pages;
     result.chapters = model.chapters();
     result.chapterGraph = model.chapterGraph();
+    result.totalWords = model.totalWords();
     result.contentsSelection = model.chapterSelection(result.chapters);
     result.graphSelection = model.chapterSelection(result.chapterGraph);
 }
@@ -497,6 +498,18 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                     }
                     modelMs = timer.elapsed() - modelStart;
                 }
+            }
+            if (outcome.ready() && !cancelled()) {
+                QElapsedTimer counting;
+                counting.start();
+                const auto counts = engine->wordCounts([latest, job, lease] {
+                    return latest->load() == job && lease && !lease->revoked();
+                });
+                captureChapters(result, *engine);
+                diagnostic("chapter-count", {{"ready", counts.total >= 0},
+                                             {"chapters", counts.chapters.size()},
+                                             {"cache_hit", counts.cached},
+                                             {"milliseconds", double(counting.nsecsElapsed()) / 1000000}});
             }
             if (outcome.ready() && !result.error.isEmpty())
                 outcome = OpeningResult::failed(OpeningFailureKind::Io, "opening.resource-read", result.error);
@@ -1098,6 +1111,7 @@ void ReaderSession::setChapters(QVector<ChapterTarget> contents, QVector<Chapter
                         return;
                     guard->frame.chapters = result.chapters;
                     guard->frame.chapterGraph = result.chapterGraph;
+                    guard->frame.totalWords = result.totalWords;
                     guard->frame.contentsSelection = result.contentsSelection;
                     guard->frame.graphSelection = result.graphSelection;
                     for (auto it = result.state.begin(); it != result.state.end(); ++it)

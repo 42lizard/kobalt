@@ -36,16 +36,16 @@ protected:
             return;
         // One scale for the whole book, so a chapter keeps its height on every
         // page. A single outlier is capped instead of flattening the others.
-        QVector<int> counts;
-        int maximum = 1;
+        QVector<qint64> counts;
+        qint64 maximum = 1;
         for (const auto &chapter : chapters)
             if (chapter.words > 0) {
                 counts.append(chapter.words);
                 maximum = qMax(maximum, chapter.words);
             }
         std::sort(counts.begin(), counts.end());
-        const qint64 cap = counts.isEmpty() ? maximum : qint64(counts[counts.size() / 2]) * m::scaleCap;
-        const int scale = int(qMax<qint64>(1, qMin<qint64>(maximum, cap)));
+        const double cap = counts.isEmpty() ? double(maximum) : double(counts[counts.size() / 2]) * m::scaleCap;
+        const double scale = qMax(1.0, qMin(double(maximum), cap));
         const int chart = m::barsHeight;
         const int barWidth = qBound(1, (width() - (visible - 1) * gap) / visible, int(m::maximumBarWidth));
         const int used = visible * barWidth + (visible - 1) * gap;
@@ -54,9 +54,9 @@ protected:
             return offset + (index - first) * (barWidth + gap);
         };
         for (int i = first; i < first + visible; ++i) {
-            const int words = qMax(0, chapters[i].words);
+            const qint64 words = qMax<qint64>(0, chapters[i].words);
             const bool capped = words > scale;
-            const int height = capped ? chart : qMax(2, int(qint64(words) * chart / scale));
+            const int height = capped ? chart : qMax(2, int(double(words) * chart / scale));
             const QRect bar(left(i), chart - height, barWidth, height);
             if (selection.current >= 0 && i < selection.current) {
                 painter.fillRect(bar, ink);

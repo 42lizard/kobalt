@@ -119,7 +119,7 @@ kobalt_check(zip-resource SOURCES tests/model/zip_resource.cpp src/publication/z
 kobalt_check(diagnostics SOURCES tests/model/diagnostics.cpp src/support/diagnostics.cpp LIBRARIES Qt6::Core)
 kobalt_check(engine-activity SOURCES tests/model/engine_activity.cpp LIBRARIES Threads::Threads)
 kobalt_check(brightness-gesture SOURCES tests/model/brightness_gesture.cpp LIBRARIES Qt6::Core)
-kobalt_check(chapter-word-count SOURCES tests/model/chapter_word_count.cpp LIBRARIES Qt6::Core)
+kobalt_check(logical-word-counter SOURCES tests/model/logical_word_counter.cpp LIBRARIES Qt6::Core)
 kobalt_check(reading-pace SOURCES tests/model/reading_pace.cpp LIBRARIES Qt6::Core)
 kobalt_check(screen-refresh SOURCES tests/model/screen_refresh.cpp LIBRARIES Qt6::Core)
 kobalt_check(font-registration SOURCES tests/model/font_registration.cpp LIBRARIES Qt6::Gui
@@ -308,6 +308,11 @@ kobalt_engine_check(reader LIBRARIES test-positions
     ARGUMENTS "${KOBALT_TEST_FIXTURES}/text.epub" "${KOBALT_TEST_FIXTURES}/color.epub")
 kobalt_engine_check(search ARGUMENTS "${KOBALT_TEST_FIXTURES}/dictionary.epub")
 kobalt_engine_check(word-selection ARGUMENTS "${KOBALT_TEST_FIXTURES}/dictionary.epub")
+kobalt_engine_check(document-word-count ARGUMENTS "${KOBALT_TEST_FIXTURES}/word-counts.epub"
+    "${KOBALT_TEST_FIXTURES}/word-count-many.epub")
+add_executable(word-count-benchmark "${KOBALT_ROOT}/tests/model/word_count_benchmark.cpp")
+target_link_libraries(word-count-benchmark PRIVATE test-reader-model)
+kobalt_test_options(word-count-benchmark)
 kobalt_engine_check(alignment)
 kobalt_engine_check(vertical-writing)
 kobalt_engine_check(mathml)

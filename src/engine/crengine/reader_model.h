@@ -11,6 +11,7 @@
 #include "publication/resource_cache.h"
 #include "platform/api/position_codec.h"
 #include "reader_links.h"
+#include "reader_word_counts.h"
 #include "reading/reading_density.h"
 #include "reading/appearance_settings.h"
 #include <QString>
@@ -83,6 +84,15 @@ public:
     }
     // Writes the parsed book and its pages to the cache, for the next opening.
     bool saveDocumentCache();
+    // Shared count, on the owning engine thread. Populates the Stats graph
+    // from source anchors. Counts visible source text once, including
+    // non-linear spine fragments; excludes SVG and ruby annotation text.
+    // Cancellation discards the result. Completed counts use document-cache
+    // properties, so reflow and cached reopening do not scan text again.
+    DocumentWordCounts wordCounts(std::function<bool()> current = {});
+    qint64 totalWords() const {
+        return totalWords_;
+    }
     QString resourceError() const;
     QJsonObject resourceStats() const;
     bool openPreview(ReaderModel &source, QSize size, QString *error);
@@ -208,6 +218,7 @@ private:
     qint64 cacheBytes_ = 0;
     bool openedFromCache_ = false;
     QVector<ChapterLink> contents_, graph_;
+    qint64 totalWords_ = -1;
     QVector<ChapterLink> chapterPages(QVector<ChapterLink> links) const;
     QVector<ChapterLink> tocChapters() const;
     // Chapter entries resolved for one pagination: their pages, and the

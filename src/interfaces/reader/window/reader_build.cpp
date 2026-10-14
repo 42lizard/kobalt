@@ -170,8 +170,6 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
     });
     resize(QGuiApplication::primaryScreen()->size());
     connectPageInput();
-    if (auto *chapters = book->chapters(); chapters && chapters->data().ready)
-        chapters->updated();
 }
 
 void Reader::buildReadingPage() {
@@ -498,15 +496,6 @@ kobalt::reader::AppearanceLayout Reader::buildMenu() {
 }
 
 void Reader::buildOverlays() {
-    if (auto *chapters = book->chapters())
-        chapters->updated = [this] {
-            const auto &data = book->chapters()->data();
-            if (data.ready)
-                model->setChapters(data.contents, data.graph);
-            save();
-            if (chapterGraph)
-                updateGraph();
-        };
     // Link discovery takes its styles in syncLinkDiscovery: they follow the
     // place it occupies and the reading strip's text size.
     linkIndicator = new kobalt::ui::Button({}, this);

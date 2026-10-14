@@ -2,6 +2,8 @@
 
 ### What's changed
 
+- Stats now uses shared cached word counts on Kobo and Android, including plain EPUBs. Counts cover the whole book and chapter intervals, survive reflow and reuse the parsed-document cache. Chapters uses the EPUB table of contents without Nickel's word-count API.
+
 - Renamed Bionic Reading to Bold Reading. Upgrades from Beta 2 keep its saved setting.
 
 - Fixed native progress and sleep-cover updates for KEPUB pages without source element IDs or with normalized text. Nickel receives the start of the current chapter when the exact position cannot be mapped; Kobalt keeps the exact position locally.

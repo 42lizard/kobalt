@@ -15,7 +15,6 @@
 #include "native_publication.h"
 #include "native_progress.h"
 #include "native_reading_session.h"
-#include "native_chapters.h"
 #include "native_dictionary.h"
 #include "publication/native_resources.h"
 #include "reading_bridge.h"
@@ -459,9 +458,7 @@ void ReaderCoordinator::hideLoading() {
 }
 
 void ReaderCoordinator::drainReadingJobs(std::function<void()> finished) {
-    kobalt::ReaderSession::drain([finished = std::move(finished)] {
-        kobalt::NativeChapters::drain(finished);
-    });
+    kobalt::ReaderSession::drain(std::move(finished));
 }
 
 void ReaderCoordinator::disposeForTransition(std::function<void()> finished) {
@@ -602,7 +599,6 @@ void ReaderCoordinator::poll() {
 #ifndef KOBALT_READER_HARDWARE
     kobalt::NativeProgress::testCommand();
     kobalt::NativeReadingSession::testCommand();
-    kobalt::NativeChapters::testCommand();
     kobalt::NativeAuthorization::testCommand();
     if (!kobalt::NativeLifecycle::suspended())
         kobalt::NativeDictionary::testCommand();

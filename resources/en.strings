@@ -146,13 +146,7 @@
 "error.missing_epub_container" = "Missing EPUB container";
 "error.missing_publication_body" = "Missing publication body";
 "error.missing_publication_container" = "Missing publication container";
-"error.native_chapter_book_changed" = "Native chapter book changed";
-"error.native_chapter_count_is_ambiguous" = "Native chapter count is ambiguous";
-"error.native_chapter_count_is_unavailable" = "Native chapter count is unavailable";
-"error.native_chapter_counts_do_not_match_the_chapter_list" = "Native chapter counts do not match the chapter list";
-"error.native_chapter_data_is_unavailable" = "Native chapter data is unavailable";
 "error.native_chapter_is_not_in_the_publication_spine" = "Native chapter is not in the publication spine";
-"error.native_chapter_list_exceeds_its_limit" = "Native chapter list exceeds its limit";
 "error.native_chapter_source_is_incomplete" = "Native chapter source is incomplete";
 "error.native_chapter_source_is_unavailable" = "Native chapter source is unavailable";
 "error.native_offset_splits_a_unicode_character" = "Native offset splits a Unicode character";

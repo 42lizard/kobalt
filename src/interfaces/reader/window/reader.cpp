@@ -1450,26 +1450,22 @@ void Reader::save(bool snapshot) {
         links.append(kobalt::qt::object({{"source", link.source}, {"rectangles", rectangles}}));
     }
     state["links"] = links;
-    if (book->chapters()) {
-        const auto &native = book->chapters()->data();
-        QJsonArray counts, locations, titles, pages;
-        for (const auto &chapter : native.graph) {
-            counts.append(chapter.words);
-            locations.append(chapter.location);
-            titles.append(chapter.title);
-        }
-        for (const auto &chapter : model->chapterGraph())
-            pages.append(chapter.page);
-        state["native_chapters"] = kobalt::qt::object({{"ready", native.ready},
-                                                       {"error", native.error},
-                                                       {"total_words", native.totalWords},
-                                                       {"words", counts},
-                                                       {"locations", locations},
-                                                       {"titles", titles},
-                                                       {"mapped_pages", pages},
-                                                       {"current", model->graphSelection().current},
-                                                       {"next", model->graphSelection().next}});
+    QJsonArray counts, positions, titles, pages;
+    for (const auto &chapter : model->chapterGraph()) {
+        counts.append(double(chapter.words));
+        positions.append(chapter.position);
+        titles.append(chapter.title);
+        pages.append(chapter.page);
     }
+    state["word_counts"] = kobalt::qt::object({{"ready", model->totalWords() >= 0},
+                                               {"total_words", double(model->totalWords())},
+                                               {"words", counts},
+                                               {"positions", positions},
+                                               {"titles", titles},
+                                               {"mapped_pages", pages},
+                                               {"current", model->graphSelection().current},
+                                               {"next", model->graphSelection().next}});
+
 #endif
     state["resource_cache"] = model->resourceStats();
     state["busy"] = model->busy();
