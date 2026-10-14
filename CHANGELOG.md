@@ -2,6 +2,8 @@
 
 ### What's changed
 
+- Show formatting warnings only for confirmed unsupported layout features. Large books no longer show a warning when the formatting inspection reaches its limits.
+
 - Stats now uses shared cached word counts on Kobo and Android, including plain EPUBs. Counts cover the whole book and chapter intervals, survive reflow and reuse the parsed-document cache. Chapters uses the EPUB table of contents without Nickel's word-count API.
 
 - Renamed Bionic Reading to Bold Reading. Upgrades from Beta 2 keep its saved setting.

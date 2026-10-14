@@ -477,10 +477,10 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                     else if (outcome.ready() && !resources->resumeAfterInspection()) {
                         outcome = OpeningResult::failed(OpeningFailureKind::Io, layout.reasonKey());
                     } else if (outcome.ready()) {
-                        // Inspection can be stricter than CREngine's parser. Let the
-                        // engine decide whether the book is readable and keep the
-                        // uncertain formatting visible as a warning.
-                        formattingWarning = layout.verdict != LayoutCompatibility::Supported;
+                        // Incomplete inspection does not establish an unsupported
+                        // feature. Keep its details in diagnostics without a warning.
+                        formattingWarning = layout.verdict == LayoutCompatibility::VerticalWriting ||
+                                            layout.verdict == LayoutCompatibility::RightToLeftProgression;
                     }
                     const auto modelStart = timer.elapsed();
                     report(OpeningStage::Text, 0);

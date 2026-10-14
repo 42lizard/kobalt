@@ -1703,20 +1703,53 @@ private slots:
         host.shutdown();
         QTRY_VERIFY(host.idle());
     }
-    void formattingWarningKeepsBookReadable_data() {
+    void formattingInspectionKeepsBookReadable_data() {
         QTest::addColumn<QString>("bookName");
-        QTest::newRow("missing-stylesheet") << "formatting-issues.epub";
-        QTest::newRow("html-entity") << "formatting-entity.epub";
+        QTest::addColumn<bool>("expectedWarning");
+        QTest::addColumn<bool>("dark");
+        QTest::addColumn<int>("ppi");
+        for (const auto &bookName :
+             {QStringLiteral("formatting-issues.epub"), QStringLiteral("formatting-entity.epub"),
+              QStringLiteral("formatting-resource-budget.epub"), QStringLiteral("formatting-total-budget.epub"),
+              QStringLiteral("formatting-unsupported-writing.epub")}) {
+            for (bool dark : {false, true}) {
+                for (int ppi : {212, 300}) {
+                    const auto name = QString("%1-%2-%3").arg(bookName).arg(dark ? "dark" : "light").arg(ppi);
+                    QTest::newRow(qPrintable(name))
+                        << bookName << (bookName == "formatting-unsupported-writing.epub") << dark << ppi;
+                }
+            }
+        }
     }
-    void formattingWarningKeepsBookReadable() {
+    void formattingInspectionKeepsBookReadable() {
         QFETCH(QString, bookName);
-        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        QFETCH(bool, expectedWarning);
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        const auto previousDensity = ui::density();
+        const auto previousPpi = readingPpi.load();
+        struct Restore {
+            int density, ppi;
+            ~Restore() {
+                ui::setDensity(density);
+                readingPpi.store(ppi);
+            }
+        } restore{previousDensity, previousPpi};
+        ui::setDensity(ppi);
+        readingPpi.store(ppi);
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        auto paths = testPaths();
+        paths.directory = root.path();
+        QVERIFY(storage::writeJson(paths.preferences(), {{"dark_mode", dark}}));
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
         CloseHost cleanup{host};
         QSignalSpy opened(&host, &test::ReaderHost::opened);
         const auto book = qEnvironmentVariable("KOBALT_FIXTURES") + "/" + bookName;
         host.open(book, nativeSize);
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
-        QVERIFY(host.session()->formattingWarning());
+        QCOMPARE(host.session()->formattingWarning(), expectedWarning);
+        QVERIFY(!host.session()->image().isNull());
         test::ReaderCanvas canvas(host.window(), nativeSize);
         canvas.resize(900, 900);
         canvas.show();
@@ -1725,25 +1758,28 @@ private slots:
         auto *warning = host.window()->findChild<QPushButton *>("rrFormattingWarning");
         auto *bookmarks = host.window()->findChild<QPushButton *>("rrBookmarks");
         QVERIFY(warning && bookmarks);
-        QTRY_VERIFY(warning->isVisible());
-        QCOMPARE(warning->size(), bookmarks->size());
-        QVERIFY(warning->geometry().right() < bookmarks->geometry().left());
-        QVERIFY(canvas.capture().save("native-reader-warning-menu-" + bookName + ".png"));
-        QVERIFY(click(canvas, warning));
-        auto *notice = host.window()->findChild<QWidget *>("rrFormattingWarningDialog");
-        QVERIFY(notice && notice->isVisible());
-        QVERIFY(canvas.capture().save("native-reader-warning-popup-" + bookName + ".png"));
-        QVERIFY(click(canvas, notice->findChild<QPushButton *>("rrFormattingWarningConfirm")));
-        QTRY_VERIFY(host.window()->findChild<QWidget *>("rrFormattingWarningDialog") == nullptr);
+        QCOMPARE(warning->isVisible(), expectedWarning);
+        const auto captureName = QString("%1-%2-%3").arg(bookName).arg(dark ? "dark" : "light").arg(ppi);
+        QVERIFY(canvas.capture().save("native-reader-warning-menu-" + captureName + ".png"));
+        if (expectedWarning) {
+            QCOMPARE(warning->size(), bookmarks->size());
+            QVERIFY(warning->geometry().right() < bookmarks->geometry().left());
+            QVERIFY(click(canvas, warning));
+            auto *notice = host.window()->findChild<QWidget *>("rrFormattingWarningDialog");
+            QVERIFY(notice && notice->isVisible());
+            QVERIFY(canvas.capture().save("native-reader-warning-popup-" + captureName + ".png"));
+            QVERIFY(click(canvas, notice->findChild<QPushButton *>("rrFormattingWarningConfirm")));
+            QTRY_VERIFY(host.window()->findChild<QWidget *>("rrFormattingWarningDialog") == nullptr);
+        }
         const int page = host.session()->page();
         QVERIFY(host.session()->turn(1));
         QTRY_VERIFY(!host.session()->busy() && host.session()->page() > page);
-        QVERIFY(host.session()->formattingWarning());
+        QCOMPARE(host.session()->formattingWarning(), expectedWarning);
         host.shutdown();
         QTRY_VERIFY(host.idle());
         host.open(book, nativeSize);
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
-        QVERIFY(host.session()->formattingWarning());
+        QCOMPARE(host.session()->formattingWarning(), expectedWarning);
         host.shutdown();
         QTRY_VERIFY(host.idle());
         host.open(fixture(), nativeSize);

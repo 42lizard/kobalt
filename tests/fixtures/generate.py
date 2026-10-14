@@ -26,6 +26,8 @@ def write(directory, source_root=ROOT):
     reader.book(directory / 'local-cache.epub', nested=True, chapter_count=2, paragraphs=300)
     reader.book(directory / 'formatting-issues.epub', nested=True, formatting_issue='missing-css')
     reader.book(directory / 'formatting-entity.epub', nested=True, formatting_issue='html-entity')
+    for issue in ('resource-budget', 'total-budget', 'unsupported-writing'):
+        reader.book(directory / f'formatting-{issue}.epub', nested=True, formatting_issue=issue)
     reader.book(directory / 'adobe-template.epub', nested=True, formatting_issue='adobe-template')
     reader.book(directory / 'oversized-metadata.epub', nested=True, chapter_count=1, paragraphs=1,
                 title='T' * 4095 + '😀' + 'T' * 300000, author='A' * 4095 + '😀' + 'A' * 300000)
