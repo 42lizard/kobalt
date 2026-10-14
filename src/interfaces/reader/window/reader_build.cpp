@@ -880,6 +880,9 @@ void Reader::buildSettings() {
     connect(darkOption, &QCheckBox::clicked, this, [this](bool enabled) {
         applyDarkMode(enabled);
     });
+    connect(bionicOption, &QCheckBox::clicked, this, [this](bool enabled) {
+        applyBoldReading(enabled);
+    });
     connect(heavierTextOption, &QCheckBox::clicked, this, [this](bool enabled) {
         applyHeavierText(enabled);
     });

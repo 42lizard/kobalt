@@ -288,6 +288,8 @@
 "reader.contents_detail" = "Contents: %1";
 "reader.could_not_change_dark_mode" = "Could not change dark mode";
 "reader.could_not_save_reader_settings" = "Could not save reader settings";
+"reader.settings_write_error" = "Disk write error";
+"reader.settings_write_error_description" = "Kobalt could not save your reader settings. Check the available storage space and try again.";
 "reader.could_not_save_reading_position" = "Could not save reading position";
 "reader.dark_mode" = "Dark mode";
 "reader.debug_progress" = "Debug progress";

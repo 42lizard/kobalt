@@ -142,10 +142,11 @@ void Reader::showFormattingWarning() {
 
 bool Reader::progressBlocked() const {
     return bool(debugDialog) || bool(finishDialog) || bool(bookmarkErrorDialog) || bool(formattingWarningDialog) ||
-           book->deviceTransition() || services.suspended() || !isVisible() || lightPopup->isVisible() ||
-           model->busy() || (chapterGraph->isVisible() && !statsPinned()) || dictionaryPanel->isVisible() ||
-           searchPanel->isVisible() || linksActive() || lookupPending || appearanceEdit.panelOpen() ||
-           appearanceEdit.applying() || general->isVisible() || choices->isVisible() || acknowledgments->isVisible();
+           bool(settingsWriteErrorDialog) || book->deviceTransition() || services.suspended() || !isVisible() ||
+           lightPopup->isVisible() || model->busy() || (chapterGraph->isVisible() && !statsPinned()) ||
+           dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() || lookupPending ||
+           appearanceEdit.panelOpen() || appearanceEdit.applying() || general->isVisible() || choices->isVisible() ||
+           acknowledgments->isVisible();
 }
 
 void Reader::dismissProgressChoice() {
@@ -485,6 +486,37 @@ void Reader::openBookmarks() {
     bookmarkList->showBookmarks(bookmarkRows(),
                                 strings::get("stats.page_of").arg(model->page() + 1).arg(model->pages()));
     refresh();
+}
+
+void Reader::showSettingsWriteError() {
+    if (settingsWriteErrorDialog) {
+        settingsWriteErrorDialog->raise();
+        return;
+    }
+    model->cancelPendingTurn();
+    auto *notice = new ui::NoticeModal(
+        this,
+        {strings::get("reader.settings_write_error_description"), strings::get("reader.settings_write_error"), {}},
+        {strings::get("common.ok"), "rrSettingsWriteErrorConfirm"});
+    settingsWriteErrorDialog = notice;
+    notice->setObjectName("rrSettingsWriteError");
+    const auto dismiss = [this, notice] {
+        notice->hide();
+        notice->deleteLater();
+        settingsWriteErrorDialog.clear();
+        updateOrientationBlock();
+        refresh();
+    };
+    notice->dismissed = dismiss;
+    connect(notice->primaryButton(), &QPushButton::clicked, this, dismiss);
+    notice->card()->fitToWidth(qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance));
+    notice->centerCard();
+    notice->show();
+    notice->raise();
+    notice->primaryButton()->setFocus();
+    updateOrientationBlock();
+    for (auto *widget : notice->findChildren<QWidget *>())
+        textRefresh(widget);
 }
 
 void Reader::showBookmarkError() {

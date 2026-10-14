@@ -222,9 +222,18 @@ void Reader::progressTick() {
 }
 
 QVector<QWidget *> Reader::popups() const {
-    return {busyNotice,          brightnessNotice,           fontDefaultDialog.data(),      linkDialog.data(),
-            debugDialog.data(),  syncDialog.data(),          finishDialog.data(),           refreshPopup.data(),
-            removeDialog.data(), bookmarkErrorDialog.data(), formattingWarningDialog.data()};
+    return {busyNotice,
+            brightnessNotice,
+            fontDefaultDialog.data(),
+            linkDialog.data(),
+            debugDialog.data(),
+            syncDialog.data(),
+            finishDialog.data(),
+            refreshPopup.data(),
+            removeDialog.data(),
+            bookmarkErrorDialog.data(),
+            formattingWarningDialog.data(),
+            settingsWriteErrorDialog.data()};
 }
 
 bool Reader::popup(QObject *object) const {
@@ -254,7 +263,7 @@ bool Reader::event(QEvent *event) {
                         !searchPanel->isVisible() && !linksActive() && !lookupPending &&
                         !acknowledgments->isVisible() && !bookmarkList->isVisible() && !lightPopup->isVisible() &&
                         !busyNotice->isVisible() && !syncDialog && !finishDialog && !bookmarkErrorDialog &&
-                        !formattingWarningDialog && !services.suspended() &&
+                        !formattingWarningDialog && !settingsWriteErrorDialog && !services.suspended() &&
                         page->image.text("kobalt.animation_text_only") == "true");
         // These panels hold text and line controls. Changes inside them can
         // use a partial refresh; showing the whole panel keeps its policy.
@@ -546,8 +555,8 @@ void Reader::updateOrientationBlock() {
         orientation->setBlocked(lifecycleHidden || services.suspended() || topControls->isVisible() || model->busy() ||
                                 appearanceEdit.panelOpen() || bool(syncDialog) || bool(finishDialog) ||
                                 bool(bookmarkErrorDialog) || bool(formattingWarningDialog) ||
-                                dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() ||
-                                lookupPending);
+                                bool(settingsWriteErrorDialog) || dictionaryPanel->isVisible() ||
+                                searchPanel->isVisible() || linksActive() || lookupPending);
 }
 
 void Reader::closeSearch() {
@@ -1314,9 +1323,9 @@ void Reader::pageButton(int direction) {
 
 void Reader::turnPage(int direction) {
     turnStarted.start();
-    if (finishDialog || syncDialog || bookmarkErrorDialog || formattingWarningDialog || !model->canTurn() || closing ||
-        exitPending || lifecycleHidden || services.suspended() || book->deviceTransition() ||
-        appearanceEdit.panelOpen() || appearanceEdit.applying())
+    if (finishDialog || syncDialog || bookmarkErrorDialog || formattingWarningDialog || settingsWriteErrorDialog ||
+        !model->canTurn() || closing || exitPending || lifecycleHidden || services.suspended() ||
+        book->deviceTransition() || appearanceEdit.panelOpen() || appearanceEdit.applying())
         return;
     if (!model->busy() && direction > 0 && model->nextPage() == model->page() && book->offerFinish()) {
         showFinishChoice();

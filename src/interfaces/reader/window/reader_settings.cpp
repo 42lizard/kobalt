@@ -108,11 +108,14 @@ void Reader::fitSettings() {
 bool Reader::writePreferences(const QJsonObject &next) {
     const auto global = appearance::globalPreferences(next);
     const auto previous = storage::readJson(book->paths().preferences());
-    if (!writeJson(book->paths().preferences(), global))
+    if (!writeJson(book->paths().preferences(), global)) {
+        showSettingsWriteError();
         return false;
+    }
     if (book->saveLayoutPreferences(next))
         return true;
     writeJson(book->paths().preferences(), previous);
+    showSettingsWriteError();
     return false;
 }
 
@@ -155,6 +158,7 @@ void Reader::applySettings() {
     for (auto it = rotation.begin(); it != rotation.end(); ++it)
         next[it.key()] = it.value();
     if (!writePreferences(next)) {
+        bionicOption->setChecked(model->requestedState().value("bold_reading").toString("off") == "bold");
         settingsError->setText(strings::get("reader.could_not_save_reader_settings"));
         settingsError->show();
         appearanceEdit.cancelNavigation();
@@ -218,6 +222,34 @@ void Reader::applyDarkMode(bool enabled) {
     model->setDarkMode(enabled);
     if (appearanceEdit.preview())
         appearanceEdit.preview()->setDarkMode(enabled);
+    refresh();
+}
+
+void Reader::applyBoldReading(bool enabled) {
+    if (model->temporaryTypography())
+        return;
+    const auto mode = enabled ? QStringLiteral("bold") : QStringLiteral("off");
+    auto next = preferences;
+    next["bold_reading"] = mode;
+    if (!writePreferences(next)) {
+        bionicOption->setChecked(model->requestedState().value("bold_reading").toString("off") == "bold");
+        return;
+    }
+    preferences = next;
+    settingsError->clear();
+    settingsError->hide();
+    auto settings = model->requestedState();
+    settings["bold_reading"] = mode;
+    model->apply(settings);
+    // Keep a pending typography draft in the same mode, including a preview
+    // that has not finished opening yet.
+    if (appearanceEdit.preview()) {
+        mutateAppearance([mode](ReaderSession &preview) {
+            auto settings = preview.requestedState();
+            settings["bold_reading"] = mode;
+            preview.apply(settings);
+        });
+    }
     refresh();
 }
 

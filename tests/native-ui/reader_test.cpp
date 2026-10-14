@@ -2244,9 +2244,9 @@ private slots:
         auto *bionic = host.window()->findChild<QCheckBox *>("rrBionicReading");
         QVERIFY(bionic && !bionic->isChecked());
         QVERIFY(click(canvas, bionic));
-        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
         QTRY_VERIFY_WITH_TIMEOUT(
             !host.session()->busy() && host.session()->state().value("bold_reading").toString() == "bold", 30000);
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
         preserved();
         QCOMPARE(host.session()->state().value("bold_reading").toString(), QString("bold"));
         settingsToggle("rrDarkMode", "dark_mode");
@@ -2308,6 +2308,10 @@ private slots:
             auto *message = host.window()->findChild<QLabel *>("rrFontDefaultMessage");
             QVERIFY(message);
             QCOMPARE(message->text(), strings::get("reader.could_not_save_reader_settings"));
+            auto *notice = host.window()->findChild<QWidget *>("rrSettingsWriteError");
+            QVERIFY(notice && notice->isVisible());
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsWriteErrorConfirm")));
+            QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrSettingsWriteError"));
             const auto current = inspectReader(host)["preview_ready"].toBool()
                                      ? inspectReader(host)["preview_settings"].toObject()
                                      : host.session()->state();
@@ -2519,11 +2523,15 @@ private slots:
         QCOMPARE(inspectReader(host)["preview_settings"].toObject(), draft);
         QCOMPARE(host.session()->state()["margin_pixels"], original["margin_pixels"]);
         QVERIFY(!host.window()->findChild<QWidget *>("rrSearch")->isVisible());
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsWriteErrorConfirm")));
+        QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrSettingsWriteError"));
         if (exit) {
             host.window()->close();
             QVERIFY(!host.idle());
             QVERIFY(host.window()->isEnabled());
             QVERIFY(inspectReader(host)["preview_ready"].toBool());
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsWriteErrorConfirm")));
+            QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrSettingsWriteError"));
         }
         QVERIFY(QDir(path).removeRecursively());
         if (exit) {
@@ -3457,6 +3465,219 @@ private slots:
             host.shutdown();
             QTRY_VERIFY_WITH_TIMEOUT(host.idle(), 10000);
         }
+    }
+    void boldReadingAppliesImmediately_data() {
+        QTest::addColumn<bool>("enabled");
+        QTest::addColumn<QString>("savedMode");
+        QTest::addColumn<bool>("dark");
+        QTest::addColumn<int>("ppi");
+        for (bool enabled : {false, true})
+            for (bool dark : {false, true})
+                for (int ppi : {300, 212}) {
+                    const auto name =
+                        QString("%1-%2-%3").arg(enabled ? "on" : "default-off", dark ? "dark" : "light").arg(ppi);
+                    QTest::newRow(qPrintable(name))
+                        << enabled << (enabled ? QString("bold") : QString()) << dark << ppi;
+                }
+        QTest::newRow("legacy-synthetic") << true << QString("synthetic") << false << 300;
+    }
+    void boldReadingAppliesImmediately() {
+        QFETCH(bool, enabled);
+        QFETCH(QString, savedMode);
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        struct RestoreDensity {
+            int density = ui::density(), ppi = readingPpi.load();
+            ~RestoreDensity() {
+                ui::setDensity(density);
+                readingPpi.store(ppi);
+            }
+        } restore;
+        ui::setDensity(ppi);
+        readingPpi.store(ppi);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        storage::Paths paths{directory.path()};
+        QJsonObject saved{{"dark_mode", dark}};
+        if (!savedMode.isEmpty())
+            saved["bold_reading"] = savedMode;
+        QVERIFY(storage::writeJson(paths.preferences(), saved));
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QTRY_VERIFY(!host.session()->busy());
+        const auto original = host.session()->image();
+        const QJsonValue position = host.session()->state()["position"];
+        const auto initialMode = enabled ? QStringLiteral("bold") : QStringLiteral("off");
+        const auto changedMode = enabled ? QStringLiteral("off") : QStringLiteral("bold");
+        QCOMPARE(host.session()->state()["bold_reading"].toString(), initialMode);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
+        auto *option = host.window()->findChild<QCheckBox *>("rrBionicReading");
+        auto *panel = host.window()->findChild<QWidget *>("rrGeneralSettings");
+        QVERIFY(option && panel && panel->isVisible());
+        QCOMPARE(option->isChecked(), enabled);
+        {
+            BlockedFile blocked(paths.preferences());
+            QVERIFY(blocked.active());
+            QVERIFY(click(canvas, option));
+            QCOMPARE(option->isChecked(), enabled);
+            QCOMPARE(host.session()->state()["bold_reading"].toString(), initialMode);
+            QVERIFY(!host.session()->busy());
+            QCOMPARE(host.session()->image(), original);
+            auto *notice = host.window()->findChild<QWidget *>("rrSettingsWriteError");
+            QVERIFY(notice && notice->isVisible());
+            QVERIFY(
+                capture(canvas, host, QString("native-reader-settings-write-error-%1").arg(QTest::currentDataTag())));
+            const auto page = host.session()->page();
+            QTest::keyClick(host.window(), Qt::Key_Right);
+            QCOMPARE(host.session()->page(), page);
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsWriteErrorConfirm")));
+            QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrSettingsWriteError"));
+            QVERIFY(blocked.restore());
+            QCOMPARE(storage::readJson(paths.preferences()), saved);
+        }
+        QVERIFY(click(canvas, option));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !host.session()->busy() && host.session()->state()["bold_reading"].toString() == changedMode, 30000);
+        QVERIFY(panel->isVisible());
+        QCOMPARE(storage::readJson(paths.preferences())["bold_reading"].toString(), changedMode);
+        QVERIFY(host.session()->image() != original);
+        QCOMPARE(host.session()->state()["position"], position);
+        {
+            struct ResumeEngine {
+                ~ResumeEngine() {
+                    engineActivity().pause(false);
+                }
+            } resume;
+            engineActivity().pause(true);
+            QVERIFY(click(canvas, option));
+            QVERIFY(host.session()->busy());
+            QVERIFY(click(canvas, option));
+            QCOMPARE(host.session()->requestedState()["bold_reading"].toString(), changedMode);
+            QCOMPARE(storage::readJson(paths.preferences())["bold_reading"].toString(), changedMode);
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !host.session()->busy() && host.session()->state()["bold_reading"].toString() == changedMode, 30000);
+        QVERIFY(click(canvas, option));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !host.session()->busy() && host.session()->state()["bold_reading"].toString() == initialMode, 30000);
+        QVERIFY(panel->isVisible());
+        QCOMPARE(storage::readJson(paths.preferences())["bold_reading"].toString(), initialMode);
+    }
+    void boldReadingPreservesTypographyDraft() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        storage::Paths paths{directory.path()};
+        paths.stateReport = directory.path() + "/state.json";
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QTRY_VERIFY(!host.session()->busy());
+        const QJsonValue pixels = host.session()->state()["font_pixels"];
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        QCheckBox *option = nullptr;
+        {
+            struct ResumeEngine {
+                ~ResumeEngine() {
+                    engineActivity().pause(false);
+                }
+            } resume;
+            engineActivity().pause(true);
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavText")));
+            QVERIFY(click(canvas, sizeStep(host)));
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
+            option = host.window()->findChild<QCheckBox *>("rrBionicReading");
+            QVERIFY(option && !option->isChecked());
+            QVERIFY(click(canvas, option));
+            QCOMPARE(host.session()->requestedState()["bold_reading"].toString(), QString("bold"));
+            QCOMPARE(storage::readJson(paths.preferences())["bold_reading"].toString(), QString("bold"));
+        }
+        const auto inspect = [&] {
+            host.window()->checkpoint();
+            return storage::readJson(paths.stateReport);
+        };
+        for (const auto *mode : {"bold", "off"}) {
+            if (QString::fromLatin1(mode) == "off")
+                QVERIFY(click(canvas, option));
+            QTRY_VERIFY_WITH_TIMEOUT(
+                !host.session()->busy() && host.session()->state()["bold_reading"].toString() == mode, 30000);
+            QTRY_VERIFY_WITH_TIMEOUT(inspect()["preview_ready"].toBool() && !inspect()["preview_busy"].toBool(), 30000);
+            const auto draft = inspect()["preview_settings"].toObject();
+            QCOMPARE(draft["bold_reading"].toString(), QString::fromLatin1(mode));
+            QVERIFY(draft["font_pixels"] != pixels);
+            QCOMPARE(host.session()->state()["font_pixels"], pixels);
+        }
+        const auto draft = inspect()["preview_settings"].toObject();
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            !host.session()->busy() && host.session()->state()["font_pixels"] == draft["font_pixels"], 30000);
+        QCOMPARE(host.session()->state()["bold_reading"].toString(), QString("off"));
+    }
+    void readerSettingsWriteErrors_data() {
+        QTest::addColumn<QString>("optionName");
+        QTest::addColumn<bool>("immediate");
+        QTest::newRow("dark-mode") << QString("rrDarkMode") << true;
+        QTest::newRow("interface-weight") << QString("rrHeavierText") << true;
+        QTest::newRow("deferred-progress") << QString("rrShowProgress") << false;
+    }
+    void readerSettingsWriteErrors() {
+        QFETCH(QString, optionName);
+        QFETCH(bool, immediate);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        storage::Paths paths{directory.path()};
+        const QJsonObject saved{{"dark_mode", false}, {"heavier_interface_text", true}, {"show_progress_bar", true}};
+        QVERIFY(storage::writeJson(paths.preferences(), saved));
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QTRY_VERIFY(!host.session()->busy());
+        const auto image = host.session()->image();
+        const auto interfaceWeight = ui::interfaceWeight();
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        auto *settings = host.window()->findChild<QPushButton *>("rrSettings");
+        QVERIFY(click(canvas, settings));
+        if (optionName == "rrHeavierText")
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsAdvanced")));
+        auto *option = host.window()->findChild<QCheckBox *>(optionName);
+        QVERIFY(option);
+        const bool checked = option->isChecked();
+        BlockedFile blocked(paths.preferences());
+        QVERIFY(blocked.active());
+        QVERIFY(click(canvas, option));
+        if (!immediate)
+            QVERIFY(click(canvas, settings));
+        auto *notice = host.window()->findChild<QWidget *>("rrSettingsWriteError");
+        QVERIFY(notice && notice->isVisible());
+        if (immediate)
+            QCOMPARE(option->isChecked(), checked);
+        QVERIFY(!host.session()->busy());
+        QCOMPARE(host.session()->image(), image);
+        QCOMPARE(ui::interfaceWeight(), interfaceWeight);
+        QVERIFY(host.window()->findChild<ReadingPage *>("rrPage")->showProgress);
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsWriteErrorConfirm")));
+        QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrSettingsWriteError"));
+        QVERIFY(blocked.restore());
+        QCOMPARE(storage::readJson(paths.preferences()), saved);
     }
     void bionicModesAndThickness() {
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);

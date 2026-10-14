@@ -1,3 +1,7 @@
+## Unreleased
+
+- Bold Reading applies as soon as its checkbox changes. Failed settings saves show a disk write error dialog and keep the previous Bold Reading setting.
+
 ## v1.0-beta.3
 
 ### What's changed

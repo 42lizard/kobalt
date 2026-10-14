@@ -254,9 +254,11 @@ private:
     void openSettings();
     void applyEdgeLight();
     void applyDarkMode(bool enabled);
+    void applyBoldReading(bool enabled);
     void applyHeavierText(bool enabled);
     void applySettings();
     bool writePreferences(const QJsonObject &next);
+    void showSettingsWriteError();
     void selectPanel(int index);
     void openPanel(int index);
     void schedulePreviewWarm();
@@ -301,7 +303,7 @@ private:
     void syncBookmarks();
     kobalt::BookmarkList *bookmarkList = nullptr;
     QPointer<kobalt::ui::ModalOverlay> removeDialog;
-    QPointer<kobalt::ui::ModalOverlay> bookmarkErrorDialog;
+    QPointer<kobalt::ui::ModalOverlay> bookmarkErrorDialog, settingsWriteErrorDialog;
     QPointer<kobalt::ui::ModalOverlay> formattingWarningDialog;
     QVector<kobalt::BookmarkRow> bookmarkRows() const;
     void openBookmarks();
