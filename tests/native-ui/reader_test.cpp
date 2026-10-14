@@ -54,6 +54,7 @@
 #include <QDir>
 #include <QLineEdit>
 #include <QWindow>
+#include <QScreen>
 #include <QEventLoop>
 #include <QJsonArray>
 #include <QLabel>
@@ -1308,16 +1309,19 @@ private slots:
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
         CloseHost cleanup{host};
         QSignalSpy opened(&host, &test::ReaderHost::opened);
-        host.open(fixture(), nativeSize);
+        // wakeReader() shows the reader full screen. Open it at the screen
+        // size so page numbers stay comparable across wake. The offscreen
+        // plugin resizes a full screen window to the screen; minimal keeps
+        // the current size.
+        const QSize screenSize = QGuiApplication::primaryScreen()->geometry().size();
+        host.open(fixture(), screenSize);
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
         host.window()->setWindowFlags(Qt::Window);
         host.window()->setWindowModality(Qt::ApplicationModal);
-        // Keep the same fullscreen size before and after wake so page numbers stay comparable.
         host.window()->showFullScreen();
-        QTRY_VERIFY(host.window()->isFullScreen());
+        QTRY_COMPARE(host.window()->size(), screenSize);
         QTRY_COMPARE(QApplication::activeModalWidget(), host.window());
         QTRY_VERIFY(!host.session()->busy());
-        const QSize readingSize = host.window()->size();
         host.session()->go(0);
         QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 0);
         host.window()->pageButton(1);
@@ -1329,7 +1333,7 @@ private slots:
         host.window()->sleepViewReady();
         host.window()->wakeReader();
         QVERIFY(host.window()->isVisible());
-        QTRY_COMPARE(host.window()->size(), readingSize);
+        QTRY_COMPARE(host.window()->size(), screenSize);
         host.window()->pageButton(1);
         QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 2);
         host.window()->pageButton(-1);
