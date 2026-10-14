@@ -30,6 +30,7 @@ add_test(NAME ui-icon-vectors COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS
 add_test(NAME bundled-fonts COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_bundled_fonts.py")
 add_test(NAME mini-build COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_mini_build.py")
 add_test(NAME dependency-extraction COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_build.py")
+add_test(NAME host-dependency-cache COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_run_tests.py")
 add_test(NAME install-receipt COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${KOBALT_TESTS}/tooling" -p test_install_receipt.py)
 add_test(NAME kobo-build-script COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${KOBALT_TESTS}/tooling" -p test_kobo_build.py)
 add_test(NAME coverage-report COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_test_coverage.py")
@@ -150,6 +151,11 @@ kobalt_check(resource-provider SOURCES tests/model/resource_provider.cpp src/pub
 
 # Reader widgets without an engine.
 set(KOBALT_DEPENDENCY_PREFIX "${KOBALT_TEST_DEPENDENCIES}")
+add_executable(font-outlines-check "${KOBALT_TESTS}/support/font_outlines.cpp")
+target_compile_options(font-outlines-check PRIVATE -Wall -Wextra -Werror)
+target_include_directories(font-outlines-check PRIVATE "${KOBALT_TEST_DEPENDENCIES}/include/freetype2")
+target_link_libraries(font-outlines-check PRIVATE "${KOBALT_TEST_DEPENDENCIES}/lib/libfreetype.a" ZLIB::ZLIB ${KOBALT_TEST_PNG})
+set_tests_properties(mini-build PROPERTIES ENVIRONMENT "KOBALT_TEST_OUTLINE_CHECK=$<TARGET_FILE:font-outlines-check>")
 add_library(reader-fonts STATIC "${KOBALT_ROOT}/src/assets/assets.cpp" "${KOBALT_ROOT}/src/assets/bundled_fonts.cpp"
     "${KOBALT_ROOT}/src/assets/system_fonts.cpp")
 target_link_libraries(reader-fonts PUBLIC Qt6::Gui PRIVATE ZLIB::ZLIB)
@@ -164,13 +170,15 @@ add_subdirectory("${KOBALT_ROOT}/src/interfaces/reader/ui" reader-widgets)
 # kobalt_widget_test(NAME SOURCES files... LIBRARIES targets...)
 # Builds a widget test and runs it on the headless platform.
 function(kobalt_widget_test name)
-    cmake_parse_arguments(widget "" "" "SOURCES;LIBRARIES;ARGUMENTS;ENVIRONMENT" ${ARGN})
+    cmake_parse_arguments(widget "SHARDED" "" "SOURCES;LIBRARIES;ARGUMENTS;ENVIRONMENT" ${ARGN})
     add_executable(${name}-test ${widget_SOURCES})
     target_link_libraries(${name}-test PRIVATE ${widget_LIBRARIES} Qt6::Test)
     kobalt_test_options(${name}-test)
-    add_test(NAME ${name} COMMAND ${name}-test ${widget_ARGUMENTS})
-    set_tests_properties(${name} PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM};QT_STYLE_OVERRIDE=Fusion;${widget_ENVIRONMENT}")
+    if(NOT widget_SHARDED)
+        add_test(NAME ${name} COMMAND ${name}-test ${widget_ARGUMENTS})
+        set_tests_properties(${name} PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM};QT_STYLE_OVERRIDE=Fusion;${widget_ENVIRONMENT}")
+    endif()
 endfunction()
 
 set(component_sources "${KOBALT_TESTS}/model/ui.cpp")
@@ -189,6 +197,7 @@ qt_add_resources(acknowledgments-components-test component_notices PREFIX "/koba
     BASE "${KOBALT_ROOT}/resources" FILES "${KOBALT_ROOT}/resources/acknowledgments.json" ${notices})
 
 kobalt_widget_test(reader-canvas-input SOURCES "${KOBALT_TESTS}/native-ui/reader_canvas_test.cpp" LIBRARIES Qt6::Widgets)
+kobalt_widget_test(test-shards SOURCES "${KOBALT_TESTS}/native-ui/test_shards_test.cpp" LIBRARIES Qt6::Core)
 
 kobalt_widget_test(native-ui-smoke SOURCES "${KOBALT_TESTS}/native-ui/main.cpp" "${KOBALT_TESTS}/native-ui/host_display.cpp"
     "${KOBALT_ROOT}/src/interfaces/reader/settings/settings_panel.cpp"
@@ -359,7 +368,7 @@ kobalt_widget_test(android-ui SOURCES "${KOBALT_TESTS}/android/android_ui_test.c
 kobalt_widget_test(android-reader-lifecycle SOURCES "${KOBALT_TESTS}/android/android_reader_test.cpp"
     "${KOBALT_ROOT}/src/platform/android/reader.cpp" LIBRARIES test-reader-runtime
     ENVIRONMENT "KOBALT_FIXTURES=${KOBALT_TEST_FIXTURES}")
-kobalt_widget_test(desktop-window SOURCES "${KOBALT_TESTS}/desktop/window_test.cpp"
+kobalt_widget_test(desktop-window SHARDED SOURCES "${KOBALT_TESTS}/desktop/window_test.cpp"
     "${KOBALT_ROOT}/src/platform/desktop/window.cpp" "${KOBALT_ROOT}/src/platform/desktop/services.cpp"
     "${KOBALT_ROOT}/src/platform/android/reader.cpp" "${KOBALT_ROOT}/src/platform/android/start_screen.cpp"
     LIBRARIES interactive-reader-runtime)
@@ -378,13 +387,35 @@ target_link_libraries(reader-test PRIVATE test-reader-runtime test-positions Qt6
 kobalt_test_options(reader-test)
 qt_add_resources(reader-test reader-test-notices PREFIX "/kobalt" BASE "${KOBALT_ROOT}/resources"
     FILES "${KOBALT_ROOT}/resources/acknowledgments.json" ${notices})
-# Both runs share one state directory, so they must not run in parallel.
+# Each reader process owns its state and capture directory.
 add_test(NAME reader-window-device COMMAND reader-test deviceCapabilities overflowClosesCurrentPanel tabsCloseBookmarks)
-set_tests_properties(reader-window-device PROPERTIES RESOURCE_LOCK reader-state
-    ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM};KOBALT_FIXTURES=${KOBALT_TEST_FIXTURES};KOBALT_TEST_DEVICE_FIXTURE=libra-colour")
-add_test(NAME reader-window COMMAND reader-test)
-set_tests_properties(reader-window PROPERTIES RESOURCE_LOCK reader-state
-    ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM};KOBALT_FIXTURES=${KOBALT_TEST_FIXTURES}")
+set(device_work "${CMAKE_CURRENT_BINARY_DIR}/work/reader-window-device")
+file(MAKE_DIRECTORY "${device_work}")
+set_tests_properties(reader-window-device PROPERTIES WORKING_DIRECTORY "${device_work}"
+    ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM};KOBALT_FIXTURES=${KOBALT_TEST_FIXTURES};KOBALT_TEST_DEVICE_FIXTURE=libra-colour;KOBALT_TEST_STATE=${device_work}/test-state")
+foreach(shard RANGE 0 11)
+    set(work "${CMAKE_CURRENT_BINARY_DIR}/work/reader-window-${shard}")
+    file(MAKE_DIRECTORY "${work}")
+    add_test(NAME reader-window-${shard} COMMAND reader-test)
+    set_tests_properties(reader-window-${shard} PROPERTIES WORKING_DIRECTORY "${work}" COST 10
+        ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM};KOBALT_FIXTURES=${KOBALT_TEST_FIXTURES};KOBALT_TEST_SHARD=${shard}/12;KOBALT_TEST_STATE=${work}/test-state")
+endforeach()
+foreach(shard RANGE 0 7)
+    set(work "${CMAKE_CURRENT_BINARY_DIR}/work/desktop-window-${shard}")
+    file(MAKE_DIRECTORY "${work}")
+    add_test(NAME desktop-window-${shard} COMMAND desktop-window-test)
+    set_tests_properties(desktop-window-${shard} PROPERTIES WORKING_DIRECTORY "${work}" COST 10
+        ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM};QT_STYLE_OVERRIDE=Fusion;KOBALT_TEST_SHARD=${shard}/8;KOBALT_TEST_EXCLUDE=canvasBookLifecycle")
+endforeach()
+foreach(shard RANGE 0 4)
+    set(work "${CMAKE_CURRENT_BINARY_DIR}/work/desktop-window-books-${shard}")
+    file(MAKE_DIRECTORY "${work}")
+    add_test(NAME desktop-window-books-${shard} COMMAND desktop-window-test canvasBookLifecycle)
+    set_tests_properties(desktop-window-books-${shard} PROPERTIES WORKING_DIRECTORY "${work}" COST 14
+        ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM};QT_STYLE_OVERRIDE=Fusion;KOBALT_TEST_DATA_SHARD=${shard}/5")
+endforeach()
+set_tests_properties(desktop-window-6 PROPERTIES COST 16)
+set_tests_properties(reader PROPERTIES COST 25)
 
 # The interactive reader for manual checks. Not a test.
 add_executable(kobalt-test-reader "${KOBALT_TESTS}/native-ui/reader_main.cpp")

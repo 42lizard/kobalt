@@ -1,5 +1,6 @@
 #include <cmath>
 #include "variable_fonts.h"
+#include "qt_test_shards.h"
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/rows.h"
 #include "interfaces/reader/settings/settings_panel.h"
@@ -493,11 +494,17 @@ private slots:
     }
     void canvasBookLifecycle_data() {
         QTest::addColumn<QString>("filename");
-        QTest::newRow("normal") << QString("text.epub");
-        QTest::newRow("long-public-domain") << QString("public-domain-ru.epub");
-        QTest::newRow("linked") << QString("links.epub");
-        QTest::newRow("arabic") << QString("multilingual-ar.epub");
-        QTest::newRow("japanese") << QString("public-domain-ja.epub");
+        int position = 0;
+        const auto row = [&](const char *name, const QString &filename) {
+            if (test::shardContains(position++, "KOBALT_TEST_DATA_SHARD")) {
+                QTest::newRow(name) << filename;
+            }
+        };
+        row("normal", "text.epub");
+        row("long-public-domain", "public-domain-ru.epub");
+        row("linked", "links.epub");
+        row("arabic", "multilingual-ar.epub");
+        row("japanese", "public-domain-ja.epub");
     }
     void canvasBookLifecycle() {
         QFETCH(QString, filename);
@@ -912,7 +919,7 @@ int main(int argc, char **argv) {
     // Worker shutdown is connected to aboutToQuit, as in the application.
     DesktopTest test;
     QTimer::singleShot(0, &app, [&] {
-        app.exit(QTest::qExec(&test, argc, argv));
+        app.exit(QTest::qExec(&test, test::shardArguments(test, argc, argv)));
     });
     return app.exec();
 }

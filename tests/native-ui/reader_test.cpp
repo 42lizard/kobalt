@@ -28,6 +28,7 @@
 #include "support/strings.h"
 #include "host_services.h"
 #include "host_progress.h"
+#include "qt_test_shards.h"
 #include "platform/nickel/common/engine_positions.h"
 #include "reader_canvas.h"
 #include "platform/android/canvas.h"
@@ -85,7 +86,7 @@ FontCopies *testFontCopies = nullptr;
 EngineFontInputs testFonts;
 QString testPlaceholder;
 storage::Paths testPaths() {
-    storage::Paths paths{QStringLiteral(KOBALT_STORAGE_ROOT)};
+    storage::Paths paths{qEnvironmentVariable("KOBALT_TEST_STATE", QStringLiteral(KOBALT_STORAGE_ROOT))};
     paths.bookPrefix = "book-";
     paths.startup = paths.directory + "/startup-session";
     paths.active = paths.directory + "/active-session.json";
@@ -5481,7 +5482,7 @@ int main(int argc, char **argv) {
     app.setQuitOnLastWindowClosed(false);
     NativeReaderTest test;
     QTimer::singleShot(0, &app, [&] {
-        app.exit(QTest::qExec(&test, argc, argv));
+        app.exit(QTest::qExec(&test, test::shardArguments(test, argc, argv)));
     });
     return app.exec();
 }
