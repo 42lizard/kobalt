@@ -10,6 +10,8 @@ Use `--target qt6` for firmware 5 and 6 development builds. The build downloads 
 
 The firmware 5 and 6 package is `build/kobalt/reader-hardware/Kobalt.zip`. The firmware 4 package is `build/kobalt-qt5/reader-hardware/Kobalt.zip`. See [Reader behavior](reader.md) for installation and removal.
 
+Device builds started from the host reuse dependency builds only when the target, immutable SDK image, source pins and build recipes match. Each reuse verifies the installed files, engine library and generated engine configuration against saved hashes. Changed inputs or missing or damaged outputs rebuild dependencies from fresh build directories. This avoids reinstalling identical headers and forcing application recompilation. Direct `--in-toolchain` builds retain the full dependency build path because they do not provide an immutable image identity. Application builds and package verification still run every time.
+
 Report bugs through the issue tracker; pull requests are not accepted.
 
 For a binary release, provide the corresponding source and dependency sources with their notices and licenses. The dependency archives downloaded by the build are under `.cache/kobalt/`.
