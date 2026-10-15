@@ -1,18 +1,20 @@
+#include "native_resources.h"
+
+#include "image_policy.h"
+#include "resource_transport.h"
+#include "support/diagnostics.h"
 #include "support/qt_compat.h"
 #include "support/strings.h"
-#include "native_resources.h"
-#include "support/diagnostics.h"
-#include "image_policy.h"
-#include <QEventLoop>
-#include <QElapsedTimer>
+
 #include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QThread>
-#include <QNetworkProxy>
-#include <QTcpSocket>
 #include <QTimer>
 #include <QUrl>
 #include <QXmlStreamReader>
+
 #include <vector>
 
 namespace kobalt {
@@ -196,8 +198,7 @@ std::shared_ptr<ResourceCache> nativeResources(QMap<QString, qint64> sizes, cons
         QElapsedTimer requestTimer;
         requestTimer.start();
         ++timings->requests;
-        QTcpSocket socket;
-        socket.setProxy(QNetworkProxy::NoProxy);
+        ResourceSocket socket;
         socket.setReadBufferSize(ResourceCache::blockBytes);
         QEventLoop loop;
         QTimer deadline, cancellation;
@@ -327,17 +328,17 @@ std::shared_ptr<ResourceCache> nativeResources(QMap<QString, qint64> sizes, cons
             if (!accepted || replaced || bodyBytes == length)
                 finish();
         };
-        QObject::connect(&socket, &QTcpSocket::connected, &loop, [&] {
+        QObject::connect(&socket, &ResourceSocket::connected, &loop, [&] {
             if (socket.write(request) != request.size())
                 fail(strings::get("error.cannot_request_native_publication_resource"));
         });
-        QObject::connect(&socket, &QTcpSocket::readyRead, &loop, drain);
-        QObject::connect(&socket, &QTcpSocket::disconnected, &loop, [&] {
+        QObject::connect(&socket, &ResourceSocket::readyRead, &loop, drain);
+        QObject::connect(&socket, &ResourceSocket::disconnected, &loop, [&] {
             drain();
             finish();
         });
 #if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-        QObject::connect(&socket, &QTcpSocket::errorOccurred, &loop, [&] {
+        QObject::connect(&socket, &ResourceSocket::errorOccurred, &loop, [&] {
             drain();
             finish();
         });
@@ -356,7 +357,7 @@ std::shared_ptr<ResourceCache> nativeResources(QMap<QString, qint64> sizes, cons
             if (!lease || lease->revoked())
                 finish();
         });
-        socket.connectToHost(QHostAddress::LocalHost, port);
+        connectResourceSocket(socket, port);
         if (!finished)
             loop.exec();
         const int socketError = int(socket.error());

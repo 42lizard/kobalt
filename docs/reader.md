@@ -282,6 +282,10 @@ Fonts with an optical-size axis show an Optical size slider below Text size. The
 
 ## Experimental PocketBook host
 
+Local EPUB resources use Unix sockets within Kobalt. Reading does not require
+Wi-Fi, an IP address or an enabled loopback interface. The existing resource
+authentication, limits and cancellation apply to this transport as well.
+
 The PocketBook fork opens local unprotected EPUBs through the native library's
 Open with menu or a launcher file argument. Starting the app without a book
 opens the PocketBook library. There is no separate start screen or file picker.

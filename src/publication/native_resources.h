@@ -11,6 +11,7 @@ void releaseResourceConnections(std::function<void()> finished);
 // Construct and use resources on the engine worker. The host keeps its GUI
 // endpoint alive through the drain barrier. Each opening gets a fresh lease;
 // neither its port nor its cancellation state can be reused for another open.
+// For PocketBook, port is the local socket endpoint number from ResourceServer.
 std::shared_ptr<ResourceCache> nativeResources(QMap<QString, qint64> sizes, const QString &path, int port,
                                                std::shared_ptr<SourceLease> lease,
                                                const QString &systemFont = "sans-serif",

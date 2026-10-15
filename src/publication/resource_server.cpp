@@ -1,26 +1,28 @@
 #include "resource_server.h"
-#include "zip_resource.h"
-#include "support/qt_compat.h"
-#include "native_archive.h"
+
 #include "image_policy.h"
+#include "loopback.h"
+#include "native_archive.h"
 #include "native_resources.h"
 #include "publication.h"
-#include "support/diagnostics.h"
-#include "loopback.h"
 #include "resource_cache.h"
-#include <cerrno>
+#include "resource_transport.h"
+#include "support/diagnostics.h"
+#include "support/qt_compat.h"
+#include "zip_resource.h"
+
 #include <QBuffer>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QImageReader>
 #include <QNetworkReply>
+#include <QTimer>
+#include <QUrl>
 #ifndef KOBALT_READER_HARDWARE
 #include <QSaveFile>
 #endif
-#include <QTcpServer>
-#include <QTcpSocket>
-#include <QTimer>
-#include <QUrl>
+
+#include <cerrno>
 
 namespace kobalt::native {
 namespace {
@@ -61,7 +63,7 @@ bool svgSource(const QByteArray &bytes) {
 }
 class Transfer : public QObject {
 public:
-    Transfer(QTcpSocket *socket, ResourceArchive &archive, const QString &route, const QString &path,
+    Transfer(ResourceSocket *socket, ResourceArchive &archive, const QString &route, const QString &path,
              const QMap<QString, qint64> &sizes, QObject *parent)
         : QObject(parent), socket_(socket), archive_(archive), route_(route), path_(path), sizes_(sizes) {
         elapsed_.start();
@@ -74,11 +76,11 @@ public:
             socket_->abort();
             deleteLater();
         });
-        connect(socket_, &QTcpSocket::disconnected, this, &QObject::deleteLater);
-        connect(socket_, &QTcpSocket::readyRead, this, [this] {
+        connect(socket_, &ResourceSocket::disconnected, this, &QObject::deleteLater);
+        connect(socket_, &ResourceSocket::readyRead, this, [this] {
             request();
         });
-        connect(socket_, &QTcpSocket::bytesWritten, this, [this](qint64) {
+        connect(socket_, &ResourceSocket::bytesWritten, this, [this](qint64) {
             schedule();
         });
         request();
@@ -91,7 +93,7 @@ public:
     }
 
 private:
-    QTcpSocket *socket_;
+    ResourceSocket *socket_;
     ResourceArchive &archive_;
     QString route_, path_, name_;
     const QMap<QString, qint64> &sizes_;
@@ -116,7 +118,7 @@ private:
         trace(stage);
         failed_ = true;
         socket_->write("HTTP/1.1 404 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-        socket_->disconnectFromHost();
+        disconnectResourceSocket(socket_);
     }
     void schedule() {
         if (scheduled_ || failed_ || !sending_)
@@ -143,10 +145,10 @@ private:
         socket_->write("HTTP/1.1 206 Partial Content\r\nContent-Length: 0\r\nX-Kobalt-Image-Dimensions: 1 " +
                        QByteArray::number(size.width()) + " " + QByteArray::number(size.height()) +
                        "\r\nConnection: close\r\n\r\n");
-        socket_->disconnectFromHost();
+        disconnectResourceSocket(socket_);
     }
     void pump() {
-        if (failed_ || socket_->state() != QAbstractSocket::ConnectedState)
+        if (failed_ || socket_->state() != ResourceSocket::ConnectedState)
             return;
         if (!sending_ || socket_->bytesToWrite() != 0)
             return;
@@ -157,7 +159,7 @@ private:
                             {"max_block_bytes", double(maxBlock_)},
                             {"elapsed_ms", double(elapsed_.elapsed())}},
                            false);
-            socket_->disconnectFromHost();
+            disconnectResourceSocket(socket_);
             return;
         }
         const auto count = qMin<qint64>(ResourceCache::blockBytes, length_ - sent_);
@@ -219,7 +221,7 @@ private:
     }
 
     void send(const QByteArray &bytes) {
-        if (failed_ || socket_->state() != QAbstractSocket::ConnectedState)
+        if (failed_ || socket_->state() != ResourceSocket::ConnectedState)
             return;
         body_ = bytes;
         begin(body_.size());
@@ -385,7 +387,7 @@ private:
         load();
     }
     void load() {
-        if (failed_ || socket_->state() != QAbstractSocket::ConnectedState)
+        if (failed_ || socket_->state() != ResourceSocket::ConnectedState)
             return;
         const auto &name = name_;
         if (dimensionsOnly_ && (!imageFileName(name) || name.endsWith(".svg", Qt::CaseInsensitive) ||
@@ -417,7 +419,8 @@ private:
 }
 struct ResourceServer::Data {
     std::unique_ptr<ResourceArchive> archive;
-    QTcpServer listener;
+    ResourceListener listener;
+    int endpoint = 0;
     QMap<QString, qint64> sizes;
     QString route, path;
 };
@@ -459,6 +462,17 @@ bool ResourceServer::open(const QString &path, const OpenArchive &openArchive) {
     QUrl route;
     route.setPath("/EPUBPATH" + path, QUrl::DecodedMode);
     data->route = QString::fromLatin1(route.toEncoded());
+#ifdef KOBALT_LOCAL_RESOURCE_SOCKET
+    // All opens occur on the GUI thread. Abstract sockets disappear on exit,
+    // including crashes, and do not need loopback configuration or privileges.
+    static unsigned nextEndpoint = 0;
+    data->endpoint = int(nextEndpoint++ % 0x7fffffffU) + 1;
+    data->listener.setSocketOptions(QLocalServer::AbstractNamespaceOption);
+    if (!data->listener.listen(resourceSocketName(data->endpoint))) {
+        diagnostic("native-resource-failed", {{"stage", "local-listen"}, {"error", int(data->listener.serverError())}});
+        return false;
+    }
+#else
     // An addressed but down loopback can accept bind() while connections fail.
     // Check it before listening, rather than waiting for a bind failure.
     int loopbackError = 0;
@@ -475,9 +489,11 @@ bool ResourceServer::open(const QString &path, const OpenArchive &openArchive) {
                    {{"stage", "loopback-listen"}, {"error", int(data->listener.serverError())}});
         return false;
     }
+    data->endpoint = data->listener.serverPort();
+#endif
     data_ = std::move(data);
-    diagnostic("native-resource-listening", {{"port", int(data_->listener.serverPort())}}, false);
-    connect(&data_->listener, &QTcpServer::newConnection, this, [this] {
+    diagnostic("native-resource-listening", {{"port", data_->endpoint}}, false);
+    connect(&data_->listener, &ResourceListener::newConnection, this, [this] {
         while (auto *socket = data_->listener.nextPendingConnection()) {
             // Leave room for completed connections awaiting deferred deletion.
             if (children().size() >= 4) {
@@ -491,6 +507,6 @@ bool ResourceServer::open(const QString &path, const OpenArchive &openArchive) {
     return true;
 }
 int ResourceServer::port() const {
-    return data_ ? data_->listener.serverPort() : 0;
+    return data_ ? data_->endpoint : 0;
 }
 }

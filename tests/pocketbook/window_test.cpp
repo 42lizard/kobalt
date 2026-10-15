@@ -51,7 +51,7 @@ private slots:
         const auto fonts = engineFontInputs(assets, {}, {}, {});
         const auto placeholder = placeholderFontFamily(assets, copies);
         const auto book = profile.path() + QStringLiteral("/Bären and Lúthien.epub");
-        QVERIFY(QFile::copy(QStringLiteral(KOBALT_FIXTURE), book));
+        QVERIFY(QFile::copy(qEnvironmentVariable("KOBALT_TEST_BOOK", QStringLiteral(KOBALT_FIXTURE)), book));
         QImage first, second;
         for (int pass = 0; pass < 2; ++pass) {
             pocketbook::Window window(storage::Paths{profile.path()}, fonts, placeholder);
@@ -60,7 +60,8 @@ private slots:
             QSignalSpy opened(&window, &pocketbook::Window::bookOpened);
             QSignalSpy failed(&window, &pocketbook::Window::bookFailed);
             window.openBook(book);
-            QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+            QTRY_VERIFY_WITH_TIMEOUT(opened.count() || failed.count(), 30000);
+            QCOMPARE(opened.count(), 1);
             QCOMPARE(failed.count(), 0);
             auto page = [&] {
                 return window.grab().toImage().copy(120, 250, 1160, 1150);

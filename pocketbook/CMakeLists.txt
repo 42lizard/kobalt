@@ -51,6 +51,7 @@ add_compile_options("-iquote${SRC}" -Wall -Wextra)
 set(KOBALT_HOST_SOURCES "${SRC}/platform/desktop/services.cpp"
     "${SRC}/platform/pocketbook/window.cpp" "${SRC}/platform/pocketbook/device.cpp")
 include("${KOBALT_ROOT}/cmake/StandaloneReader.cmake")
+target_compile_definitions(standalone-runtime PRIVATE KOBALT_LOCAL_RESOURCE_SOCKET)
 if(KOBALT_POCKETBOOK_HOST)
     target_compile_definitions(standalone-runtime PUBLIC KOBALT_POCKETBOOK_HOST)
 else()
