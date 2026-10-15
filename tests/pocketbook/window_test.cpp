@@ -5,7 +5,7 @@
 #include "platform/pocketbook/window.h"
 
 #include <QApplication>
-#include <QFileDialog>
+#include <QFile>
 #include <QFontDatabase>
 #include <QImage>
 #include <QLineEdit>
@@ -50,6 +50,8 @@ private slots:
         FontCopies copies;
         const auto fonts = engineFontInputs(assets, {}, {}, {});
         const auto placeholder = placeholderFontFamily(assets, copies);
+        const auto book = profile.path() + QStringLiteral("/Bären and Lúthien.epub");
+        QVERIFY(QFile::copy(QStringLiteral(KOBALT_FIXTURE), book));
         QImage first, second;
         for (int pass = 0; pass < 2; ++pass) {
             pocketbook::Window window(storage::Paths{profile.path()}, fonts, placeholder);
@@ -57,19 +59,7 @@ private slots:
             window.show();
             QSignalSpy opened(&window, &pocketbook::Window::bookOpened);
             QSignalSpy failed(&window, &pocketbook::Window::bookFailed);
-            if (pass == 0) {
-                auto *open = window.findChild<QPushButton *>("androidOpenBook");
-                QVERIFY(open);
-                QTimer::singleShot(0, &window, [&] {
-                    auto *dialog = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
-                    QVERIFY(dialog);
-                    QTest::keyPress(dialog, Qt::Key_Escape);
-                    QTest::keyRelease(&window, Qt::Key_Escape);
-                });
-                open->click();
-                QVERIFY(window.isVisible());
-            }
-            window.openBook(QStringLiteral(KOBALT_FIXTURE));
+            window.openBook(book);
             QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
             QCOMPARE(failed.count(), 0);
             auto page = [&] {
@@ -78,6 +68,10 @@ private slots:
             QTest::qWait(300);
             if (pass == 0) {
                 first = page();
+                const auto capture = qEnvironmentVariable("KOBALT_TEST_CAPTURE");
+                if (!capture.isEmpty()) {
+                    QVERIFY(window.grab().save(capture));
+                }
                 QTest::keyClick(&window, Qt::Key_PageDown);
                 QTRY_VERIFY_WITH_TIMEOUT(page() != first, 10000);
                 QTest::qWait(300);
@@ -92,9 +86,33 @@ private slots:
             } else {
                 QTRY_COMPARE_WITH_TIMEOUT(page(), second, 10000);
             }
-            window.close();
+            QPushButton *back = nullptr;
+            for (auto *widget : QApplication::allWidgets()) {
+                if (widget->objectName() == "rrReturn") {
+                    back = qobject_cast<QPushButton *>(widget);
+                }
+            }
+            QVERIFY(back);
+            back->click();
             QTRY_VERIFY_WITH_TIMEOUT(window.idle(), 10000);
+            QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 1000);
         }
+        pocketbook::Window invalid(storage::Paths{profile.path()}, fonts, placeholder);
+        invalid.resize(1404, 1735);
+        invalid.show();
+        QSignalSpy failed(&invalid, &pocketbook::Window::bookFailed);
+        invalid.openBook(profile.path() + "/missing.epub");
+        QTRY_COMPARE(failed.count(), 1);
+        QTRY_VERIFY(invalid.idle());
+        auto *native = invalid.findChild<QPushButton *>("rrOpeningNative");
+        auto *back = invalid.findChild<QPushButton *>("rrOpeningBack");
+        QVERIFY(native);
+        QVERIFY(back);
+        // A failed native handoff must leave the error view usable.
+        native->click();
+        QVERIFY(back->isVisible());
+        back->click();
+        QTRY_VERIFY(!invalid.isVisible());
     }
 };
 int main(int argc, char **argv) {
