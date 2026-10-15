@@ -46,15 +46,16 @@ ReaderOrientation::~ReaderOrientation() {
 }
 void ReaderOrientation::configure(const QJsonObject &settings) {
     manualOrientation = validOrientation(settings.value("orientation").toInt(Qt::PortraitOrientation));
-    if (sensor) {
+    if (automaticAvailable()) {
         manualOrientation =
             manualOrientation == Qt::LandscapeOrientation || manualOrientation == Qt::InvertedLandscapeOrientation
                 ? Qt::LandscapeOrientation
                 : Qt::PortraitOrientation;
     }
     const bool automatic = settings.value("auto_rotate").toBool(false);
-    if (active && (!sensor || (!automatic && currentOrientation != manualOrientation &&
-                               currentOrientation != Qt::ScreenOrientation(int(manualOrientation) * 4)))) {
+    if (active &&
+        (!automaticAvailable() || (!automatic && currentOrientation != manualOrientation &&
+                                   currentOrientation != Qt::ScreenOrientation(int(manualOrientation) * 4)))) {
         apply(manualOrientation);
     }
     setAutomatic(automatic);
@@ -168,7 +169,7 @@ bool ReaderOrientation::filter(QOrientationReading *reading) {
 }
 #endif
 void ReaderOrientation::deliver() {
-    if (!active || !sensor || blocked || pending == Qt::PrimaryOrientation)
+    if (!active || !automaticAvailable() || blocked || pending == Qt::PrimaryOrientation)
         return;
     const auto orientation = pending;
     pending = Qt::PrimaryOrientation;

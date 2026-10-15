@@ -108,6 +108,22 @@ class DependencyCacheTests(unittest.TestCase):
             with patch.object(run_tests.subprocess, 'check_output', return_value='second version\n'):
                 self.assertNotEqual(first, run_tests.dependency_identity(self.output, {}, True))
 
+    def test_system_png_without_qt_sdk_is_part_of_identity(self):
+        png = self.output / 'libpng.so'
+        header = self.output / 'png.h'
+        png.write_bytes(b'first library')
+        header.write_text('first header')
+        override = (png, self.output, '1.6')
+        with patch.object(run_tests.platform, 'platform', return_value='test host'), \
+                patch.object(run_tests.subprocess, 'check_output', return_value='tool version\n'), \
+                patch.object(run_tests.shutil, 'which', side_effect=lambda name: '/tools/' + name):
+            first = run_tests.dependency_identity(None, {}, False, png_override=override)
+            png.write_bytes(b'updated library')
+            second = run_tests.dependency_identity(None, {}, False, png_override=override)
+            self.assertNotEqual(first, second)
+            header.write_text('updated header')
+            self.assertNotEqual(second, run_tests.dependency_identity(None, {}, False, png_override=override))
+
 
 if __name__ == '__main__':
     unittest.main()

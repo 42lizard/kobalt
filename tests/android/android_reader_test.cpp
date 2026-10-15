@@ -91,7 +91,7 @@ private slots:
             window->show();
             QVERIFY(QTest::qWaitForWindowExposed(window));
             QTRY_VERIFY(window->readyForPresentation());
-            auto *page = window->findChild<ReadingPage *>("rrPage");
+            auto *page = dynamic_cast<ReadingPage *>(window->findChild<QWidget *>("rrPage"));
             QVERIFY(page);
             page->tapped(page->rect().center());
             auto *stats = window->findChild<QPushButton *>("rrNavStats");

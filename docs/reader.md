@@ -308,6 +308,10 @@ Fonts with an optical-size axis show an Optical size slider below Text size. The
 
 ## Experimental PocketBook host
 
+Local EPUB resources use the shared direct ZIP access on the engine worker.
+Reading does not require Wi-Fi, an IP address or an enabled loopback interface.
+The existing resource limits, cancellation and access-revocation checks apply.
+
 The PocketBook fork opens local unprotected EPUBs through the native library's
 Open with menu or a launcher file argument. Starting the app without a book
 opens the PocketBook library. There is no separate start screen or file picker.

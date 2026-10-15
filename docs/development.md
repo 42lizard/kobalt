@@ -45,6 +45,12 @@ and the successful-open notification. The parent installer adds `kobalt.app`
 to EPUB's Open with choices without changing the current default reader.
 Reading progress and bookmarks still use Kobalt's own storage.
 
+This target uses the shared direct ZIP publication access, without sockets.
+Run the parent ARM workflow with
+`--without-network` in a container granted `SYS_ADMIN` to create an isolated
+network namespace with no loopback address. This exercises EPUB opening,
+rendering, page turns and position restoration without any IP networking.
+
 `--arm-test` also builds the workflow test for QEMU with the exact firmware Qt
 and C runtime. Only InkView hardware calls are stubbed and the display is
 offscreen; native task switching and physical display/input require device

@@ -51,7 +51,7 @@ private slots:
         const auto fonts = engineFontInputs(assets, {}, {}, {});
         const auto placeholder = placeholderFontFamily(assets, copies);
         const auto book = profile.path() + QStringLiteral("/Bären and Lúthien.epub");
-        QVERIFY(QFile::copy(QStringLiteral(KOBALT_FIXTURE), book));
+        QVERIFY(QFile::copy(qEnvironmentVariable("KOBALT_TEST_BOOK", QStringLiteral(KOBALT_FIXTURE)), book));
         QImage first, second;
         for (int pass = 0; pass < 2; ++pass) {
             pocketbook::Window window(storage::Paths{profile.path()}, fonts, placeholder);
@@ -60,12 +60,20 @@ private slots:
             QSignalSpy opened(&window, &pocketbook::Window::bookOpened);
             QSignalSpy failed(&window, &pocketbook::Window::bookFailed);
             window.openBook(book);
-            QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+            QTRY_VERIFY_WITH_TIMEOUT(opened.count() || failed.count(), 30000);
+            QCOMPARE(opened.count(), 1);
             QCOMPARE(failed.count(), 0);
+            ReaderWindow *reader = nullptr;
+            for (auto *widget : QApplication::allWidgets()) {
+                if (auto *candidate = dynamic_cast<ReaderWindow *>(widget)) {
+                    reader = candidate;
+                }
+            }
+            QVERIFY(reader);
+            QTRY_VERIFY_WITH_TIMEOUT(reader->readyForPresentation(), 30000);
             auto page = [&] {
                 return window.grab().toImage().copy(120, 250, 1160, 1150);
             };
-            QTest::qWait(300);
             if (pass == 0) {
                 first = page();
                 const auto capture = qEnvironmentVariable("KOBALT_TEST_CAPTURE");
@@ -73,9 +81,11 @@ private slots:
                     QVERIFY(window.grab().save(capture));
                 }
                 QTest::keyClick(&window, Qt::Key_PageDown);
-                QTRY_VERIFY_WITH_TIMEOUT(page() != first, 10000);
-                QTest::qWait(300);
+                QTRY_VERIFY_WITH_TIMEOUT(reader->readyForPresentation() && page() != first, 10000);
                 second = page();
+                if (!capture.isEmpty()) {
+                    QVERIFY(second.save(capture + ".turned.png"));
+                }
                 QLineEdit editor(&window);
                 editor.setText("abc");
                 editor.show();
@@ -84,6 +94,10 @@ private slots:
                 QTest::keyClick(&editor, Qt::Key_Left);
                 QCOMPARE(editor.cursorPosition(), 1);
             } else {
+                const auto capture = qEnvironmentVariable("KOBALT_TEST_CAPTURE");
+                if (!capture.isEmpty()) {
+                    QVERIFY(page().save(capture + ".reopened.png"));
+                }
                 QTRY_COMPARE_WITH_TIMEOUT(page(), second, 10000);
             }
             QPushButton *back = nullptr;
