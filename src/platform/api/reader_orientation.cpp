@@ -46,9 +46,19 @@ ReaderOrientation::~ReaderOrientation() {
 }
 void ReaderOrientation::configure(const QJsonObject &settings) {
     manualOrientation = validOrientation(settings.value("orientation").toInt(Qt::PortraitOrientation));
-    setAutomatic(settings.value("auto_rotate").toBool(false));
-    if (active)
+    if (automaticAvailable()) {
+        manualOrientation =
+            manualOrientation == Qt::LandscapeOrientation || manualOrientation == Qt::InvertedLandscapeOrientation
+                ? Qt::LandscapeOrientation
+                : Qt::PortraitOrientation;
+    }
+    const bool automatic = settings.value("auto_rotate").toBool(false);
+    if (active &&
+        (!automaticAvailable() || (!automatic && currentOrientation != manualOrientation &&
+                                   currentOrientation != Qt::ScreenOrientation(int(manualOrientation) * 4)))) {
         apply(manualOrientation);
+    }
+    setAutomatic(automatic);
 }
 void ReaderOrientation::start(Qt::ScreenOrientation orientation) {
     if (active)
@@ -100,11 +110,7 @@ bool ReaderOrientation::setAutomatic(bool enabled) {
     pending = Qt::PrimaryOrientation;
 #ifndef KOBALT_NO_SENSORS
     automaticRotation = enabled && sensor;
-    if (!automaticRotation && sensor && startedSensor) {
-        sensor->stop();
-        startedSensor = false;
-    }
-    if (active && automaticRotation) {
+    if (active && sensor) {
         if (!sensor->isActive()) {
             startedSensor = sensor->start();
             if (!startedSensor) {
@@ -129,7 +135,7 @@ void ReaderOrientation::setBlocked(bool value) {
 bool ReaderOrientation::filter(QOrientationReading *reading) {
     if (!active)
         return true;
-    if (automaticRotation) {
+    if (sensor) {
         Qt::ScreenOrientation next = Qt::PrimaryOrientation;
         switch (reading->orientation()) {
         case QOrientationReading::TopUp:
@@ -147,7 +153,9 @@ bool ReaderOrientation::filter(QOrientationReading *reading) {
         default:
             break;
         }
-        if (next == Qt::PrimaryOrientation || next == currentOrientation) {
+        const bool portrait = next == Qt::PortraitOrientation || next == Qt::InvertedPortraitOrientation;
+        const bool allowed = automaticRotation || portrait == (manualOrientation == Qt::PortraitOrientation);
+        if (next == Qt::PrimaryOrientation || !allowed || next == currentOrientation) {
             pending = Qt::PrimaryOrientation;
             debounce.stop();
         } else if (next != pending) {
@@ -161,7 +169,7 @@ bool ReaderOrientation::filter(QOrientationReading *reading) {
 }
 #endif
 void ReaderOrientation::deliver() {
-    if (!active || !automaticRotation || blocked || pending == Qt::PrimaryOrientation)
+    if (!active || !automaticAvailable() || blocked || pending == Qt::PrimaryOrientation)
         return;
     const auto orientation = pending;
     pending = Qt::PrimaryOrientation;

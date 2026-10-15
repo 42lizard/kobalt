@@ -2,6 +2,7 @@
 #include "usb_removal.h"
 #include <QObject>
 #include <QPointer>
+#include <QTimer>
 #include <functional>
 
 namespace kobalt {
@@ -37,7 +38,10 @@ public:
         return usbPending || exported;
     }
     bool draining = false;
-    std::function<void()> sleep, sleepViewReady, wake, beforeWake, cancelWake;
+    bool usbPromptExpected() const {
+        return expectingUsbPrompt;
+    }
+    std::function<void()> sleep, sleepViewReady, wake, beforeWake, cancelWake, usbPrompt;
     static void finishSleepView();
     std::function<void(std::function<void()>)> prepareUsb;
     std::function<void(std::function<void()>)> prepareShutdown;
@@ -55,17 +59,21 @@ public:
     bool testSleepCovered = false, testSleepViewReady = false;
 #endif
 private slots:
+    void usbPlugged();
     void aboutToSleep();
     void resumed();
     void processingDone();
     void unplugging();
 
 private:
+    bool expectingUsbPrompt = false;
     bool savingBeforeSleep = false;
     bool connected_ = false, asleep = false, usbPending = false, exported = false, poweringOff = false;
     bool storageReady = false, remounting = false;
     QPointer<QObject> pendingGadget, pendingWorkflow;
     void finishUsb();
+    void finishWake();
+    QTimer wakeRetry;
     quint64 generation = 0;
     UsbRemoval usbRemoval;
     bool removalPending = false;

@@ -44,9 +44,6 @@ public:
     }
     void observeReading(double, const QString &) override {}
     void stopReading() override {}
-    ReadingChapters *chapters() override {
-        return nullptr;
-    }
 
 private:
     std::shared_ptr<HostProgress> progress;

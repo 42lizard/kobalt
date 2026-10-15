@@ -2,15 +2,47 @@
 
 ### What's changed
 
+- Improved opening of EPUBs with imperfect markup and unsupported layout features, including books that use Adobe page templates.
+
+- Added Hide non-linear fragments in Settings > Advanced. It skips optional EPUB sections during normal page turns while keeping them available through links, Chapters and page-number navigation. It is off by default.
+
+- Increased the maximum text size from 20 pt to 48 pt and the maximum Thickness from +8 to +12.
+
+- Fixed excessive view redrawing throughout Kobalt, which in practice means you see the screen flash less frequently.
+
+- Opening the font and layout panels is now significantly faster.
+
+- Renamed Bionic Reading to Bold Reading. Upgrades from Beta 2 keep its saved setting. The checkbox now applies immediately. Failed settings saves show a disk write error dialog and keep the previous setting.
+
 - Save changed reading progress to Nickel every 30 seconds while reading and before sleep, so the sleep screen can show the current progress.
 
 - Save reading progress before USB export, while preserving newer synced progress and allowing USB to continue if saving fails.
 
-- Fixed unchanged header and footer text flashing during ordinary page turns on MTK devices. These turns now use partial update mode.
+- Fixed native progress and sleep-cover updates for KEPUB pages without source element IDs or with normalized text. Nickel receives the start of the current chapter when the exact position cannot be mapped; Kobalt keeps the exact position locally.
 
-- Use whole-screen coverage for ordinary page turns on older and unknown hardware, keeping the existing update mode and waveform.
+- Fixed opening and bookmarking DRM-free books downloaded through compatible sync servers that use numeric or other non-UUID book IDs. Existing bookmark folders remain available.
 
-- Avoid cleanup flashes when opening reading controls over text-only pages in light mode. Closing the controls by tapping the page or title retains cleanup. Dark-mode controls use cleanup when opening and closing.
+- Stats now uses shared cached word counts on Kobo and Android, including plain EPUBs. Counts cover the whole book and chapter intervals, survive reflow and reuse the parsed-document cache. Chapters uses the EPUB table of contents without Nickel's word-count API.
+
+- Added Automatic brightness for Kobo devices with an ambient light sensor. Manual brightness adjustments turn it off and stop a pending brightness animation from overwriting the chosen level. Cancelled gestures restore the original level and setting.
+
+- Kobo devices with an orientation sensor now offer Portrait, Landscape and Both. Portrait lock is the default, and rejected orientations no longer trigger page layout changes. Devices without a sensor keep manual rotation.
+
+- Added support for the Kobo Touch's physical Home button. Pressing it saves reading progress and returns to Nickel's Home screen.
+
+- Page buttons now page Chapters, Bookmarks, search results and licenses instead of being ignored.
+
+- Sideloaded fonts in folders up to two levels below `fonts/`, such as `fonts/Family/static/`, now appear in the font picker. Hidden files and Kobo's wrapped fonts are skipped.
+
+- Publisher Fonts uses Libron for serif, Legible Next for sans-serif and IBM Plex Mono for monospace when the book has no embedded fonts. The default reading font remains a separate book override.
+
+- Added hyphenation dictionaries for Estonian, Finnish, Georgian, Hungarian, Latvian, Lithuanian, Polish, Slovak, Slovenian and Ukrainian.
+
+- Show formatting warnings only for confirmed unsupported layout features. Large books no longer show a warning when the formatting inspection reaches its limits.
+
+- Show the book-loading screen at 0% in Kobalt's interface fonts, before publication inspection and full asset validation. This makes Kobalt feel faster to start and feels less like it's frozen.
+
+- Long chapters in the Stats chart fill the chart height without a visible line through the bars when chapters are very long relative to other chapters.
 
 ## v1.0-beta.2
 

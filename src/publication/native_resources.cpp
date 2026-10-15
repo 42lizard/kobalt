@@ -1,20 +1,18 @@
-#include "native_resources.h"
-
-#include "image_policy.h"
-#include "resource_transport.h"
-#include "support/diagnostics.h"
 #include "support/qt_compat.h"
 #include "support/strings.h"
-
-#include <QCoreApplication>
-#include <QElapsedTimer>
+#include "native_resources.h"
+#include "support/diagnostics.h"
+#include "image_policy.h"
 #include <QEventLoop>
+#include <QElapsedTimer>
+#include <QCoreApplication>
 #include <QFile>
 #include <QThread>
+#include <QNetworkProxy>
+#include <QTcpSocket>
 #include <QTimer>
 #include <QUrl>
 #include <QXmlStreamReader>
-
 #include <vector>
 
 namespace kobalt {
@@ -34,6 +32,7 @@ struct TransferTimings {
 };
 thread_local bool transferring = false;
 thread_local std::vector<std::function<void()>> pendingReleases;
+std::atomic_bool networkReady{false};
 QObject *resourceNetwork() {
     // A nested event loop on the engine worker would run other queued engine
     // jobs during a transfer and corrupt CREngine's process-global font state.
@@ -48,6 +47,7 @@ QObject *resourceNetwork() {
             thread->wait();
         });
         thread->start();
+        networkReady.store(true);
         return worker;
     }();
     return network;
@@ -151,6 +151,10 @@ bool resourceSecretMatches(const QByteArray &candidate) {
     return difference == 0;
 }
 void releaseResourceConnections(std::function<void()> finished) {
+    if (!networkReady.load()) {
+        kobalt::qt::invoke(qApp, finished, Qt::QueuedConnection);
+        return;
+    }
     auto *network = resourceNetwork();
     kobalt::qt::invoke(
         network,
@@ -198,7 +202,8 @@ std::shared_ptr<ResourceCache> nativeResources(QMap<QString, qint64> sizes, cons
         QElapsedTimer requestTimer;
         requestTimer.start();
         ++timings->requests;
-        ResourceSocket socket;
+        QTcpSocket socket;
+        socket.setProxy(QNetworkProxy::NoProxy);
         socket.setReadBufferSize(ResourceCache::blockBytes);
         QEventLoop loop;
         QTimer deadline, cancellation;
@@ -210,10 +215,10 @@ std::shared_ptr<ResourceCache> nativeResources(QMap<QString, qint64> sizes, cons
              headersDone = false;
         qint64 length = -1, bodyBytes = 0;
         QByteArray prefix, header;
-        const bool validateXml = name.endsWith(".xhtml", Qt::CaseInsensitive) ||
-                                 name.endsWith(".html", Qt::CaseInsensitive) ||
-                                 name.endsWith(".opf", Qt::CaseInsensitive) ||
-                                 name.endsWith(".ncx", Qt::CaseInsensitive) || name == "META-INF/container.xml";
+        // CREngine parses reading content as HTML and can recover from errors
+        // that a strict XML parser rejects. Only validate the package structure
+        // here; chapters and navigation remain the engine's responsibility.
+        const bool validateXml = name.endsWith(".opf", Qt::CaseInsensitive) || name == "META-INF/container.xml";
         QXmlStreamReader xml;
         auto finish = [&] {
             finished = true;
@@ -328,17 +333,17 @@ std::shared_ptr<ResourceCache> nativeResources(QMap<QString, qint64> sizes, cons
             if (!accepted || replaced || bodyBytes == length)
                 finish();
         };
-        QObject::connect(&socket, &ResourceSocket::connected, &loop, [&] {
+        QObject::connect(&socket, &QTcpSocket::connected, &loop, [&] {
             if (socket.write(request) != request.size())
                 fail(strings::get("error.cannot_request_native_publication_resource"));
         });
-        QObject::connect(&socket, &ResourceSocket::readyRead, &loop, drain);
-        QObject::connect(&socket, &ResourceSocket::disconnected, &loop, [&] {
+        QObject::connect(&socket, &QTcpSocket::readyRead, &loop, drain);
+        QObject::connect(&socket, &QTcpSocket::disconnected, &loop, [&] {
             drain();
             finish();
         });
 #if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-        QObject::connect(&socket, &ResourceSocket::errorOccurred, &loop, [&] {
+        QObject::connect(&socket, &QTcpSocket::errorOccurred, &loop, [&] {
             drain();
             finish();
         });
@@ -357,7 +362,7 @@ std::shared_ptr<ResourceCache> nativeResources(QMap<QString, qint64> sizes, cons
             if (!lease || lease->revoked())
                 finish();
         });
-        connectResourceSocket(socket, port);
+        socket.connectToHost(QHostAddress::LocalHost, port);
         if (!finished)
             loop.exec();
         const int socketError = int(socket.error());

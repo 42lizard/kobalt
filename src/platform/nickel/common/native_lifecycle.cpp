@@ -134,6 +134,8 @@ extern "C" __attribute__((visibility("default"))) void kobalt_usb_connect(void *
         nativeUsbConnect(manager);
 }
 NativeLifecycle::NativeLifecycle(QObject *parent) : QObject(parent) {
+    wakeRetry.setSingleShot(true);
+    connect(&wakeRetry, &QTimer::timeout, this, &NativeLifecycle::finishWake);
     const auto power = symbol<QObject *(*)()>("_ZN22N3PowerWorkflowManager14sharedInstanceEv");
     const auto usb = symbol<QObject *(*)()>("_ZN19PlugWorkflowManager14sharedInstanceEv");
     if (!power || !usb || !nativeUsbWorkflow || !nativeCanSuspend || !nativeUsbConnect || !nativeAboutUsbConnect ||
@@ -143,6 +145,10 @@ NativeLifecycle::NativeLifecycle(QObject *parent) : QObject(parent) {
     const auto b = connect(power(), SIGNAL(resumedFromSleep()), this, SLOT(resumed()), Qt::DirectConnection);
     const auto c = connect(usb(), SIGNAL(doneProcessing()), this, SLOT(processingDone()), Qt::DirectConnection);
     const auto d = connect(usb(), SIGNAL(aboutToUnplug()), this, SLOT(unplugging()), Qt::DirectConnection);
+    const auto plugManager = symbol<QObject *(*)()>("_ZN11PlugManager14sharedInstanceEv");
+    if (plugManager) {
+        connect(plugManager(), SIGNAL(plugged()), this, SLOT(usbPlugged()), Qt::DirectConnection);
+    }
     connected_ = a && b && c && d;
     if (connected_) {
         active = this;
@@ -155,7 +161,21 @@ NativeLifecycle::NativeLifecycle(QObject *parent) : QObject(parent) {
     testTimer->start(100);
 #endif
 }
+void NativeLifecycle::usbPlugged() {
+    expectingUsbPrompt = true;
+    qt::later(5000, this, [this] {
+        expectingUsbPrompt = false;
+    });
+    // Nickel's signal can be called directly inside its library, bypassing a
+    // PLT hook. Wait until its slots have created the confirmation dialog.
+    qt::later(0, this, [this] {
+        if (usbPrompt && !storageBlocked() && !poweringOff) {
+            usbPrompt();
+        }
+    });
+}
 void NativeLifecycle::aboutToSleep() {
+    wakeRetry.stop();
     asleep = true;
     engineActivity().pause(!draining && !storageBlocked());
     diagnostic("sleep-start");
@@ -166,18 +186,33 @@ void NativeLifecycle::aboutToSleep() {
     savingBeforeSleep = false;
 }
 void NativeLifecycle::resumed() {
-    // Nickel may still be finishing its resume/PIN handler on this stack.
-    kobalt::qt::later(0, this, [this] {
-        if (poweringOff || removalPending || nativeSleeping())
-            return;
-        asleep = false;
-        if (storageBlocked())
-            return;
-        engineActivity().pause(false);
-        diagnostic("sleep-end");
-        if (wake)
-            wake();
-    });
+    // Leave Nickel's resume stack before restoring the reader.
+    wakeRetry.start(0);
+}
+void NativeLifecycle::finishWake() {
+    if (poweringOff || removalPending) {
+        return;
+    }
+    const auto &api = powerApi();
+    const auto *power = api.available() ? api.manager() : nullptr;
+    if (!power || api.sleeping(power)) {
+        return;
+    }
+    if (suspended()) {
+        // Sleep, PIN and USB views can outlast their native transition signal.
+        // Retry only while awake; another sleep signal cancels the timer.
+        wakeRetry.start(25);
+        return;
+    }
+    asleep = false;
+    if (storageBlocked()) {
+        return;
+    }
+    engineActivity().pause(false);
+    diagnostic("sleep-end");
+    if (wake) {
+        wake();
+    }
 }
 bool NativeLifecycle::canSuspend() {
     return !active ||
@@ -322,9 +357,8 @@ void NativeLifecycle::processingDone() {
     diagnostic("usb-storage-ready");
     if (restartAfterRemoval())
         return;
-    if (asleep || nativeSleeping()) {
+    if (nativeSleeping()) {
         engineActivity().pause(true);
-        return;
     }
     resumed();
 }

@@ -10,8 +10,9 @@ configure_file("${SRC}/engine/crengine/reader_hyphenation.h.in" reader_hyphenati
 configure_file("${SRC}/support/build_info.h.in" build_info.h @ONLY)
 include("${KOBALT_ROOT}/cmake/ReaderComponents.cmake")
 kobalt_publication_library(standalone-publication)
-add_library(reader-fonts STATIC "${SRC}/assets/assets.cpp" "${SRC}/assets/bundled_fonts.cpp")
-target_link_libraries(reader-fonts PUBLIC Qt6::Gui)
+add_library(reader-fonts STATIC "${SRC}/assets/assets.cpp" "${SRC}/assets/bundled_fonts.cpp"
+    "${SRC}/assets/system_fonts.cpp")
+target_link_libraries(reader-fonts PUBLIC Qt6::Gui PRIVATE z)
 set(KOBALT_DEPENDENCY_PREFIX "${KOBALT_TEST_DEPENDENCIES}")
 add_subdirectory("${SRC}/interfaces/reader/ui" reader-widgets)
 include("${KOBALT_ROOT}/cmake/EngineSources.cmake")
