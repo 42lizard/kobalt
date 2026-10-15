@@ -3,12 +3,12 @@
 #include "device.h"
 #include "interfaces/reader/ui/style/scale.h"
 #include "interfaces/reader/ui/style/theme.h"
+#include "interfaces/reader/views/opening.h"
 #include "platform/android/canvas.h"
-#include "platform/android/start_screen.h"
 #include "reading/reading_density.h"
+#include "support/diagnostics.h"
 
 #include <QCloseEvent>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QLineEdit>
 #include <QStackedLayout>
@@ -24,51 +24,43 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     ui::setDensity(300);
     stack = new QStackedLayout(this);
     stack->setContentsMargins(0, 0, 0, 0);
-    start = new android::StartScreen(readerServices().presentation, this);
+    opening = createEmbeddedOpening(this, readerServices().presentation);
     canvas = new android::WidgetCanvas(this);
-    stack->addWidget(start);
+    stack->addWidget(opening->window());
     stack->addWidget(canvas);
-    start->setLastBook(controller.lastBook());
-    connect(start, &android::StartScreen::openRequested, this, [this] {
-        const auto path = QFileDialog::getOpenFileName(this, tr("Open EPUB"), "/mnt/ext1", tr("EPUB books (*.epub)"),
-                                                       nullptr, QFileDialog::DontUseNativeDialog);
-        if (!path.isEmpty()) {
-            openBook(path);
-        }
-    });
-    connect(start, &android::StartScreen::reopenRequested, this, &Window::openBook);
-    connect(start, &android::StartScreen::forgetRequested, this, [this] {
-        if (controller.forgetLastBook()) {
-            start->setLastBook({});
+    connect(opening->window(), &QDialog::rejected, this, &QWidget::close);
+    connect(opening->window(), &QDialog::accepted, this, [this] {
+        if (openNativeBook(bookPath)) {
+            close();
         } else {
-            start->showForgetError();
+            diagnostic("pocketbook-native-open-failed");
+            opening->window()->show();
         }
     });
-    connect(start, &android::StartScreen::exitRequested, this, &QWidget::close);
-    connect(&controller, &android::ReaderController::openingProgress, start, &android::StartScreen::setProgress);
+    connect(&controller, &android::ReaderController::openingProgress, this, [this](int percent) {
+        opening->setProgress(percent);
+    });
+    connect(&controller, &android::ReaderController::exitRequested, this, &QWidget::close);
     connect(&controller, &android::ReaderController::opened, this, [this] {
         auto *reader = controller.window();
         canvas->setContent(reader);
         stack->setCurrentWidget(canvas);
         canvas->fitContent();
         reader->show();
-        start->setLastBook(controller.lastBook());
         reader->checkpoint();
+        bookReady(bookPath, controller.lastBook().value("title").toString());
+        diagnostic("pocketbook-book-opened");
         keepAwake(false);
         emit bookOpened();
     });
     connect(&controller, &android::ReaderController::failed, this, [this](const QString &error) {
-        failed = true;
-        start->showError(error);
-        stack->setCurrentWidget(start);
+        diagnostic("pocketbook-book-failed");
+        opening->showFallback(OpeningFallback::Failure);
+        stack->setCurrentWidget(opening->window());
         keepAwake(false);
         emit bookFailed(error);
     });
     connect(&controller, &android::ReaderController::closed, this, [this] {
-        stack->setCurrentWidget(start);
-        if (!failed) {
-            start->showReady();
-        }
         keepAwake(false);
         if (closing) {
             close();
@@ -94,11 +86,11 @@ void Window::openBook(const QString &path) {
     if (closing || (controller.window() && controller.path() == QFileInfo(path).absoluteFilePath())) {
         return;
     }
-    failed = false;
+    bookPath = QFileInfo(path).absoluteFilePath();
+    diagnostic("pocketbook-book-requested");
     keepAwake(true);
-    start->showOpening();
-    stack->setCurrentWidget(start);
-    controller.open(QFileInfo(path).absoluteFilePath(), size());
+    stack->setCurrentWidget(opening->window());
+    controller.open(bookPath, size());
 }
 void Window::closeEvent(QCloseEvent *event) {
     if (!controller.idle()) {

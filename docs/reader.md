@@ -282,11 +282,15 @@ Fonts with an optical-size axis show an Optical size slider below Text size. The
 
 ## Experimental PocketBook host
 
-The PocketBook fork opens local unprotected EPUBs from its start screen or a
-launcher file argument. The last book, positions, bookmarks and preferences are
+The PocketBook fork opens local unprotected EPUBs through the native library's
+Open with menu or a launcher file argument. Starting the app without a book
+opens the PocketBook library. There is no separate start screen or file picker.
+The last book, positions, bookmarks and preferences are
 local to `/mnt/ext1/system/kobalt/config`; native PocketBook reading databases
 are not used. Page keys and touch use the shared reader actions. Home drains
-pending reading work before exit; closing a book returns to the start screen.
+pending reading work before exit; closing a book also exits so PocketBook can
+resume the previous task. Successful opening notifies InkView and updates the
+task title and recent books. Registering Kobalt preserves the default reader.
 Manual rotation uses InkView; automatic sensor rotation, in-app frontlight,
 dictionary installation and browser launch are unavailable. Native keyboard,
 refresh and lifecycle behavior still require device acceptance on PB743K3

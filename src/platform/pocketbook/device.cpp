@@ -4,6 +4,7 @@
 #include "platform/desktop/services.h"
 
 #include <QApplication>
+#include <QFile>
 #include <QInputMethod>
 #include <QKeyEvent>
 #include <QLineEdit>
@@ -18,6 +19,28 @@
 #endif
 
 namespace kobalt::pocketbook {
+void bookReady(const QString &path, const QString &title) {
+#ifndef KOBALT_POCKETBOOK_HOST
+    const auto file = QFile::encodeName(path);
+    const auto caption = (title + " — Kobalt").toUtf8();
+    SetSubtaskInfo(GetCurrentTask(), 0, caption.constData(), file.constData());
+    BookReady(file.constData());
+    AddLastOpen(file.constData());
+#else
+    Q_UNUSED(path);
+    Q_UNUSED(title);
+#endif
+}
+bool openNativeBook(const QString &path) {
+#ifndef KOBALT_POCKETBOOK_HOST
+    const auto file = QFile::encodeName(path);
+    const char *args[] = {"/ebrmain/bin/eink-reader.app", file.constData()};
+    return OpenTask(args[0], 2, args, TASK_MAKEACTIVE) >= 0;
+#else
+    Q_UNUSED(path);
+    return false;
+#endif
+}
 QSize initialize() {
 #ifdef KOBALT_POCKETBOOK_HOST
     return {1404, 1872};
