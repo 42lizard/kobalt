@@ -1,0 +1,34 @@
+--- a/crengine/include/lvfntman.h
++++ b/crengine/include/lvfntman.h
+@@ -152,11 +152,19 @@
+         //       Given the alignment constraints on bmp, the only sane way to compute that is via offsetof.
+         return offsetof(LVFontGlyphCacheItem, bmp) + (bmp_pitch * bmp_height);
+     }
++    static LVFontGlyphCacheItem * allocate(int pitch, int height)
++    {
++        // alignas(16) requires more than ARM's malloc alignment guarantee.
++        void * storage = NULL;
++        if (posix_memalign(&storage, alignof(LVFontGlyphCacheItem),
++                           offsetof(LVFontGlyphCacheItem, bmp) + pitch * height) != 0)
++            return NULL;
++        return static_cast<LVFontGlyphCacheItem *>(storage);
++    }
+     static LVFontGlyphCacheItem * newItem( LVFontLocalGlyphCache * local_cache, lChar32 ch, int w, int h, int pitch = 0, lUInt8 pixfmt = 1 )
+     {
+         if (!pitch) pitch = w * pixfmt;
+-        LVFontGlyphCacheItem * item = (LVFontGlyphCacheItem *)malloc( offsetof(LVFontGlyphCacheItem, bmp)
+-                                                                        + (pitch * h) );
++        LVFontGlyphCacheItem * item = allocate(pitch, h);
+ 	if (item) {
+ 	    item->data.ch = ch;
+ 	    item->bmp_width = (lUInt16)w;
+@@ -178,8 +186,7 @@
+     static LVFontGlyphCacheItem *newItem(LVFontLocalGlyphCache* local_cache, lUInt32 glyph_index, int w, int h, int pitch = 0, lUInt8 pixfmt = 1)
+     {
+         if (!pitch) pitch = w * pixfmt;
+-        LVFontGlyphCacheItem * item = (LVFontGlyphCacheItem *)malloc( offsetof(LVFontGlyphCacheItem, bmp)
+-                                                                        + (pitch * h) );
++        LVFontGlyphCacheItem * item = allocate(pitch, h);
+         if (item) {
+             item->data.gindex = glyph_index;
+             item->bmp_width = (lUInt16) w;

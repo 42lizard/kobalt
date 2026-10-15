@@ -1,11 +1,11 @@
 #pragma once
+#include "interfaces/reader_interface.h"
 #include "platform/android/reader.h"
 
 #include <QWidget>
 
 class QStackedLayout;
 namespace kobalt::android {
-class StartScreen;
 class WidgetCanvas;
 }
 namespace kobalt::pocketbook {
@@ -29,9 +29,10 @@ protected:
 private:
     android::ReaderController controller;
     QStackedLayout *stack;
-    android::StartScreen *start;
+    std::unique_ptr<ReaderOpeningView> opening;
+    QString bookPath;
     android::WidgetCanvas *canvas;
-    bool closing = false, failed = false;
+    bool closing = false;
     bool repairPending = false;
 };
 }

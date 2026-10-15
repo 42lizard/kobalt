@@ -526,11 +526,11 @@
 /* Arguments: %1, %2 */
 "stats.duration_clock" = "%1:%2";
 
-"opening.native" = "Opening with Kobo's reader";
+"opening.native" = "Opening with the built-in reader";
 "opening.protected" = "This book is protected.";
 "opening.continuing" = "Continuing automatically";
 "opening.failed" = "Couldn't open this book";
-"opening.failed_detail" = "Kobalt couldn't read this EPUB. You can try opening it in Kobo's built-in reader.";
+"opening.failed_detail" = "Kobalt couldn't read this EPUB. You can try opening it in the device's built-in reader.";
 "opening.try_native" = "Try built-in reader";
 "opening.go_back" = "Go back";
 

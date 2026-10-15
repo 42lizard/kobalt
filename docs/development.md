@@ -23,7 +23,7 @@ Build the standalone app with `python3 android/build.py` from this public checko
 ## PocketBook
 
 The experimental `pocketbook/` target reuses the standalone reader libraries,
-Android's Qt-only controller and start screen, and desktop's fallback services.
+the Qt-only publication controller, and desktop's fallback services.
 Its InkView adapter and native Qt platform integration live in
 `src/platform/pocketbook/`. It does not link Nickel. The target is the InkPad
 Color 3 (PB743K3) with U743k3.6.10.2854 and its Qt 6.8.2 runtime.
@@ -37,6 +37,20 @@ Qt 6.8.2 libraries extracted from the target firmware. These are link inputs,
 never package contents. CREngine keeps its private static text libraries;
 Qt uses the firmware's shared FreeType. Qt Sensors is disabled only for this
 host because that module is absent from the inspected firmware.
+
+The PocketBook library supplies the EPUB path. The host displays the shared
+reader opening view and exits after reading work drains; it has no Android
+start page or desktop file picker. InkView receives the active book title/path
+and the successful-open notification. The parent installer adds `kobalt.app`
+to EPUB's Open with choices without changing the current default reader.
+Reading progress and bookmarks still use Kobalt's own storage.
+
+`--arm-test` also builds the workflow test for QEMU with the exact firmware Qt
+and C runtime. Only InkView hardware calls are stubbed and the display is
+offscreen; native task switching and physical display/input require device
+acceptance. This test caught an ARM glyph-cache alignment fault: `alignas(16)`
+objects must use aligned allocation, since ARM `malloc` may provide only 8-byte
+alignment. The correction is retained in `crengine-glyph-alignment.patch`.
 
 `cmake/StandaloneReader.cmake` is shared by the desktop and PocketBook builds.
 The existing desktop behavior and sensor support remain enabled by default.

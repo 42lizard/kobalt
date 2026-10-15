@@ -15,6 +15,7 @@ parser.add_argument('--host', action='store_true')
 parser.add_argument('--jobs', type=int, default=2)
 parser.add_argument('--skip-dependencies', action='store_true')
 parser.add_argument('--regression', action='store_true', help='Run the full upstream host test suite')
+parser.add_argument('--arm-test', action='store_true', help='Also build the ARM reading test for firmware emulation')
 parser.add_argument('--firmware-libs', type=Path, help='Extracted PB743K3 Qt 6.8.2 libraries (device build only)')
 args = parser.parse_args()
 if args.jobs < 1:
@@ -29,6 +30,7 @@ if not args.skip_dependencies:
                     *(['--host'] if args.host else [])], check=True)
 if args.host:
     os.environ.pop('CMAKE_TOOLCHAIN_FILE', None)
+if args.host or args.arm_test:
     import runpy
     runpy.run_path(str(ROOT / 'tests/fixtures/reader_fixture.py'))['book'](output / 'fixture.epub')
 options = json.loads((output / 'engine-options.json').read_text())
@@ -37,6 +39,7 @@ manifest = output / 'assets/install/.adds/kobalt/assets/manifest.json'
 if not args.regression and json.loads(manifest.read_text())['version'] != version:
     parser.error('Asset version differs from the build; rerun without --skip-dependencies')
 options.append(f'-DKOBALT_VERSION={version}')
+options.append('-DKOBALT_POCKETBOOK_ARM_TEST=' + ('ON' if args.arm_test else 'OFF'))
 if args.firmware_libs:
     options.append(f'-DKOBALT_FIRMWARE_LIBS={args.firmware_libs.resolve()}')
 source = ROOT / ('tests' if args.regression else 'pocketbook')
