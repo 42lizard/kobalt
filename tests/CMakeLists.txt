@@ -33,6 +33,7 @@ add_test(NAME dependency-extraction COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT
 add_test(NAME host-dependency-cache COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_run_tests.py")
 add_test(NAME install-receipt COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${KOBALT_TESTS}/tooling" -p test_install_receipt.py)
 add_test(NAME kobo-build-script COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${KOBALT_TESTS}/tooling" -p test_kobo_build.py)
+add_test(NAME pocketbook-build-tools COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${KOBALT_TESTS}/pocketbook" -p "test_*.py")
 add_test(NAME coverage-report COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_test_coverage.py")
 add_test(NAME variable-font-fixture COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_variable_font.py")
 add_test(NAME cpp-formatter-tool COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_format_cpp.py")

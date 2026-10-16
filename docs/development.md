@@ -28,39 +28,30 @@ Its InkView adapter and native Qt platform integration live in
 `src/platform/pocketbook/`. It does not link Nickel. The target is the InkPad
 Color 3 (PB743K3) with U743k3.6.10.2854 and its Qt 6.8.2 runtime.
 
-Use the SDK container and firmware preparation steps in the parent
-[PocketBook repository](https://github.com/42lizard/pocketbook/tree/experiment/kobalt-pocketbook/apps/kobalt).
-Inside that container, `python3 external/kobalt/pocketbook/build.py --host`
-builds the host and runs the EPUB open/page/close/reopen check. Omit `--host`
-and supply `--firmware-libs DIR` for ARM. The directory must contain the real
-Qt 6.8.2 libraries extracted from the target firmware. These are link inputs,
-never package contents. CREngine keeps its private static text libraries;
-Qt uses the firmware's shared FreeType. Qt Sensors is disabled only for this
-host because that module is absent from the inspected firmware.
+The buildchain is self-contained in this checkout. With Python 3.11+, Docker
+or Podman, and the official target firmware's `SWUPDATE.BIN`, run:
+
+```sh
+./build-pocketbook.sh --firmware /absolute/path/SWUPDATE.BIN --jobs 4 --test
+```
+
+See [PocketBook build and installation](../pocketbook/README.md) for firmware
+provenance, outputs, checks, installation and device limitations. The SDK recipe
+is `toolchains/pocketbook/Dockerfile`; no parent repository or SDK checkout is
+required. Firmware libraries are local link/test inputs and are never packaged.
 
 The PocketBook library supplies the EPUB path. The host displays the shared
-reader opening view and exits after reading work drains; it has no Android
-start page or desktop file picker. InkView receives the active book title/path
-and the successful-open notification. The parent installer adds `kobalt.app`
-to EPUB's Open with choices without changing the current default reader.
-Reading progress and bookmarks still use Kobalt's own storage.
+opening view and exits after reading work drains; it has no Android start page
+or desktop file picker. Local EPUB resources use upstream's direct ZIP access.
+The optional ARM test runs in an isolated network namespace, opens and turns a
+page, closes and checks restored content. InkView hardware calls are stubbed;
+physical display, input and task switching still need device acceptance.
 
-This target uses the shared direct ZIP publication access, without sockets.
-Run the parent ARM workflow with
-`--without-network` in a container granted `SYS_ADMIN` to create an isolated
-network namespace with no loopback address. This exercises EPUB opening,
-rendering, page turns and position restoration without any IP networking.
-
-`--arm-test` also builds the workflow test for QEMU with the exact firmware Qt
-and C runtime. Only InkView hardware calls are stubbed and the display is
-offscreen; native task switching and physical display/input require device
-acceptance. This test caught an ARM glyph-cache alignment fault: `alignas(16)`
-objects must use aligned allocation, since ARM `malloc` may provide only 8-byte
-alignment. The correction is retained in `crengine-glyph-alignment.patch`.
-
-`cmake/StandaloneReader.cmake` is shared by the desktop and PocketBook builds.
-The existing desktop behavior and sensor support remain enabled by default.
-The public PocketBook workflow test lives in `tests/pocketbook/window_test.cpp`.
+`cmake/StandaloneReader.cmake` is shared with desktop. Qt Sensors is disabled
+only for PocketBook because that module is absent from the target firmware.
+CREngine retains its private static text libraries and the ARM glyph-allocation
+alignment fix. Qt uses firmware FreeType. Kobo Qt5 and Qt6 build entry points
+and native integration remain separate.
 
 ## macOS
 

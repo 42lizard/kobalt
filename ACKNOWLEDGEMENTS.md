@@ -105,4 +105,6 @@ The [font manifests](resources/fonts/) and [icon manifest](resources/icons/lucid
 
 The build and test scripts also use Python, CMake, Ninja, GNU Make, GCC or Clang, GNU Binutils, pkg-config, Docker or Podman, QEMU user-mode emulation and the Android SDK and NDK. These are development tools, rather than libraries bundled into the Kobalt reader package.
 
+The experimental PocketBook build uses [Filip Stanis's Qt6 SDK helpers and builder](https://github.com/fstanis/pocketbook-sdk-qt6), pinned in `toolchains/pocketbook/Dockerfile`, and [PocketBook's InkView SDK](https://github.com/pocketbook/SDK_6.3.0). PocketBook supplies the target firmware and runtime libraries; they are local build/test inputs and are not included in the application package. [7-Zip](https://www.7-zip.org/), by Igor Pavlov and contributors, extracts those firmware inputs during the build.
+
 The [in-app acknowledgments](resources/acknowledgments.json), dependency manifests and license notices are the source records for this document.

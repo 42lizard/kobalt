@@ -324,4 +324,4 @@ task title and recent books. Registering Kobalt preserves the default reader.
 Manual rotation uses InkView; automatic sensor rotation, in-app frontlight,
 dictionary installation and browser launch are unavailable. Native keyboard,
 refresh and lifecycle behavior still require device acceptance on PB743K3
-U743k3.6.10.2854. Build and installation steps are in the parent PocketBook repo.
+U743k3.6.10.2854. Build and installation steps are in [PocketBook build and installation](../pocketbook/README.md).
