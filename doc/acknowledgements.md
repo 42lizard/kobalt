@@ -110,3 +110,5 @@ The builds also use CMake, Ninja, GNU Make, GCC or Clang, GNU Binutils, pkg-conf
 The [in-app acknowledgments](../assets/acknowledgments.json), dependency manifests and license notices are the source records for this document.
 
 Android BOOX support uses [AndroidHiddenApiBypass 4.3](https://github.com/LSPosed/AndroidHiddenApiBypass) by the LSPosed contributors, under the Apache License 2.0. Kobalt uses its own BOOX adapter and does not bundle the Onyx SDK.
+
+The experimental PocketBook port uses [Filip Stanis's Qt 6 SDK helpers and builder](https://github.com/fstanis/pocketbook-sdk-qt6) and [PocketBook's InkView SDK](https://github.com/pocketbook/SDK_6.3.0). PocketBook's firmware supplies device runtime libraries; these build/test inputs are not included in application packages. Firmware extraction uses [7-Zip](https://www.7-zip.org/) by Igor Pavlov and contributors.
