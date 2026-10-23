@@ -105,6 +105,7 @@ endfunction()
 kobalt_check(touch-rotation SOURCES tests/model/touch_rotation.cpp src/platform/nickel/qt5/touch_rotation.cpp LIBRARIES Qt6::Gui)
 kobalt_check(usb-removal SOURCES tests/model/usb_removal.cpp LIBRARIES Qt6::Core)
 kobalt_check(nickel-session-calls SOURCES tests/model/nickel_session_calls.cpp LIBRARIES Qt6::Core)
+kobalt_check(nickel-dictionary-selection SOURCES tests/model/nickel_dictionary_selection.cpp LIBRARIES Qt6::Core)
 
 kobalt_check(progress SOURCES tests/model/reading_progress.cpp src/reading/reading_progress.cpp LIBRARIES Qt6::Core)
 kobalt_check(storage-assets SOURCES tests/model/storage_assets.cpp src/assets/assets.cpp src/storage/reader_storage.cpp
@@ -133,6 +134,7 @@ kobalt_check(image-damage SOURCES tests/model/image_damage.cpp LIBRARIES Qt6::Gu
 kobalt_check(page-pixels SOURCES tests/model/page_pixels.cpp LIBRARIES Qt6::Gui)
 kobalt_check(qt-compat SOURCES tests/model/qt_compat.cpp LIBRARIES Qt6::Core)
 kobalt_check(appearance-settings SOURCES tests/model/appearance_settings.cpp src/reading/appearance_settings.cpp LIBRARIES Qt6::Core)
+kobalt_check(header-footer SOURCES tests/model/header_footer.cpp src/reading/header_footer.cpp LIBRARIES Qt6::Core)
 kobalt_check(font-data SOURCES tests/model/font_data.cpp src/interfaces/reader/ui/style/font_data.cpp LIBRARIES Qt6::Gui
     DEFINITIONS KOBALT_FONT_DIRECTORY="${KOBALT_ROOT}/resources/fonts")
 kobalt_check(image-policy SOURCES tests/model/image_policy.cpp src/publication/image_policy.cpp
@@ -205,6 +207,8 @@ kobalt_widget_test(native-ui-smoke SOURCES "${KOBALT_TESTS}/native-ui/main.cpp" 
     "${KOBALT_ROOT}/src/interfaces/reader/settings/settings_panel.cpp"
     "${KOBALT_ROOT}/src/interfaces/reader/settings/dictionaries_page.cpp"
     "${KOBALT_ROOT}/src/interfaces/reader/settings/appearance_panel.cpp"
+    "${KOBALT_ROOT}/src/interfaces/reader/settings/header_footer_panel.cpp"
+    "${KOBALT_ROOT}/src/reading/header_footer.cpp"
     "${KOBALT_ROOT}/src/interfaces/reader/views/opening.cpp"
     "${KOBALT_ROOT}/src/storage/reader_storage.cpp"
     LIBRARIES reader-widgets ARGUMENTS --smoke)
@@ -215,6 +219,9 @@ kobalt_widget_test(nickel-browser-handoff SOURCES "${KOBALT_TESTS}/nickel/browse
     LIBRARIES Qt6::Widgets)
 kobalt_widget_test(nickel-window-presentation SOURCES "${KOBALT_TESTS}/nickel/window_presentation_test.cpp"
     "${KOBALT_ROOT}/src/platform/nickel/common/window_presentation.cpp" LIBRARIES Qt6::Widgets)
+kobalt_widget_test(nickel-battery SOURCES "${KOBALT_TESTS}/nickel/native_battery_test.cpp"
+    "${KOBALT_ROOT}/src/platform/nickel/common/native_battery.cpp" LIBRARIES Qt6::Core ${CMAKE_DL_LIBS})
+set_target_properties(nickel-battery-test PROPERTIES ENABLE_EXPORTS TRUE)
 kobalt_widget_test(nickel-usb-dialog-overlay SOURCES "${KOBALT_TESTS}/nickel/usb_dialog_overlay_test.cpp"
     LIBRARIES Qt6::Widgets)
 kobalt_widget_test(nickel-usb-transition SOURCES "${KOBALT_TESTS}/nickel/usb_transition_test.cpp"
@@ -320,6 +327,7 @@ kobalt_engine_check(vertical-writing)
 kobalt_engine_check(mathml)
 kobalt_engine_check(line-breaking)
 kobalt_engine_check(whitespace)
+kobalt_engine_check(fallback-styles)
 kobalt_engine_check(svg-limits)
 target_compile_definitions(whitespace-check PRIVATE KOBALT_FONT_DIRECTORY="${KOBALT_ROOT}/resources/fonts")
 kobalt_engine_check(multilingual ARGUMENTS "${KOBALT_TEST_FIXTURES}/multilingual-ar.epub"

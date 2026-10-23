@@ -676,9 +676,7 @@ void ReaderCoordinator::load() {
         benchmarkTypographyEnabled ? kobalt::appearance::benchmarkTypography(run.identity) : QJsonObject();
     const auto preferences = kobalt::appearance::readerPreferences(readJson(environment_.paths.preferences()), saved);
     run.orientation->configure(preferences);
-    kobalt::appearance::applyFontDefault(saved, preferences);
     saved["dark_mode"] = preferences.value("dark_mode").toBool(false);
-    saved["smooth_images"] = preferences.value("smooth_images").toBool(true);
     saved["bold_reading"] = preferences.value("bold_reading").toString("off");
     const auto size = run.interface->readingViewport(QGuiApplication::primaryScreen()->size(), preferences);
     run.model->open(
@@ -686,7 +684,7 @@ void ReaderCoordinator::load() {
          useNative ? run.diskBaseline.location : run.nativePublication->location(), environment_.paths.layoutCache(),
          run.sourceLease, run.nativePublication->resources(run.sourceLease), positionCodec(),
          environment_.paths.documentCache(), temporaryAppearance, originalAppearance,
-         environment_.paths.directory + "/userstyle.css"},
+         environment_.paths.directory + "/userstyle.css", kobalt::appearance::bookDefaults(preferences)},
         [this](const kobalt::OpeningResult &outcome) {
             run.openingTimings["load_and_layout_ms"] = run.openingTimer.elapsed() - run.layoutStarted;
             if (!outcome.ready()) {
@@ -717,6 +715,9 @@ void ReaderCoordinator::showReader() {
         std::move(run.model), run.statePath, environment_.paths, run.identity, run.expectedHash,
         kobalt::nickel::makeReadingBridge(run.identity, std::move(run.nativeProgress)), run.baseline, run.diskBaseline);
     auto services = readerHostServices();
+    services.coverImagePath = run.nativePublication ? run.nativePublication->coverPath() : QString();
+    services.automaticBookOpening = bindings_.automaticBookOpening;
+    services.setAutomaticBookOpening = bindings_.setAutomaticBookOpening;
     const auto suspended = services.suspended;
     services.suspended = [this, suspended] {
         return usbDialog_.active() || suspended();

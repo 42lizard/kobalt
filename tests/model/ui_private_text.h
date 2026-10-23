@@ -12,6 +12,63 @@
 #include <QTextBoundaryFinder>
 #include <QFileInfo>
 
+inline void checkPrivateFallbackStyles(const kobalt::AssetBundle &assets) {
+    using namespace kobalt::ui;
+    struct Sample {
+        const char *stem;
+        const char *text;
+        bool italics;
+    };
+    for (const auto &sample :
+         {Sample{"NotoSerif", "ΕλληνικάРусские", true}, Sample{"NotoNaskhArabic", "العَرَبِيَّة", false},
+          Sample{"NotoSerifHebrew", "עִבְרִית", false}, Sample{"NotoSerifArmenian", "Հայերեն", false},
+          Sample{"NotoSerifGeorgian", "ქართული", false}, Sample{"NotoSerifDevanagari", "हिन्दी", false},
+          Sample{"NotoSerifBengali", "বাংলা", false}, Sample{"NotoSerifTamil", "தமிழ்", true},
+          Sample{"NotoSerifThai", "ภาษาไทย", false}}) {
+        const auto text = QString::fromUtf8(sample.text);
+        const auto alias = QString("Style reference %1").arg(sample.stem);
+        for (const auto *style : {"Regular", "Bold", "Italic", "BoldItalic"}) {
+            const QString name(style);
+            if (name.contains("Italic") && !sample.italics) {
+                continue;
+            }
+            require(registerPrivateInterfaceFont(assets.file(QString("fonts/%1-%2.ttf").arg(sample.stem, style)), alias,
+                                                 true) == PrivateFontRegistration::Private,
+                    "Cannot register fallback style reference");
+        }
+        for (const bool italic : {false, true}) {
+            if (italic && !sample.italics) {
+                continue;
+            }
+            for (const bool bold : {false, true}) {
+                QFont fallback("Kobalt UI Serif"), reference(alias);
+                for (auto *font : {&fallback, &reference}) {
+                    font->setPixelSize(48);
+                    font->setBold(bold);
+                    font->setItalic(italic);
+                }
+                require(needsPrivateText(text, fallback), "Style fixture is covered by its primary face");
+                const auto actual = renderPrivateText(text, fallback, 0);
+                const auto expected = renderPrivateText(text, reference, 0);
+                require(!actual.image.isNull() && actual.missingGlyphs == 0 && actual.image == expected.image &&
+                            actual.advance == expected.advance && actual.origin == expected.origin,
+                        qPrintable(QString("Fallback ignored the real %1 bold=%2 italic=%3 face")
+                                       .arg(sample.stem)
+                                       .arg(bold)
+                                       .arg(italic)));
+                const QVector<QPair<int, int>> match{{0, int(text.size())}};
+                const auto highlighted = renderPrivateText(text, fallback, 0, match, {}, PrivateTextEmphasis::FontFace);
+                const auto expectedMatch =
+                    renderPrivateText(text, reference, 0, match, {}, PrivateTextEmphasis::FontFace);
+                require(highlighted.image == expectedMatch.image && highlighted.advance == expectedMatch.advance &&
+                            measurePrivateText(text, fallback, match, PrivateTextEmphasis::FontFace) ==
+                                highlighted.advance,
+                        "Fallback search match did not use the real bold face for measurement and drawing");
+            }
+        }
+    }
+}
+
 inline void checkPrivateInterfaceText(const kobalt::AssetBundle &assets) {
     using namespace kobalt::ui;
     require(privateInterfaceFontBytes() == 0, "Private interface fonts were loaded eagerly");
@@ -113,6 +170,30 @@ inline void checkPrivateInterfaceText(const kobalt::AssetBundle &assets) {
     require(registerPrivateInterfaceFont(assets.file("fonts/ebook-core/Libron-Bold.ttf"), "Private Excerpt Serif",
                                          true) == PrivateFontRegistration::Private,
             "Cannot register private excerpt bold");
+    {
+        // A private label without descenders centers its letters, as the
+        // font button's name does with Qt's tight bounds.
+        QImage canvas(400, 72, QImage::Format_RGB32);
+        canvas.fill(Qt::white);
+        QPainter painter(&canvas);
+        QFont face("Private Excerpt Serif");
+        face.setPixelSize(32);
+        painter.setFont(face);
+        painter.setPen(Qt::black);
+        drawOpticalText(painter, QRectF(canvas.rect()), QStringLiteral("Libron"));
+        painter.end();
+        int first = -1, last = -1;
+        for (int y = 0; y < canvas.height(); ++y)
+            for (int x = 0; x < canvas.width(); ++x)
+                if (qGray(canvas.pixel(x, y)) < 128) {
+                    if (first < 0)
+                        first = y;
+                    last = y;
+                    break;
+                }
+        require(first >= 0 && qAbs((first + last + 1) - canvas.height()) <= 2,
+                "Private optical text did not center its letters");
+    }
     WholeLineLabel excerpt;
     excerpt.setAlignment(Qt::AlignLeft | Qt::AlignTop);
     excerpt.setStyleSheet("background:white;color:black;border:none;");
@@ -271,5 +352,6 @@ inline void checkPrivateInterfaceText(const kobalt::AssetBundle &assets) {
         require(logicalLeft > label.width() / 2 && absoluteLeft < 100,
                 "Private RTL label did not preserve QLabel visual alignment and absolute left alignment");
     }
+    checkPrivateFallbackStyles(assets);
     require(initializePrivateInterfaceText(assets), "Cannot restore private font state after component checks");
 }

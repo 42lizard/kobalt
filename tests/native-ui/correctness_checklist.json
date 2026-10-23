@@ -229,7 +229,7 @@
       "platform": "native",
       "expected": "Theme replay, narrow/wide relayout, adaptive header/footer size labels, dropdown borders and popup placement preserve clipping and stacking.",
       "assertions": [
-        "reader-window:chromeSizeSegmentsApplyAndPersist",
+        "reader-window:headerFooterPresetsApplyAndPersist",
         "reader-window:chromeSizeLabelsFollowAvailableWidth",
         "reader-window:rotationLabelsFollowAvailableWidth",
         "reader-window:searchClearConstructionAndReplay",
@@ -559,18 +559,28 @@
     },
     "layout": {
       "scenes": [
-        "footer-sizes",
-        "header-sizes",
+        "header-footer",
+        "header-footer-fields",
+        "header-footer-large",
         "layout",
-        "margin-preview"
+        "margin-preview",
+        "reading-alternative-a",
+        "reading-alternative-b",
+        "reading-default"
       ]
     },
     "light": {
       "scenes": [
         "brightness-swipe",
         "frontlight",
+        "frontlight-automatic-warmth",
         "warmth-swipe",
         "warmth-swipe-cool"
+      ]
+    },
+    "light-sensor": {
+      "scenes": [
+        "frontlight-both-automatic"
       ]
     },
     "links": {

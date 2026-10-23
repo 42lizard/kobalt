@@ -18,6 +18,7 @@
 #include "interfaces/reader/settings/settings_panel.h"
 #include "build_info.h"
 #include "reading/appearance_settings.h"
+#include "reading/page_navigation.h"
 #include <QApplication>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -89,6 +90,24 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
         kobalt::diagnostic("settings-unreadable", {{"status", kobalt::storage::readStatusName(savedSettings.status)}},
                            false);
     preferences = appearance::readerPreferences(savedSettings.object, book->layoutPreferences());
+    // The next new book starts with this book's appearance. A damaged settings
+    // file is left for the next settings save to replace.
+    const auto openedPreset = kobalt::headerfooter::presetValue(kobalt::headerfooter::select(preferences).preset);
+    // No saved last preset means Kobalt, so a profile that only uses Kobalt never writes one.
+    const auto lastPreset = savedSettings.object.value(appearance::lastPresetKey)
+                                .toString(kobalt::headerfooter::presetValue(kobalt::headerfooter::Preset::Default));
+    const bool settingsReadable = savedSettings.status == kobalt::storage::ReadStatus::Ok ||
+                                  savedSettings.status == kobalt::storage::ReadStatus::Missing;
+    if (settingsReadable && !model->temporaryTypography()) {
+        auto global = savedSettings.object;
+        if (lastPreset != openedPreset) {
+            global[appearance::lastPresetKey] = openedPreset;
+        }
+        appearance::rememberTextLayout(global, model->state());
+        if (global != savedSettings.object && !writeJson(book->paths().preferences(), global)) {
+            kobalt::diagnostic("last-appearance-unsaved", {}, false);
+        }
+    }
     bookmarks = std::make_unique<kobalt::BookmarkSession>(
         *model,
         [this] {
@@ -117,9 +136,10 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
         });
     };
     // Choose the text weight before the first font is used.
-    kobalt::ui::setInterfaceWeight(kobalt::ui::interfaceWeightSteps(preferences));
+    kobalt::ui::setInterfaceWeight(kobalt::ui::heavierTextSteps);
     // Set only our window; native Nickel controls keep their own font.
     setFont(kobalt::ui::interfaceFont());
+    kobalt::ui::keepInterfaceUnhinted(this);
     readerStyle(this, styles::reader());
     buildReadingPage();
     startClockTimer();
@@ -169,6 +189,12 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
             setGeometry(geometry);
     });
     resize(QGuiApplication::primaryScreen()->size());
+    prepareSleepCover();
+    if (services.observeBattery && presentation->supportsSleepScreen()) {
+        services.observeBattery(this, [this] {
+            updateSleepBattery();
+        });
+    }
     connectPageInput();
     // Android can suspend the app without hiding the embedded reader widget.
     connect(qApp, &QGuiApplication::applicationStateChanged, this, [this] {
@@ -256,16 +282,9 @@ void Reader::buildReadingPage() {
         lookupWord(point);
     };
     header = new ChapterHeader(page);
-    page->showHeader = preferences.value("show_header").toBool(true);
-    page->showFooter = preferences.value("show_footer").toBool(true);
-    page->headerSize = m::reading::textSize(preferences.value("header_text_size").toString());
-    page->footerSize = m::reading::textSize(preferences.value("footer_text_size").toString());
-    page->headerTextPixels = m::reading::textPixels(page->headerSize, false);
-    page->footerTextPixels = m::reading::textPixels(page->footerSize, true);
-    page->showClock = preferences.value("show_clock").toBool(true);
-    page->hideDeviceStatus = hideNativeStatus();
-    page->showProgress = preferences.value("show_progress_bar").toBool(true);
-    page->clockText = services.clock();
+    const auto chrome = kobalt::headerfooter::select(preferences);
+    chromePreset = chrome.preset;
+    page->chrome = chrome.layout;
 }
 
 void Reader::startClockTimer() {
@@ -281,14 +300,13 @@ void Reader::startClockTimer() {
             updateMenuStatus();
             return;
         }
-        if (!page->showClock || general->isVisible() || dictionaryPanel->isVisible() || searchPanel->isVisible() ||
+        if (!chromeTicks() || general->isVisible() || dictionaryPanel->isVisible() || searchPanel->isVisible() ||
             linksActive())
             return;
-        const auto time = services.clock();
-        if (time == page->clockText)
+        const auto before = page->slotContents;
+        showChapterText();
+        if (page->slotContents == before)
             return;
-        page->clockText = time;
-        page->cleanRefresh(false);
         page->refreshContent(true);
     });
     startClock();
@@ -394,17 +412,17 @@ void Reader::buildToolbar() {
                    });
     toolbarComposition.formattingWarning->setVisible(model->formattingWarning());
 
-    toolbarComposition.settings =
-        iconButton(topControls, top, "rrSettings", strings::get("reader.reader_settings"), ControlIcon::More, [this] {
-            // The button stays enabled while a panel's changes apply, so the
-            // visible top bar does not repaint twice. Ignore taps then.
-            if (appearanceEdit.applying())
-                return;
-            if (general->isVisible())
-                applySettings();
-            else
-                openSettings();
-        });
+    toolbarComposition.settings = iconButton(topControls, top, "rrSettings", strings::get("reader.reader_settings"),
+                                             ControlIcon::Settings, [this] {
+                                                 // The button stays enabled while a panel's changes apply, so the
+                                                 // visible top bar does not repaint twice. Ignore taps then.
+                                                 if (appearanceEdit.applying())
+                                                     return;
+                                                 if (general->isVisible())
+                                                     applySettings();
+                                                 else
+                                                     openSettings();
+                                             });
     toolbarComposition.settings->setCheckable(true);
     toolbarComposition.clock = menuClock;
     toolbarComposition.session = menuSession;
@@ -481,7 +499,11 @@ kobalt::reader::AppearanceLayout Reader::buildMenu() {
     menu = new AppearanceSheet(this);
     panels = menu->pages;
     previewLabel = menu->message;
-    return menu->controls();
+    headerFooterView = new kobalt::reader::HeaderFooterView(this);
+    auto layout = menu->controls();
+    layout.headerFooter = headerFooterView->body();
+    layout.headerFooterRows = headerFooterView->rows();
+    return layout;
 }
 
 void Reader::buildOverlays() {
@@ -558,23 +580,13 @@ void Reader::buildOverlays() {
 }
 
 void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
-    auto *typography = layout.typography, *pageLayout = layout.pageLayout;
     auto *typeRows = layout.typeRows, *pageRows = layout.pageRows;
     kobalt::reader::AppearancePanelInputs appearanceInputs;
-    const auto chromeSize = [this](bool footer) {
-        const QString key = footer ? "footer_text_size" : "header_text_size";
-        const QString visibility = footer ? "show_footer" : "show_header";
-        return preferences.value(visibility).toBool(true) ? m::reading::textSize(preferences.value(key).toString())
-                                                          : QString("off");
-    };
-    appearanceInputs.headerSize = chromeSize(false);
-    appearanceInputs.footerSize = chromeSize(true);
     appearanceInputs.sideButtons = services.pageButtons();
     appearanceInputs.reverseLandscapeButtons = services.reverseLandscapeButtons();
     appearanceInputs.automaticRotationAvailable = orientation->automaticAvailable();
-    appearanceInputs.showClock = page->showClock;
     appearanceInputs.systemRotation = services.systemRotation;
-    kobalt::reader::AppearancePanel appearance({typography, pageLayout, typeRows, pageRows}, appearanceInputs);
+    kobalt::reader::AppearancePanel appearance(layout, appearanceInputs);
     fontButton = appearance.fontButton;
     sizeSlider = appearance.sizeSlider;
     opticalSizeSlider = appearance.opticalSizeSlider;
@@ -587,8 +599,6 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
     hyphenButtons = appearance.hyphenButtons;
     rotationButtons = appearance.rotationButtons;
     autoRotateOption = appearance.autoRotateOption;
-    clockOption = appearance.clockOption;
-    clockHideOption = appearance.clockHideOption;
     connect(fontButton, &QPushButton::clicked, this, [this] {
         if (choices->isVisible() && choosingTypography) {
             choices->hide();
@@ -721,60 +731,109 @@ void Reader::buildAppearance(const kobalt::reader::AppearanceLayout &layout) {
                                         : strings::get("reader.the_orientation_sensor_is_unavailable"));
             refresh();
         });
+    headerFooterRow = appearance.headerFooterRow;
+    slotMap = appearance.slotMap;
+    presetCards = appearance.presetCards;
     headerSizeButtons = appearance.headerSizeButtons;
     footerSizeButtons = appearance.footerSizeButtons;
-    auto connectChromeSize = [this](bool footer) {
-        const QString key = footer ? "footer_text_size" : "header_text_size";
-        const QString visibility = footer ? "show_footer" : "show_header";
-        for (auto *button : footer ? footerSizeButtons : headerSizeButtons) {
-            connect(button, &QPushButton::clicked, this, [this, button, key, footer, visibility] {
-                if (model->temporaryTypography()) {
-                    syncChromeSizeButtons();
-                    return;
-                }
-                const QString value = button->property("text_size").toString();
-                auto next = preferences;
-                next[visibility] = value != "off";
-                if (value != "off") {
-                    next[key] = value;
-                }
-                const bool changed = next != preferences;
-                if (!writePreferences(next)) {
-                    syncChromeSizeButtons();
-                    appearanceEdit.setError(strings::get("reader.could_not_save_reader_settings"));
-                    refresh();
-                    return;
-                }
-                preferences = next;
-                if (footer) {
-                    page->showFooter = value != "off";
-                    page->footerSize = m::reading::textSize(next.value(key).toString());
-                    page->footerTextPixels = m::reading::textPixels(page->footerSize, true);
-                } else {
-                    page->showHeader = value != "off";
-                    page->headerSize = m::reading::textSize(next.value(key).toString());
-                    page->headerTextPixels = m::reading::textPixels(page->headerSize, false);
-                }
-                const QSize viewport(width(), height() - page->topHeight() - page->bottomHeight());
-                if (changed) {
-                    mutateAppearance([viewport](ReaderSession &preview) {
-                        preview.resize(viewport);
-                    });
-                }
-                header->setGeometry(0, 0, width(), page->topHeight());
-                header->setVisible(page->topHeight() > 0);
-                syncChromeSizeButtons();
-                appearanceEdit.clearError();
-                refresh();
-            });
-        }
+    progressBarButtons = appearance.progressBarButtons;
+    connect(headerFooterRow, &QPushButton::clicked, this, [this] {
+        openHeaderFooterView();
+    });
+    // Close returns to the Layout panel, which stayed open beneath the view.
+    headerFooterView->closed = [this] {
+        closeChromeViews();
     };
-    connectChromeSize(false);
-    connectChromeSize(true);
-    typeRows->setSpacing(m::control::rowGap);
-    pageRows->setSpacing(m::control::rowGap);
-    typeRows->addStretch();
-    pageRows->addStretch();
+    for (auto *card : presetCards) {
+        const auto preset = card->preset();
+        connect(card, &QPushButton::clicked, this, [this, preset] {
+            if (model->temporaryTypography()) {
+                syncChromeControls();
+                return;
+            }
+            if (preset != chromePreset) {
+                // Custom starts from the preset in force until it has a layout of its own.
+                const auto custom = customChrome();
+                saveChrome(preset, preset == kobalt::headerfooter::Preset::Custom ? &custom : nullptr);
+            }
+        });
+    }
+    // A slot starts an edit, so a preset in force may replace Custom first.
+    slotMap->chosen = [this](int slot) {
+        confirmCustomReplace(
+            [this, slot] {
+                if (chromePreset != kobalt::headerfooter::Preset::Custom) {
+                    const auto start = page->chrome;
+                    if (model->temporaryTypography() || !saveChrome(kobalt::headerfooter::Preset::Custom, &start))
+                        return;
+                }
+                openFieldChooser(slot);
+            },
+            [] {});
+    };
+    // An edit starts from the layout in force, so a preset can be adjusted.
+    // The result is the shared Custom layout, and the book switches to Custom.
+    const auto editCustom = [this](const std::function<void(kobalt::headerfooter::Layout &)> &edit) {
+        // The pressed segment already looks chosen; Cancel puts it back.
+        confirmCustomReplace(
+            [this, edit] {
+                auto custom = page->chrome;
+                edit(custom);
+                if (model->temporaryTypography() || !saveChrome(kobalt::headerfooter::Preset::Custom, &custom))
+                    syncChromeControls();
+            },
+            [this] {
+                syncChromeControls();
+            });
+    };
+    for (auto *button : headerSizeButtons + footerSizeButtons) {
+        const bool footer = footerSizeButtons.contains(button);
+        const auto value = button->property("text_size").toString();
+        connect(button, &QPushButton::clicked, this, [editCustom, footer, value] {
+            editCustom([footer, value](kobalt::headerfooter::Layout &custom) {
+                (footer ? custom.footerSize : custom.headerSize) = value;
+            });
+        });
+    }
+    for (auto *button : progressBarButtons) {
+        const bool on = button->property("switch_on").toBool();
+        connect(button, &QPushButton::clicked, this, [editCustom, on] {
+            editCustom([on](kobalt::headerfooter::Layout &custom) {
+                custom.progressBar = on;
+            });
+        });
+    }
+    fieldChooser = new kobalt::reader::FieldChooser(this);
+    fieldChooser->selected = [this, editCustom](kobalt::headerfooter::Field field) {
+        const int slot = fieldChooser->slot();
+        editCustom([slot, field](kobalt::headerfooter::Layout &custom) {
+            custom.slotFields[slot] = field;
+        });
+        // A choice ends the list, as choosing a chapter does.
+        closeFieldChooser();
+    };
+    fieldChooser->uppercaseChanged = [this, editCustom](bool on) {
+        const int slot = fieldChooser->slot();
+        editCustom([slot, on](kobalt::headerfooter::Layout &custom) {
+            custom.uppercase[slot] = on;
+        });
+    };
+    fieldChooser->done = [this] {
+        closeFieldChooser();
+    };
+    // The views belong to the Layout panel and leave with it. The Text tab
+    // replaces it with the Text page, which also closes them.
+    menu->installEventFilter(this);
+    connect(panels, &QStackedWidget::currentChanged, this, [this](int index) {
+        if (index == kobalt::reader::TypographyPage)
+            closeChromeViews();
+    });
+    syncChromeControls();
+    // Every appearance page uses the same row gap.
+    for (auto *rows : {typeRows, pageRows, layout.headerFooterRows}) {
+        rows->setSpacing(m::control::rowGap);
+        rows->addStretch();
+    }
 }
 
 void Reader::buildSettings() {
@@ -789,6 +848,8 @@ void Reader::buildSettings() {
     settingsInputs.animationsSupported = services.animationsAvailable();
     settingsInputs.lightSupported = services.lightAvailable();
     settingsInputs.warmthSupported = warmthSupported;
+    settingsInputs.sleepScreenSupported = presentation->supportsSleepScreen();
+    settingsInputs.automaticBookOpeningSupported = services.automaticBookOpening && services.setAutomaticBookOpening;
 #ifndef KOBALT_READER_HARDWARE
     settingsInputs.debugProgressAvailable = true;
 #endif
@@ -850,13 +911,16 @@ void Reader::buildSettings() {
     }
     settingsPages = settings->settingsPages;
     darkOption = settings->darkOption;
-    smoothOption = settings->smoothOption;
-    progressOption = settings->progressOption;
+    inheritTextLayoutOption = settings->inheritTextLayoutOption;
     animationOption = settings->animationOption;
     edgeLightOption = settings->edgeLightOption;
     denseGraphOption = settings->denseGraphOption;
     pinStatsOption = settings->pinStatsOption;
-    heavierTextOption = settings->heavierTextOption;
+    inheritHeaderFooterOption = settings->inheritHeaderFooterOption;
+    sleepScreenButton = settings->sleepScreenButton;
+    pageNavigationButton = settings->pageNavigationButton;
+    tapZonesButton = settings->tapZonesButton;
+    automaticOpeningOption = settings->automaticOpeningOption;
     linkIndicatorOption = settings->linkIndicatorOption;
     hideNonlinearOption = settings->hideNonlinearOption;
     bionicOption = settings->bionicOption;
@@ -869,8 +933,17 @@ void Reader::buildSettings() {
     connect(bionicOption, &QCheckBox::clicked, this, [this](bool enabled) {
         applyBoldReading(enabled);
     });
-    connect(heavierTextOption, &QCheckBox::clicked, this, [this](bool enabled) {
-        applyHeavierText(enabled);
+    connect(sleepScreenButton, &QPushButton::clicked, this, [this] {
+        openSleepScreen();
+    });
+    connect(tapZonesButton, &QPushButton::clicked, this, [this] {
+        openTapZones();
+    });
+    connect(pageNavigationButton, &QPushButton::clicked, this, [this] {
+        openPageNavigation();
+    });
+    connect(automaticOpeningOption, &QCheckBox::clicked, this, [this](bool enabled) {
+        applyAutomaticOpening(enabled);
     });
     connect(refreshButton, &QPushButton::clicked, this, [this] {
         openScreenRefresh();
@@ -882,10 +955,7 @@ void Reader::buildSettings() {
     });
     connect(settings->confirmDefaults, &QPushButton::clicked, this, [this] {
         restoringDefaults = true;
-        clockOption->setChecked(true);
         darkOption->setChecked(false);
-        smoothOption->setChecked(true);
-        progressOption->setChecked(true);
         animationOption->setChecked(false);
         bionicOption->setChecked(false);
         screenRefreshMode = kobalt::ScreenRefresh::Smart;
@@ -1003,6 +1073,9 @@ void Reader::connectLightGestures() {
 
 void Reader::connectPageInput() {
     page->swiped = [this](int direction) {
+        if (!pageNavigation::swipes(pageNavigation::mode(preferences, services.pageButtons()))) {
+            return;
+        }
         if (revealingLinks || dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() ||
             lookupPending || appearanceEdit.preview() || general->isVisible() || choices->isVisible() ||
             topControls->isVisible())
@@ -1030,9 +1103,14 @@ void Reader::connectPageInput() {
         }
         const bool devicePreview = services.devicePreview && services.devicePreview();
         const qreal y = qreal(point.y()) / qMax(1, page->height());
-        const bool menuTap = x > .33 && x < .67 && (!devicePreview || (y > .33 && y < .67));
+        const auto layout = pageNavigation::tapLayout(preferences);
+        const auto action = tapZones::action(layout, x, y);
+        const bool previewColumn = devicePreview && layout == tapZones::Layout::LeftRight;
+        const bool menuTap = action == tapZones::Action::Menu && (!previewColumn || (y > .33 && y < .67));
         if (topControls->isVisible() || choices->isVisible()) {
-            if (!devicePreview || menuTap) {
+            // An open Text or Layout panel can cover the middle of a device
+            // preview, so any tap on the page that stays visible closes it.
+            if (!devicePreview || menuTap || appearanceEdit.panelOpen()) {
                 flashAfterMenu = true;
                 dismissControls();
             }
@@ -1051,10 +1129,15 @@ void Reader::connectPageInput() {
             showControls();
             return;
         }
-        if (devicePreview && x > .33 && x < .67)
+        if (previewColumn && action == tapZones::Action::Menu)
             return;
-        const int direction = x <= .33 ? -1 : 1;
-        turnPage(model->state().value("page_progression_rtl").toBool() ? -direction : direction);
+        if (!pageNavigation::taps(pageNavigation::mode(preferences, services.pageButtons()))) {
+            return;
+        }
+        const int direction = action == tapZones::Action::Previous ? -1 : 1;
+        const bool reverse =
+            layout == tapZones::Layout::LeftRight && model->state().value("page_progression_rtl").toBool();
+        turnPage(reverse ? -direction : direction);
     };
 }
 

@@ -269,6 +269,7 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
     originalAppearance = request.originalAppearance;
     appearance::migrateLineSpacing(originalAppearance);
     const auto pinnedAppearance = temporaryAppearance;
+    const auto appearanceDefaults = std::move(request.appearanceDefaults);
     const auto nativeLocation = std::move(request.platformLocation),
                layoutCachePath = std::move(request.layoutCachePath);
     const auto documentCachePath = std::move(request.documentCachePath);
@@ -313,7 +314,7 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
         engineWorker(),
         [guard, engine, path, identity, size, saved, nativeLocation, lease, factory, finished, report, systemFont,
          layoutCachePath, documentCachePath, retainedHash, retainedSettings, latest, job, positions, pinnedAppearance,
-         retainedWarning, retainedDetails, userStyleSheetPath]() mutable {
+         retainedWarning, retainedDetails, userStyleSheetPath, appearanceDefaults]() mutable {
             EngineJob activity;
             QElapsedTimer timer;
             timer.start();
@@ -393,15 +394,16 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
             if (outcome.ready()) {
                 const auto bionic = saved.value("bold_reading");
                 const auto dark = saved.value("dark_mode");
-                const auto smooth = saved.value("smooth_images");
                 const auto hideNonlinear = saved.value("hide_nonlinear_fragments");
                 if (!savedMatches)
                     saved = {};
                 saved["bold_reading"] = bionic;
                 saved["dark_mode"] = dark;
-                saved["smooth_images"] = smooth;
                 saved["hide_nonlinear_fragments"] = hideNonlinear;
                 appearance::migrateLineSpacing(saved);
+                if (!appearanceDefaults.isEmpty()) {
+                    appearance::applyBookDefaults(saved, appearanceDefaults);
+                }
                 if (!pinnedAppearance.isEmpty())
                     appearance::copy(saved, pinnedAppearance);
                 const auto initial = saved.value("position").toString().isEmpty() ? nativeLocation : QString();
@@ -461,7 +463,7 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                     if (outcome.ready() && !cancelled()) {
                         result = capture(*engine, positions, false);
                         result.author = engine->author();
-                        result.cover = engine->coverThumbnail();
+                        result.cover = engine->coverImage({120, 180});
                         report(OpeningStage::Ready, 100);
                     }
                     modelMs = timer.elapsed() - modelStart;
@@ -513,7 +515,7 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                             report(OpeningStage::Ready, 0);
                             result = capture(*engine, positions, false);
                             result.author = engine->author();
-                            result.cover = engine->coverThumbnail();
+                            result.cover = engine->coverImage({120, 180});
                             report(OpeningStage::Ready, 100);
                         }
                     }
@@ -903,6 +905,26 @@ void ReaderSession::compareNativePosition(const QString &location, std::function
                         result.direction = direction;
                     }
                     finished(result);
+                },
+                Qt::QueuedConnection);
+        },
+        Qt::QueuedConnection);
+}
+void ReaderSession::coverImage(QSize maximumSize, std::function<void(QImage)> finished, QString preferredPath) {
+    auto engine = model;
+    const auto lease = lease_;
+    QPointer<ReaderSession> guard(this);
+    kobalt::qt::invoke(
+        engineWorker(),
+        [engine, guard, lease, maximumSize, preferredPath, finished] {
+            EngineJob activity;
+            auto image = lease && !lease->revoked() ? engine->coverImage(maximumSize, preferredPath) : QImage();
+            kobalt::qt::invoke(
+                qApp,
+                [guard, lease, image = std::move(image), finished]() mutable {
+                    if (!guard)
+                        return;
+                    finished(guard->lease_ == lease && lease && !lease->revoked() ? std::move(image) : QImage());
                 },
                 Qt::QueuedConnection);
         },

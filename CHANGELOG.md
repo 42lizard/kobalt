@@ -1,84 +1,106 @@
-## Unreleased
-
-- Add optional `userstyle.css` for book styling. Edits apply when reopening a book and do not affect installation checks.
-
 ## v1.0-beta.4
 
-- Refresh the page and bookmark ribbon together when jumping to a bookmark or returning to the previous passage.
+### What's new
 
-- Update bundled FreeType, FriBidi and Android libpng to include upstream security fixes.
+- Choose how to turn pages in Settings > Controls > Page navigation: swipes and taps, taps only, swipes only or hardware page turn buttons only on devices with page buttons. The middle tap zone always opens the menu. Controls sits below Display with a hand icon and also contains the frontlight gesture setting.
 
-- Limit SVG nesting and resource-reference depth to bound recursive renderer work.
+- Choose Left / right, Top / bottom or One-handed in Settings > Controls > Tap zones. One-handed taps turn forward and swipes turn either way. The center zone always opens the menu. Settings options now have section headings.
 
-- Pause Android reading time while the device sleeps or the app is inactive, so Stats does not count that time as reading.
+- Follow Kobo warmth schedule in the Light panel uses the bedtime set in Kobo settings. It keeps Kobo's automatic warmth setting on first open. Manual warmth adjustments turn it off; check it again to resume the schedule.
 
-- Keep missing zero-width spaces invisible and preserve thin and hair spacing when a font lacks those characters.
+- New books inherit the last book's text style and page margins. Settings > Advanced has separate options for text and layout inheritance and header and footer inheritance, both on by default. Books with saved settings keep them.
 
-- Bookmark jumps now offer Return to page in the reading menu, using the same return history as internal links.
+- Header and footer customization has been added with a few presets and the option to fully customize both. The _Custom_ preset is saved globally, but needs to be applied on a per-book basis. Books without a saved header and footer start with the last preset used.
 
-- Size Text, Layout and About panels from their visible content. Android's Layout panel no longer leaves space for the omitted rotation controls. Text and Layout scroll when their controls do not fit on screen.
+- Choose a sleep screen in Settings > System on Kobo: Kobo's built-in screen, Kobalt with book cover or Kobalt with the dimmed reading page. The cover option prefers Kobo's full-screen cover, then the embedded cover, then the reading page. Both Kobalt options show reading progress, time left and battery status. Kobo's built-in screen is the default, and its PIN prompt is unchanged.
 
-- Added an experimental Android debug APK for ARM64 devices running Android 9 or later. It opens DRM-free EPUBs and keeps books, settings and reading progress locally. Obtain testing APKs directly from this repository; they use a shared public signing key.
+- Style every book with your own CSS in an optional `.adds/kobalt/userstyle.css`. Any of this CSS is loaded automatically by Kobalt. Use responsibly!
 
-- Restore publisher spacing in Kobo books containing the original injected style hacks. Keep kepubify wrapper rules and custom styles.
+- After jumping to a bookmark, "Return to page" is now offered to take you back to where you came from when you navigated to the bookmark.
+
+### What's fixed
+
+- Settings tabs keep their icon and label visible while pressed in both themes.
+
+- The Kobalt sleep screen shows time left in hours and minutes when the estimate exceeds 120 minutes. Its heading shows Sleeping, Charging or Charged, with a battery icon and a smaller monospaced percentage in the top-right corner only while charging or charged. The card updates as charging progresses and returns to Sleeping without a battery display when unplugged.
+
+- Image smoothing and heavier interface text are always on. Their options have been removed from Advanced settings.
+
+- On Kobo, your e-reader will now wake faster from sleep: it won't wait for the frontlight to be ready to refresh the screen.
+
+- New icons throughout the reader. The bottom tabs have larger icons and labels on one line, Settings opens from a gear in the toolbar, and each Settings tab shows an icon above its label.
+
+- On Kobo, time estimates use Kobo's own reading pace, and your reading time in Kobalt counts towards Kobo's reading history.
+
+- Interface text on Kobo is sharper at small sizes due to not using font hinting.
+
+- Minor UI adjustments.
+
+- The header and footer sheet fits six-inch screens, keeps its height when presets or sizes change, and joins the toolbar when the gap is small.
+
+- Showing and hiding link highlights refreshes the whole page once instead of refreshing each link separately.
+
+- Fixed bugs in text rendering, including Arabic letters that did not join, math equations that lost their font, fallback text without real bold or italic, and visible or missing special spaces.
+
+- Kobo custom dictionaries load when the standard dictionary is not installed, and can be chosen next to a standard dictionary for the same language.
+
+- Kobo books that contain Kobo's original injected style hacks get their publisher spacing back.
+
+- The bookmark ribbon now updates together with the page after a bookmark jump.
+
+- On Android, Stats no longer counts time while the device sleeps or the app is in the background.
 
 ## v1.0-beta.3
 
-### What's changed
+### What's new
 
-- Improved opening of EPUBs with imperfect markup and unsupported layout features, including books that use Adobe page templates.
+- New option: Hide non-linear fragments, in Settings > Advanced. Normal page turns skip the optional sections of an EPUB, while links, Chapters and page numbers can still open them. It is off by default.
 
-- Added Hide non-linear fragments in Settings > Advanced. It skips optional EPUB sections during normal page turns while keeping them available through links, Chapters and page-number navigation. It is off by default.
+- Text size now goes up to 48 pt, from 20 pt, and Thickness up to +12, from +8.
 
-- Increased the maximum text size from 20 pt to 48 pt and the maximum Thickness from +8 to +12.
+- Automatic brightness, on Kobo devices with an ambient light sensor. Adjusting the brightness yourself turns it off.
 
-- Fixed excessive view redrawing throughout Kobalt, which in practice means you see the screen flash less frequently.
+- Kobo devices with an orientation sensor offer Portrait, Landscape and Both. Portrait is the default. Devices without a sensor keep manual rotation.
 
-- Opening the font and layout panels is now significantly faster.
+- On the Kobo Touch, the physical Home button saves your progress and returns to Kobo's Home screen.
 
-- Renamed Bionic Reading to Bold Reading. Upgrades from Beta 2 keep its saved setting. The checkbox now applies immediately. Failed settings saves show a disk write error dialog and keep the previous setting.
+- Page buttons turn the pages of Chapters, Bookmarks, search results and licenses.
 
-- Save changed reading progress to Nickel every 30 seconds while reading and before sleep, so the sleep screen can show the current progress.
+- Fonts you add in subfolders of `fonts/`, such as `fonts/Family/static/`, appear in the font picker.
 
-- Save reading progress before USB export, while preserving newer synced progress and allowing USB to continue if saving fails.
+- Hyphenation for Estonian, Finnish, Georgian, Hungarian, Latvian, Lithuanian, Polish, Slovak, Slovenian and Ukrainian.
 
-- Fixed native progress and sleep-cover updates for KEPUB pages without source element IDs or with normalized text. Nickel receives the start of the current chapter when the exact position cannot be mapped; Kobalt keeps the exact position locally.
+### What's fixed
 
-- Fixed opening and bookmarking DRM-free books downloaded through compatible sync servers that use numeric or other non-UUID book IDs. Existing bookmark folders remain available.
+- More EPUBs open correctly, including books with imperfect markup, unsupported layout features or Adobe page templates.
 
-- Stats now uses shared cached word counts on Kobo and Android, including plain EPUBs. Counts cover the whole book and chapter intervals, survive reflow and reuse the parsed-document cache. Chapters uses the EPUB table of contents without Nickel's word-count API.
+- The screen flashes less often, and the font and layout panels open much faster.
 
-- Added Automatic brightness for Kobo devices with an ambient light sensor. Manual brightness adjustments turn it off and stop a pending brightness animation from overwriting the chosen level. Cancelled gestures restore the original level and setting.
+- Reading progress is saved to Kobo every 30 seconds and before the device sleeps or connects over USB, so the sleep screen shows where you are.
 
-- Kobo devices with an orientation sensor now offer Portrait, Landscape and Both. Portrait lock is the default, and rejected orientations no longer trigger page layout changes. Devices without a sensor keep manual rotation.
+- Fixed bugs syncing reading progress to Kobo for some KEPUB books, and opening books from compatible sync servers.
 
-- Added support for the Kobo Touch's physical Home button. Pressing it saves reading progress and returns to Nickel's Home screen.
+- Stats shows word counts for every book, plain EPUBs included, on Kobo and Android. Very long chapters no longer draw a line through their bar in the chart.
 
-- Page buttons now page Chapters, Bookmarks, search results and licenses instead of being ignored.
+- With Publisher Fonts and a book without embedded fonts, serif text uses Libron, sans-serif uses Legible Next and monospace uses IBM Plex Mono.
 
-- Sideloaded fonts in folders up to two levels below `fonts/`, such as `fonts/Family/static/`, now appear in the font picker. Hidden files and Kobo's wrapped fonts are skipped.
+- Formatting warnings appear only for layout features that are really unsupported, and no longer appear for large books just because of their size.
 
-- Publisher Fonts uses Libron for serif, Legible Next for sans-serif and IBM Plex Mono for monospace when the book has no embedded fonts. The default reading font remains a separate book override.
-
-- Added hyphenation dictionaries for Estonian, Finnish, Georgian, Hungarian, Latvian, Lithuanian, Polish, Slovak, Slovenian and Ukrainian.
-
-- Show formatting warnings only for confirmed unsupported layout features. Large books no longer show a warning when the formatting inspection reaches its limits.
-
-- Show the book-loading screen at 0% in Kobalt's interface fonts, before publication inspection and full asset validation. This makes Kobalt feel faster to start and feels less like it's frozen.
-
-- Long chapters in the Stats chart fill the chart height without a visible line through the bars when chapters are very long relative to other chapters.
+- The loading screen appears at once when you open a book, so opening feels faster and no longer looks frozen.
 
 ## v1.0-beta.2
 
-### What's changed
+### What's new
+
+- Added evenly spaced line-spacing slider marks with snapping at 100%, 110%, 120%, 130%, 140%, 150%, 175%, 200%, 250% and 300%. Plus and minus still adjust spacing by one percentage point.
+
+### What's fixed
 
 - Fixed opening and appearance previews for EPUBs whose structural CSS selectors require styles to be recalculated after parsing. Publisher image spacing and centered text are preserved.
 
 - Fixed opening EPUBs with repeated identical manifest items. Conflicting duplicate IDs remain unsupported.
 
 - Fixed opening EPUBs with standard IDPF-obfuscated embedded TrueType or OpenType fonts.
-
-- Added evenly spaced line-spacing slider marks with snapping at 100%, 110%, 120%, 130%, 140%, 150%, 175%, 200%, 250% and 300%. Plus and minus still adjust spacing by one percentage point.
 
 - Fixed line spacing being applied twice. 150% now means 1.5 times the font size. Existing book settings are converted to preserve their approximate spacing, with 122% becoming 150% and a maximum of 300%.
 

@@ -9,9 +9,11 @@
 #include "support/strings.h"
 #include "ui/input.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/views/sleep_screen.h"
 #include "interfaces/reader/ui/style/styles.h"
 #include "platform/api/kobo_refresh.h"
 #include "reading/appearance_settings.h"
+#include "reading/sleep_screen.h"
 #include "model/page_refresh_regions.h"
 #include "support/diagnostics.h"
 #include "interfaces/reader/ui/style/metrics.h"
@@ -50,6 +52,7 @@ Reader::~Reader() {
     lightPopup->changed = {};
     delete lightPopup;
     light.reset();
+    presentation->clearSleepScreen();
     presentation->resumeBackground();
     for (int id : registeredFonts)
         QFontDatabase::removeApplicationFont(id);
@@ -74,6 +77,8 @@ void Reader::prepareUsb(std::function<void()> finished) {
     prepareTransition(std::move(finished), 2000);
 }
 void Reader::prepareTransition(std::function<void()> finished, int timeoutMs) {
+    sleepImage = {};
+    presentation->clearSleepScreen();
     auto elapsed = std::make_shared<QElapsedTimer>();
     elapsed->start();
     model->cancelPendingTurn();
@@ -112,12 +117,60 @@ void Reader::prepareTransition(std::function<void()> finished, int timeoutMs) {
         });
 }
 
+void Reader::prepareSleepCover() {
+    const auto request = ++sleepCoverRequest;
+    sleepCover = {};
+    if (!presentation->supportsSleepScreen() || sleep::mode(preferences) != sleep::Mode::Cover) {
+        return;
+    }
+    // Decode off the GUI thread while the book is available. Keep at most
+    // 16 MiB, only for the cover option, and reuse it in either orientation.
+    QPointer<Reader> guard(this);
+    model->coverImage(
+        {2048, 2048},
+        [guard, request](QImage image) {
+            if (guard && guard->sleepCoverRequest == request) {
+                guard->sleepCover = std::move(image);
+            }
+        },
+        services.coverImagePath);
+}
+
 void Reader::sleepReader() {
     if (lifecycleHidden)
         return;
     setProperty("reader_sleep_clean_pending", true);
     model->cancelPendingTurn();
     book->stopReading();
+    sleepImage = {};
+    // RGB32 needs four bytes per pixel. Bound the optional capture to 16 MiB;
+    // oversized viewports keep Nickel's sleep screen instead.
+    const qint64 sleepPixels = qint64(page->width()) * page->height();
+    const auto *modal = QApplication::activeModalWidget();
+    const bool foreground = !modal || modal == this || isAncestorOf(modal);
+    const auto mode = sleep::mode(preferences);
+    if (mode != sleep::Mode::Stock && presentation->supportsSleepScreen() && foreground && sleepPixels > 0 &&
+        sleepPixels <= 4 * 1024 * 1024 && readyForPresentation() && !appearanceEdit.panelOpen() &&
+        !model->temporaryTypography()) {
+        const bool useCover = mode == sleep::Mode::Cover && !sleepCover.isNull();
+        QImage frame = useCover ? sleepCoverBackground(sleepCover, page->size(), darkTheme) : page->snapshot(true);
+        if (!frame.isNull()) {
+            // Capture only the page, including its header and footer. Menus,
+            // dialogs and a temporary typography preview are not sleep content.
+            const int percent = qBound(0, int(100.0 * model->page() / qMax(1, model->pages())), 100);
+            const auto remaining = book->estimates().bookMilliseconds;
+            sleepBattery = services.battery();
+            const auto &battery = sleepBattery;
+            const auto status = battery.fullyCharged ? SleepStatus::Charged
+                                : battery.charging   ? SleepStatus::Charging
+                                                     : SleepStatus::Sleeping;
+            sleepOrientation = kobalt::shownOrientation(QGuiApplication::primaryScreen());
+            sleepProgress = strings::get("sleep.percent_read").arg(percent);
+            sleepRemaining = sleepTimeLeft(remaining);
+            sleepImage = sleepScreenImage(std::move(frame), sleepProgress, sleepRemaining, darkTheme, battery.percent,
+                                          status, !useCover);
+        }
+    }
     services.cancelAnimation();
     page->animationDirection = 0;
     setProperty("reader_animation_direction", 0);
@@ -142,14 +195,39 @@ void Reader::prepareWake() {
         presentation->pauseBackground(true);
 }
 
+void Reader::updateSleepBattery() {
+    if (!lifecycleHidden || sleepImage.isNull()) {
+        return;
+    }
+    const auto battery = services.battery();
+    if (battery.charging == sleepBattery.charging && battery.fullyCharged == sleepBattery.fullyCharged &&
+        ((!battery.charging && !battery.fullyCharged) || battery.percent == sleepBattery.percent)) {
+        return;
+    }
+    sleepBattery = battery;
+    const auto status = battery.fullyCharged ? SleepStatus::Charged
+                        : battery.charging   ? SleepStatus::Charging
+                                             : SleepStatus::Sleeping;
+    // Paint over the card in the retained frame. Reusing the composed background
+    // avoids another cover decode or another dimming pass while asleep.
+    sleepImage = sleepScreenImage(std::move(sleepImage), sleepProgress, sleepRemaining, darkTheme, battery.percent,
+                                  status, false);
+    if (!isVisible()) {
+        presentation->updateSleepScreen(sleepImage, sleepScreenCardRect(sleepImage.size(), !sleepRemaining.isEmpty()));
+    }
+}
+
 void Reader::cancelWake() {
     if (lifecycleHidden && !isVisible())
         presentation->resumeBackground();
 }
 
 void Reader::sleepViewReady() {
-    if (!lifecycleHidden)
+    if (!lifecycleHidden || !isVisible())
         return;
+    if (!sleepImage.isNull()) {
+        presentation->presentSleepScreen(sleepImage, sleepOrientation);
+    }
     // Hiding a top-level window immediately submits the backing store
     // underneath it. Paint Nickel's sleep view first, or that store still
     // contains the library. Do not pump unrelated events during handoff.
@@ -165,6 +243,8 @@ void Reader::sleepViewReady() {
 }
 
 void Reader::wakeReader() {
+    sleepImage = {};
+    presentation->clearSleepScreen();
     setProperty("reader_sleep_clean_pending", false);
     lifecycleHidden = false;
     if (finishDialog)
@@ -230,7 +310,10 @@ void Reader::progressTick() {
 }
 
 QVector<QWidget *> Reader::popups() const {
-    return {busyNotice,
+    // Header and footer and the field list cover the panels, under every other pop-up.
+    return {headerFooterView,
+            fieldChooser,
+            busyNotice,
             brightnessNotice,
             fontDefaultDialog.data(),
             linkDialog.data(),
@@ -238,7 +321,11 @@ QVector<QWidget *> Reader::popups() const {
             syncDialog.data(),
             finishDialog.data(),
             refreshPopup.data(),
+            sleepPopup.data(),
+            pageNavigationPopup.data(),
+            tapZonesPopup.data(),
             removeDialog.data(),
+            customReplaceDialog.data(),
             bookmarkErrorDialog.data(),
             formattingWarningDialog.data(),
             settingsWriteErrorDialog.data()};
@@ -290,6 +377,10 @@ bool Reader::event(QEvent *event) {
 
 bool Reader::eventFilter(QObject *watched, QEvent *event) {
     const auto type = event->type();
+    if (watched == menu && type == QEvent::Hide && fieldChooser) {
+        fieldChooser->hide();
+        headerFooterView->hide();
+    }
     if (watched == brightnessNotice && type == QEvent::Hide && isVisible() && !lifecycleHidden && !closing &&
         !exportRunning && !exitPending && !services.suspended()) {
         requestFlash("light-swipe");
@@ -343,6 +434,18 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
     // The overlay itself only receives taps outside the refresh card.
     if (refreshPopup && watched == refreshPopup && type == QEvent::MouseButtonRelease) {
         closeScreenRefresh();
+        return true;
+    }
+    if (sleepPopup && watched == sleepPopup && type == QEvent::MouseButtonRelease) {
+        closeSleepScreen();
+        return true;
+    }
+    if (tapZonesPopup && watched == tapZonesPopup && type == QEvent::MouseButtonRelease) {
+        closeTapZones();
+        return true;
+    }
+    if (pageNavigationPopup && watched == pageNavigationPopup && type == QEvent::MouseButtonRelease) {
+        closePageNavigation();
         return true;
     }
     // Panels are raised as they open, and a panel created later starts
@@ -414,6 +517,25 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
                 dismissing = true;
                 choices->hide();
                 refresh();
+            }
+        }
+        // A tap on the page above the Header and footer sheet closes it, as
+        // with Font; the toolbar and the tabs keep working.
+        if (isVisible() && headerFooterView->isVisible() && !fieldChooser->isVisible()) {
+            QPointF point;
+            if (touch) {
+                const auto points = kobalt::ui::touchPositions(static_cast<QTouchEvent *>(event), true);
+                if (points.isEmpty())
+                    return QWidget::eventFilter(watched, event);
+                point = points.first();
+            } else
+                point = kobalt::ui::mousePosition(static_cast<QMouseEvent *>(event), true);
+            const QRect sheetRect(headerFooterView->mapToGlobal(QPoint()), headerFooterView->size());
+            const QRect toolbarRect(topControls->mapToGlobal(QPoint()), topControls->size());
+            if (!sheetRect.contains(point.toPoint()) && !toolbarRect.contains(point.toPoint()) &&
+                !(navigation && navigation->contains(point.toPoint()))) {
+                dismissing = true;
+                closeChromeViews();
             }
         }
     }
@@ -756,7 +878,9 @@ void Reader::goToPassage(const QString &target) {
     if (target.isEmpty() || model->busy() || closing || lifecycleHidden || services.suspended()) {
         return;
     }
-    const LinkVisit origin{model->state().value("position").toString(), model->page(), page->chapterTitle};
+    const LinkVisit origin{
+        model->state().value("position").toString(), model->page(),
+        (model->chapterTitle().isEmpty() ? strings::get("reader.reading") : model->chapterTitle()).toUpper()};
     if (!model->goTo(target)) {
         return;
     }
@@ -987,10 +1111,10 @@ void Reader::syncLinkDiscovery() {
         // number. Without a footer it stays just above the bottom edge.
         QRect strip = page->footerTextRect();
         if (strip.isEmpty())
-            strip = QRect(0, height() - page->bottomHeight() - m::reading::stripHeight(page->footerSize), width(),
-                          m::reading::stripHeight(page->footerSize));
+            strip = QRect(0, height() - page->bottomHeight() - m::reading::stripHeight(page->chrome.footerSize),
+                          width(), m::reading::stripHeight(page->chrome.footerSize));
         strip.translate(page->mapTo(this, QPoint()));
-        const int text = page->footerTextPixels;
+        const int text = page->footerTextPixels();
         linkIndicator->setText(QString::number(count));
         linkIndicator->setAccessibleName(label);
         linkIndicator->setToolTip(label);
@@ -1017,9 +1141,9 @@ void Reader::syncLinkDiscovery() {
         // The label replaces the header or footer strip, never the book text,
         // in the strip's own face and size. Without a strip that fits, a tap on
         // unlinked text still leaves.
-        const bool top = fits(page->topHeight(), page->headerTextPixels);
+        const bool top = fits(page->topHeight(), page->headerTextPixels());
         const int strip = top ? page->topHeight() : page->bottomHeight();
-        const int text = top ? page->headerTextPixels : page->footerTextPixels;
+        const int text = top ? page->headerTextPixels() : page->footerTextPixels();
         linkDiscovery->setVisible(top || fits(strip, text));
         linkDiscovery->setEdges({});
         linkDiscovery->setDividers(top ? Qt::BottomEdge : Qt::TopEdge);
@@ -1082,10 +1206,15 @@ void Reader::syncNavigation() {
         }
     }
     const bool chapters = choices->isVisible() && !choosingTypography;
+    // The field list takes the place Chapters takes, under the Layout tab.
+    // Header and footer is a sheet over the page, placed like Font below.
+    QWidget *cover = fieldChooser && fieldChooser->isVisible() ? fieldChooser : nullptr;
+    const bool chromeSheet = !cover && headerFooterView && headerFooterView->isVisible();
     const bool pinned = statsPinned();
     using Nav = kobalt::NavigationDestination;
     const auto update = [&] {
-        const int active = chapters                                                                ? int(Nav::Chapters)
+        const int active = cover || chromeSheet                                                    ? int(Nav::Layout)
+                           : chapters                                                              ? int(Nav::Chapters)
                            : choosingTypography && choices->isVisible() && choices->isFontPicker() ? int(Nav::Text)
                            : menu->isVisible()       ? (panels->currentIndex() == 0 ? int(Nav::Text) : int(Nav::Layout))
                            : lightPopup->isVisible() ? int(Nav::Light)
@@ -1094,8 +1223,10 @@ void Reader::syncNavigation() {
         navigation->update(
             size(),
             {bottomControls, menu, chapterGraph,
-             bookmarkList->isVisible() ? static_cast<QWidget *>(bookmarkList) : static_cast<QWidget *>(choices),
-             chapters || bookmarkList->isVisible(),
+             cover                       ? cover
+             : bookmarkList->isVisible() ? static_cast<QWidget *>(bookmarkList)
+                                         : static_cast<QWidget *>(choices),
+             cover || chapters || bookmarkList->isVisible(),
              topControls->isVisible() && !searchPanel->isVisible() && !acknowledgments->isVisible(),
              !model->busy() && !appearanceEdit.applying(), services.lightAvailable(), active,
              linkReturnAvailable ? strings::get("reader.return_page").arg(linkHistory.last().page + 1) : QString(),
@@ -1142,6 +1273,17 @@ void Reader::syncNavigation() {
         }
         // Dropdowns cover the reading-panel rules raised by navigation.
         choices->raise();
+    }
+    if (chromeSheet) {
+        const int bottom = navigation->contentBottom(size());
+        // At most up to the toolbar, with the sheet's rule on the toolbar's.
+        const int room = qMax(1, bottom - navigation->toolbarHeight() + int(m::chrome::heavyRule));
+        int sheetHeight = qMin(headerFooterView->preferredHeight(width()), room);
+        if (room - sheetHeight < m::headerFooter::toolbarSnap) {
+            sheetHeight = room;
+        }
+        headerFooterView->setGeometry(0, bottom - sheetHeight, width(), sheetHeight);
+        headerFooterView->raise();
     }
 }
 
@@ -1296,6 +1438,7 @@ bool Reader::pageList(int direction) {
                     : bookmarkList->isVisible()                 ? static_cast<QWidget *>(bookmarkList)
                     : searchPanel->isVisible()                  ? static_cast<QWidget *>(searchPanel)
                     : acknowledgments->isVisible()              ? acknowledgments
+                    : fieldChooser->isVisible()                 ? static_cast<QWidget *>(fieldChooser)
                                                                 : nullptr;
     if (!list)
         return false;
@@ -1446,7 +1589,7 @@ void Reader::save(bool snapshot) {
         saveTimer->stop();
     QJsonObject state;
     if (!book->checkpoint(&state)) {
-        page->progress = strings::get("reader.could_not_save_reading_position");
+        page->notice = strings::get("reader.could_not_save_reading_position");
         page->refreshContent();
     }
 #ifdef KOBALT_READER_HARDWARE
@@ -1485,6 +1628,10 @@ void Reader::save(bool snapshot) {
                                                {"mapped_pages", pages},
                                                {"current", model->graphSelection().current},
                                                {"next", model->graphSelection().next}});
+    const auto estimates = book->estimates();
+    state["reading_estimates"] = kobalt::qt::object({{"chapter_ms", double(estimates.chapterMilliseconds)},
+                                                     {"book_ms", double(estimates.bookMilliseconds)},
+                                                     {"learning", estimates.learningPace}});
 
 #endif
     state["resource_cache"] = model->resourceStats();
@@ -1507,8 +1654,9 @@ void Reader::save(bool snapshot) {
     state["typography_button_font"] = QFontInfo(findChild<QPushButton *>("rrTypography")->font()).family();
     state["benchmark_typography"] = model->temporaryTypography();
     state["display_settings"] = preferences;
-    state["header_text_pixels"] = page->headerTextPixels;
-    state["footer_text_pixels"] = page->footerTextPixels;
+    state["header_text_pixels"] = page->headerTextPixels();
+    state["footer_text_pixels"] = page->footerTextPixels();
+    state["header_footer_preset"] = kobalt::headerfooter::presetValue(chromePreset);
     state["reading_top"] = page->topHeight();
     state["reading_bottom"] = page->bottomHeight();
     state["reading_image_height"] = model->image().height();
@@ -1517,8 +1665,7 @@ void Reader::save(bool snapshot) {
     state["auto_rotation_available"] = orientation && orientation->automaticAvailable();
     state["viewport_width"] = width();
     state["viewport_height"] = height();
-    state["clock_text"] = page->clockText;
-    state["header_text"] = page->chapterTitle;
+    state["header_text"] = page->headerText();
     state["contents_page"] = choices->chapterPage();
     state["font_samples"] = choices->fontSamples();
     state["native_font_families"] = QJsonArray::fromStringList(pickerNativeFamilies);

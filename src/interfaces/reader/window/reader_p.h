@@ -126,6 +126,11 @@ private:
     bool importingProgress = false, comparingProgress = false;
     bool exitPending = false, exportRunning = false;
     bool lifecycleHidden = false;
+    QImage sleepImage, sleepCover;
+    QString sleepProgress, sleepRemaining;
+    BatteryStatus sleepBattery;
+    quint64 sleepCoverRequest = 0;
+    Qt::ScreenOrientation sleepOrientation = Qt::PrimaryOrientation;
     QTimer *clockTimer;
 #ifdef KOBALT_READER_HARDWARE
     const bool liveState = QFile::exists(book->paths().directory + "/live-state");
@@ -144,9 +149,10 @@ private:
     kobalt::ui::Panel *general;
     std::unique_ptr<kobalt::LightControls> light;
     kobalt::LightPanel *lightPopup = nullptr;
-    QCheckBox *darkOption, *smoothOption, *progressOption, *animationOption, *edgeLightOption, *denseGraphOption,
-        *pinStatsOption, *heavierTextOption;
-    QPushButton *autoRotateOption, *clockOption, *clockHideOption;
+    QCheckBox *darkOption, *inheritTextLayoutOption, *animationOption, *edgeLightOption, *denseGraphOption,
+        *pinStatsOption, *inheritHeaderFooterOption;
+    QCheckBox *automaticOpeningOption = nullptr;
+    QPushButton *autoRotateOption;
     QCheckBox *hideStatusOption = nullptr, *hideDeviceOptionsOption = nullptr;
     bool hideNativeStatus() const;
     QJsonObject preferences;
@@ -172,8 +178,36 @@ private:
     QVector<QPushButton *> rotationButtons;
     bool restoringDefaults = false, themeReady = false, darkTheme = false;
     kobalt::ui::FontButton *fontButton;
-    QVector<QPushButton *> alignmentButtons, hyphenButtons, headerSizeButtons, footerSizeButtons;
-    void syncChromeSizeButtons();
+    QVector<QPushButton *> alignmentButtons, hyphenButtons;
+    // Header and footer. The preset is saved per book; the Custom layout is
+    // shared by every book that selects it.
+    kobalt::headerfooter::Preset chromePreset = kobalt::headerfooter::Preset::Default;
+    kobalt::ui::DropdownButton *headerFooterRow = nullptr;
+    kobalt::reader::SlotMap *slotMap = nullptr;
+    QVector<kobalt::reader::PresetCard *> presetCards;
+    QVector<QPushButton *> headerSizeButtons, footerSizeButtons, progressBarButtons;
+    // Header and footer and the field list fill the reading area like
+    // Chapters, over the Layout panel, which stays open beneath them.
+    kobalt::reader::HeaderFooterView *headerFooterView = nullptr;
+    kobalt::reader::FieldChooser *fieldChooser = nullptr;
+    QWidget *chromeView() const;
+    void openHeaderFooterView();
+    void closeChromeViews();
+    kobalt::headerfooter::Values chromeValues();
+    kobalt::headerfooter::Layout customChrome() const;
+    // Custom has a saved layout that differs from Kobalt's.
+    bool customModified() const;
+    // Before an edit replaces a modified Custom layout with a preset's, ask.
+    void confirmCustomReplace(const std::function<void()> &proceed, const std::function<void()> &cancel);
+    // Reads the preset and layout from the preferences and shows them.
+    void loadChrome();
+    // Saves the preset, and the Custom layout when given, then shows them.
+    bool saveChrome(kobalt::headerfooter::Preset preset, const kobalt::headerfooter::Layout *custom = nullptr);
+    void syncChromeControls();
+    void openFieldChooser(int slot);
+    void closeFieldChooser();
+    // True when a slot shows something that changes with the clock.
+    bool chromeTicks() const;
     kobalt::ui::SettingSlider *sizeSlider, *opticalSizeSlider, *weightSlider, *variableWeightSlider, *spacingSlider,
         *marginSlider, *verticalMarginSlider, *bookSlider;
     kobalt::reader::AppearanceEditSession appearanceEdit;
@@ -259,7 +293,18 @@ private:
     void applyEdgeLight();
     void applyDarkMode(bool enabled);
     void applyBoldReading(bool enabled);
-    void applyHeavierText(bool enabled);
+    void prepareSleepCover();
+    void updateSleepBattery();
+    void showSleepScreen();
+    void openSleepScreen();
+    void closeSleepScreen();
+    void showTapZones();
+    void openTapZones();
+    void closeTapZones();
+    void showPageNavigation();
+    void openPageNavigation();
+    void closePageNavigation();
+    void applyAutomaticOpening(bool enabled);
     void applySettings();
     bool writePreferences(const QJsonObject &next);
     void showSettingsWriteError();
@@ -296,6 +341,10 @@ private:
     ui::DescribedOption *bionicOption = nullptr;
     kobalt::ui::CaptionButton *refreshButton = nullptr;
     QPointer<kobalt::ui::ModalOverlay> refreshPopup;
+    kobalt::ui::CaptionButton *sleepScreenButton = nullptr;
+    QPointer<kobalt::ui::ModalOverlay> sleepPopup;
+    kobalt::ui::CaptionButton *pageNavigationButton = nullptr, *tapZonesButton = nullptr;
+    QPointer<kobalt::ui::ModalOverlay> pageNavigationPopup, tapZonesPopup;
     static QString refreshExplanation(kobalt::ScreenRefresh mode);
     static QString refreshLabel(kobalt::ScreenRefresh mode);
     void showScreenRefresh();
@@ -307,6 +356,7 @@ private:
     void syncBookmarks();
     kobalt::BookmarkList *bookmarkList = nullptr;
     QPointer<kobalt::ui::ModalOverlay> removeDialog;
+    QPointer<kobalt::ui::ModalOverlay> customReplaceDialog;
     QPointer<kobalt::ui::ModalOverlay> bookmarkErrorDialog, settingsWriteErrorDialog;
     QPointer<kobalt::ui::ModalOverlay> formattingWarningDialog;
     QVector<kobalt::BookmarkRow> bookmarkRows() const;

@@ -125,7 +125,31 @@ FT_Face primaryFace(const QFont &font) {
     }
     return nullptr;
 }
-FT_Face faceFor(uint character, QChar::Script script, FT_Face primary) {
+FT_Face fallbackFace(const QString &regular, const QFont &font, int index = 0) {
+    if (regular.endsWith("-Regular.ttf")) {
+        const auto stem = regular.left(regular.size() - QStringLiteral("Regular.ttf").size());
+        QStringList styles;
+        if (font.weight() >= QFont::Bold && font.italic()) {
+            styles.append("BoldItalic");
+        }
+        if (font.weight() >= QFont::Bold) {
+            styles.append("Bold");
+        }
+        if (font.italic()) {
+            styles.append("Italic");
+        }
+        for (const auto &style : styles) {
+            const auto file = stem + style + ".ttf";
+            if (fonts().pending.contains(file) || fonts().sources.contains(file)) {
+                if (const auto face = fonts().face(file, index)) {
+                    return face;
+                }
+            }
+        }
+    }
+    return fonts().face(regular, index);
+}
+FT_Face faceFor(uint character, QChar::Script script, FT_Face primary, const QFont &font) {
     if (primary && FT_Get_Char_Index(primary, character)) {
         return primary;
     }
@@ -172,13 +196,13 @@ FT_Face faceFor(uint character, QChar::Script script, FT_Face primary) {
         break;
     }
     if (!preferred.isEmpty()) {
-        const auto face = fonts().face(preferred, index);
+        const auto face = fallbackFace(preferred, font, index);
         if (face && FT_Get_Char_Index(face, character)) {
             return face;
         }
     }
     for (const auto &file : {QStringLiteral("NotoSerif-Regular.ttf"), QStringLiteral("NotoSansMath-Regular.ttf")}) {
-        const auto face = fonts().face(file);
+        const auto face = fallbackFace(file, font);
         if (face && FT_Get_Char_Index(face, character)) {
             return face;
         }
@@ -199,10 +223,12 @@ struct Glyph {
 }
 bool initializePrivateInterfaceText(const AssetBundle &assets) {
     QMap<QString, std::function<QByteArray()>> pending;
-    QStringList files{"IBMPlexSans-Regular.ttf",    "IBMPlexSans-Bold.ttf",  "IBMPlexSans-Italic.ttf",
-                      "IBMPlexMono-Regular.ttf",    "IBMPlexMono-Bold.ttf",  "InstrumentSerif-Regular.ttf",
-                      "InstrumentSerif-Italic.ttf", "NotoSerif-Regular.ttf", "NotoSansMath-Regular.ttf",
-                      "NotoSerifCJK-Regular.ttc"};
+    QStringList files{"IBMPlexSans-Regular.ttf",    "IBMPlexSans-Bold.ttf",     "IBMPlexSans-Italic.ttf",
+                      "IBMPlexMono-Regular.ttf",    "IBMPlexMono-Bold.ttf",     "InstrumentSerif-Regular.ttf",
+                      "InstrumentSerif-Italic.ttf", "NotoSansMath-Regular.ttf", "NotoSerifCJK-Regular.ttc"};
+    for (const auto *file : serifFallbackFontFiles) {
+        files.append(QLatin1String(file));
+    }
     for (const auto *file : scriptFallbackFontFiles) {
         files.append(QLatin1String(file));
     }
@@ -423,22 +449,33 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
             return true;
         };
         FT_Face requested = primary;
+        const QFont *requestedFont = &font;
         for (const auto &range : boldRanges) {
             if (start >= range.first && start < range.first + range.second) {
                 requested = boldPrimary;
+                if (emphasis == PrivateTextEmphasis::FontFace) {
+                    requestedFont = &boldFont;
+                }
                 break;
             }
         }
         FT_Face face = requested;
         if (!covers(face)) {
-            face = faceFor(cluster.first(), QChar::script(cluster.first()), requested);
+            face = faceFor(cluster.first(), QChar::script(cluster.first()), requested, *requestedFont);
             if (!covers(face)) {
                 QStringList files = fonts().pending.keys();
                 for (const auto &file : fonts().sources.keys())
                     if (!files.contains(file))
                         files.append(file);
                 for (const auto &file : files) {
-                    const auto candidate = fonts().face(file);
+                    if (file.endsWith("-Bold.ttf") || file.endsWith("-Italic.ttf") ||
+                        file.endsWith("-BoldItalic.ttf")) {
+                        const auto regular = file.left(file.lastIndexOf('-') + 1) + "Regular.ttf";
+                        if (fonts().pending.contains(regular) || fonts().sources.contains(regular)) {
+                            continue;
+                        }
+                    }
+                    const auto candidate = fallbackFace(file, *requestedFont);
                     if (covers(candidate)) {
                         face = candidate;
                         break;
@@ -695,12 +732,9 @@ QString elideInterfaceText(const QString &text, const QFont &font, int width) {
     }
     return elidePrivateText(text, font, width);
 }
-void drawInterfaceText(QPainter &painter, const QRect &area, const QString &text, Qt::Alignment alignment, int weight,
-                       const QVector<QPair<int, int>> &boldRanges) {
-    if (!needsPrivateText(text, painter.font())) {
-        painter.drawText(area, alignment, text);
-        return;
-    }
+namespace {
+void drawPrivateText(QPainter &painter, const QRect &area, const QString &text, Qt::Alignment alignment, int weight,
+                     const QVector<QPair<int, int>> &boldRanges, bool optical) {
     auto rendered = renderPrivateText(text, painter.font(), weight, boldRanges);
     if (rendered.image.isNull()) {
         return;
@@ -712,13 +746,43 @@ void drawInterfaceText(QPainter &painter, const QRect &area, const QString &text
     const int x = alignment.testFlag(Qt::AlignRight)     ? area.right() + 1 - rendered.advance
                   : alignment.testFlag(Qt::AlignHCenter) ? area.left() + (area.width() - rendered.advance) / 2
                                                          : area.left();
-    const int y = alignment.testFlag(Qt::AlignBottom)    ? area.bottom() + 1 - rendered.image.height()
-                  : alignment.testFlag(Qt::AlignVCenter) ? area.top() + (area.height() - rendered.image.height()) / 2
-                                                         : area.top();
+    int y = alignment.testFlag(Qt::AlignBottom)    ? area.bottom() + 1 - rendered.image.height()
+            : alignment.testFlag(Qt::AlignVCenter) ? area.top() + (area.height() - rendered.image.height()) / 2
+                                                   : area.top();
+    if (optical) {
+        // Center the rows that hold ink, as Qt's tight bounds do for native
+        // text, so a line without descenders does not sit high.
+        int first = -1, last = -1;
+        for (int row = 0; row < rendered.image.height(); ++row) {
+            const auto *pixels = reinterpret_cast<const QRgb *>(rendered.image.constScanLine(row));
+            for (int column = 0; column < rendered.image.width(); ++column)
+                if (qAlpha(pixels[column])) {
+                    if (first < 0)
+                        first = row;
+                    last = row;
+                    break;
+                }
+        }
+        if (first >= 0)
+            y = qRound(area.top() + area.height() / 2.0 - (first + last + 1) / 2.0);
+    }
     painter.save();
     painter.setClipRect(area, Qt::IntersectClip);
     painter.drawImage(QPoint(x, y), rendered.image);
     painter.restore();
+}
+}
+void drawInterfaceText(QPainter &painter, const QRect &area, const QString &text, Qt::Alignment alignment, int weight,
+                       const QVector<QPair<int, int>> &boldRanges) {
+    if (!needsPrivateText(text, painter.font())) {
+        painter.drawText(area, alignment, text);
+        return;
+    }
+    drawPrivateText(painter, area, text, alignment, weight, boldRanges, false);
+}
+void drawOpticalPrivateText(QPainter &painter, const QRect &area, const QString &text, Qt::Alignment alignment,
+                            int weight, const QVector<QPair<int, int>> &boldRanges) {
+    drawPrivateText(painter, area, text, alignment, weight, boldRanges, true);
 }
 int PrivateTextLabel::textWidth(const QString &value) const {
     return interfaceTextWidth(value, font());

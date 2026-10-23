@@ -1,4 +1,5 @@
 #include "text.h"
+#include "support/qt_font.h"
 #include "../style/fonts.h"
 #include "../style/font_data.h"
 #include "../style/styles.h"
@@ -251,9 +252,9 @@ void drawOpticalText(QPainter &painter, const QRectF &area, const QString &text,
                      SampleAppearance appearance) {
     if (needsPrivateText(text, painter.font())) {
         const auto ranges = appearance.bionic == "bold" ? samplePrefixes(text) : QVector<QPair<int, int>>();
-        drawInterfaceText(painter, area.toRect(),
-                          elidePrivateText(text, painter.font(), qMax(0, int(area.width())), ranges),
-                          (centered ? Qt::AlignHCenter : Qt::AlignLeft) | Qt::AlignVCenter, appearance.weight, ranges);
+        drawOpticalPrivateText(painter, area.toRect(),
+                               elidePrivateText(text, painter.font(), qMax(0, int(area.width())), ranges),
+                               centered ? Qt::AlignHCenter : Qt::AlignLeft, appearance.weight, ranges);
         return;
     }
     const bool bold = appearance.bionic == "bold";
@@ -424,6 +425,18 @@ void SampleLabel::paintEvent(QPaintEvent *event) {
 }
 // Some fonts report an x-height that does not match their glyphs. Measure
 // capitals as well as lowercase so small x-heights do not inflate font names.
+qreal halfSpacedWidth(const QFontMetrics &metrics, const QString &text) {
+    return qt::textWidth(metrics, text) - text.count(' ') * qt::textWidth(metrics, QStringLiteral(" ")) / 2.0;
+}
+void drawHalfSpaced(QPainter &painter, qreal x, const QRect &bounds, const QString &text) {
+    const auto metrics = painter.fontMetrics();
+    const qreal baseline = bounds.y() + (bounds.height() - metrics.height()) / 2.0 + metrics.ascent();
+    const qreal space = qt::textWidth(metrics, QStringLiteral(" ")) / 2.0;
+    for (const auto &word : text.split(' ')) {
+        painter.drawText(QPointF(x, baseline), word);
+        x += qt::textWidth(metrics, word) + space;
+    }
+}
 QFont fontSample(const QString &face) {
     QFont font(face.isEmpty() ? kobalt::ui::interfaceFontFamily() : face);
     font.setWeight(QFont::Normal);

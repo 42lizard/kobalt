@@ -11,6 +11,8 @@
 #include "interfaces/reader/ui/style/metrics.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include "reading/appearance_settings.h"
+#include "reading/page_navigation.h"
+#include "reading/sleep_screen.h"
 #include "storage/reader_storage.h"
 #include <QDateTime>
 
@@ -21,7 +23,59 @@ namespace m = kobalt::ui::metrics;
 using kobalt::ui::readerStyle;
 using kobalt::ui::makeButton;
 using kobalt::platform::textRefresh;
-using ReaderOption = kobalt::ui::DescribedOption;
+
+void Reader::confirmCustomReplace(const std::function<void()> &proceed, const std::function<void()> &cancel) {
+    using kobalt::headerfooter::Preset;
+    // Custom itself, or a Custom that still matches Kobalt, has nothing to lose.
+    if (chromePreset == Preset::Custom || !customModified()) {
+        proceed();
+        return;
+    }
+    if (customReplaceDialog)
+        return;
+    auto *choice = new ui::ChoiceModal(
+        this,
+        {strings::get("header_footer.replace_custom_detail").arg(kobalt::headerfooter::presetLabel(chromePreset)),
+         strings::get("header_footer.replace_custom_prompt"),
+         {}},
+        {strings::get("common.cancel"), "rrKeepCustomLayout"},
+        {strings::get("header_footer.replace_custom"), "rrReplaceCustomLayout"});
+    customReplaceDialog = choice;
+    customReplaceDialog->setObjectName("rrReplaceCustom");
+    auto *text = choice->descriptionLabel();
+    text->setObjectName("rrReplaceCustomDetail");
+    readerStyle(text, styles::font(m::chrome::descriptionText) + "color:palette(placeholder-text);");
+    auto finish = [this, proceed, cancel](bool replace) {
+        if (!customReplaceDialog)
+            return;
+        customReplaceDialog->hide();
+        customReplaceDialog->deleteLater();
+        customReplaceDialog.clear();
+        if (replace)
+            proceed();
+        else
+            cancel();
+        refresh();
+    };
+    connect(choice->secondaryButton(), &QPushButton::clicked, this, [finish] {
+        finish(false);
+    });
+    connect(choice->primaryButton(), &QPushButton::clicked, this, [finish] {
+        finish(true);
+    });
+    // A tap outside the card keeps the layout, as Cancel does.
+    choice->dismissed = [finish] {
+        finish(false);
+    };
+    choice->card()->fitToWidth(qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance));
+    customReplaceDialog->centerCard();
+    for (auto *widget : customReplaceDialog->findChildren<QWidget *>())
+        textRefresh(widget);
+    textRefresh(customReplaceDialog);
+    customReplaceDialog->show();
+    customReplaceDialog->raise();
+    customReplaceDialog->setFocus();
+}
 
 void Reader::showFontDefaultDialog(const QString &face) {
     if (model->temporaryTypography())
@@ -628,34 +682,26 @@ void Reader::openScreenRefresh() {
     auto *title = card->title(strings::get("reader.refresh_the_screen"), "rrScreenRefreshTitle");
     title->setContentsMargins(c::inset, 0, c::inset, 0);
     card->rows()->addSpacing(m::notice::cardMargins.bottom());
-    QVector<ReaderOption *> options;
     const int cardWidth = qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance);
-    int rowHeight = c::listActionHeight;
+    // The shared pick-one list: rows share the tallest height a choice needs.
+    auto *choices = new kobalt::ui::RadioList(card);
+    choices->setObjectName("rrScreenRefreshChoices");
+    choices->setMinimumRowHeight(c::listActionHeight);
+    choices->setTopDivider(true);
     for (const auto mode : kobalt::screenRefreshModes) {
-        auto *option = new ReaderOption(refreshLabel(mode), refreshExplanation(mode), card);
-        option->setObjectName(qPrintable("rrRefresh_" + kobalt::screenRefreshValue(mode)));
-        auto presentation = option->presentation();
-        presentation.indicator = ReaderOption::Indicator::Radio;
-        presentation.horizontalInset = c::inset;
-        presentation.dividers = ui::Edges(Qt::BottomEdge) | (options.isEmpty() ? ui::Edges(Qt::TopEdge) : ui::Edges{});
-        presentation.labelPixels = c::labelText;
-        presentation.descriptionPixels = c::descriptionText;
-        presentation.indicatorSize = {c::checkSize, c::checkSize};
-        presentation.minimumRowHeight =
-            refreshExplanation(mode).isEmpty() ? c::listActionHeight * 2 / 3 : c::listActionHeight;
-        option->setPresentation(presentation);
-        option->setChecked(mode == screenRefreshMode);
-        connect(option, &QCheckBox::clicked, this, [this, mode] {
-            screenRefreshMode = mode;
-            showScreenRefresh();
-            closeScreenRefresh();
-        });
-        card->rows()->addWidget(option);
-        options.append(option);
-        rowHeight = qMax(rowHeight, option->heightForWidth(cardWidth - 4));
+        choices->add(QString("rrRefresh_" + kobalt::screenRefreshValue(mode)), refreshLabel(mode),
+                     refreshExplanation(mode));
+        if (mode == screenRefreshMode)
+            choices->setCurrent(choices->options().size() - 1);
     }
-    for (auto *option : options)
-        option->setFixedHeight(rowHeight);
+    choices->chosen = [this](int index) {
+        screenRefreshMode = kobalt::screenRefreshModes[index];
+        showScreenRefresh();
+        closeScreenRefresh();
+    };
+    card->rows()->addWidget(choices);
+    // The card sizes from its layout; give the list its height at the card's width.
+    choices->setFixedHeight(choices->heightForWidth(cardWidth - 4));
     card->fitToWidth(cardWidth);
     refreshPopup->centerCard();
     for (auto *widget : refreshPopup->findChildren<QWidget *>())
@@ -663,6 +709,294 @@ void Reader::openScreenRefresh() {
     textRefresh(refreshPopup);
     refreshPopup->show();
     refreshPopup->raise();
+}
+
+namespace {
+QString sleepLabel(sleep::Mode mode) {
+    switch (mode) {
+    case sleep::Mode::Stock:
+        return strings::get("settings.sleep_stock");
+    case sleep::Mode::Cover:
+        return strings::get("settings.sleep_cover");
+    case sleep::Mode::Page:
+        return strings::get("settings.sleep_page");
+    }
+    return {};
+}
+QString sleepExplanation(sleep::Mode mode) {
+    switch (mode) {
+    case sleep::Mode::Stock:
+        return strings::get("settings.sleep_stock_description");
+    case sleep::Mode::Cover:
+        return strings::get("settings.sleep_cover_description");
+    case sleep::Mode::Page:
+        return strings::get("settings.sleep_page_description");
+    }
+    return {};
+}
+}
+
+void Reader::showSleepScreen() {
+    sleepScreenButton->setCaption(sleepLabel(sleep::mode(preferences)).toUpper());
+}
+
+void Reader::closeSleepScreen() {
+    if (!sleepPopup) {
+        return;
+    }
+    sleepPopup->hide();
+    sleepPopup->deleteLater();
+    sleepPopup.clear();
+}
+
+void Reader::openSleepScreen() {
+    if (sleepPopup) {
+        return;
+    }
+    namespace c = m::chrome;
+    sleepPopup = new ui::ModalOverlay(this);
+    sleepPopup->setObjectName("rrSleepScreenPopup");
+    sleepPopup->setGeometry(rect());
+    sleepPopup->installEventFilter(this);
+    sleepPopup->dismissed = [this] {
+        closeSleepScreen();
+    };
+    auto *card = sleepPopup->card();
+    card->rows()->setContentsMargins(2, 2, 2, 2);
+    card->rows()->setSpacing(0);
+    card->rows()->addSpacing(m::notice::cardMargins.top());
+    auto *title = card->title(strings::get("settings.sleep_screen"), "rrSleepScreenTitle");
+    title->setContentsMargins(c::inset, 0, c::inset, 0);
+    card->rows()->addSpacing(m::notice::cardMargins.bottom());
+    const int cardWidth = qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance);
+    auto *choices = new ui::RadioList(card);
+    choices->setObjectName("rrSleepScreenChoices");
+    choices->setMinimumRowHeight(c::listActionHeight);
+    choices->setTopDivider(true);
+    for (const auto mode : sleep::modes) {
+        choices->add("rrSleep_" + sleep::value(mode), sleepLabel(mode), sleepExplanation(mode));
+        if (mode == sleep::mode(preferences)) {
+            choices->setCurrent(choices->options().size() - 1);
+        }
+    }
+    choices->chosen = [this](int index) {
+        auto next = preferences;
+        next[sleep::preferenceKey] = sleep::value(sleep::modes[index]);
+        next.remove("kobalt_sleep_screen");
+        if (writePreferences(next)) {
+            preferences = next;
+            prepareSleepCover();
+            showSleepScreen();
+            settingsError->clear();
+            settingsError->hide();
+        } else {
+            settingsError->setText(strings::get("reader.could_not_save_reader_settings"));
+            settingsError->show();
+        }
+        closeSleepScreen();
+    };
+    card->rows()->addWidget(choices);
+    choices->setFixedHeight(choices->heightForWidth(cardWidth - 4));
+    card->fitToWidth(cardWidth);
+    sleepPopup->centerCard();
+    for (auto *widget : sleepPopup->findChildren<QWidget *>()) {
+        textRefresh(widget);
+    }
+    textRefresh(sleepPopup);
+    sleepPopup->show();
+    sleepPopup->raise();
+    sleepPopup->setFocus();
+}
+
+namespace {
+QString navigationLabel(pageNavigation::Mode mode) {
+    switch (mode) {
+    case pageNavigation::Mode::TapsAndSwipes:
+        return strings::get("settings.navigation_taps_and_swipes");
+    case pageNavigation::Mode::TapsOnly:
+        return strings::get("settings.navigation_taps_only");
+    case pageNavigation::Mode::SwipesOnly:
+        return strings::get("settings.navigation_swipes_only");
+    case pageNavigation::Mode::ButtonsOnly:
+        return strings::get("settings.navigation_buttons_only");
+    }
+    return {};
+}
+QString tapZoneLabel(tapZones::Layout layout) {
+    switch (layout) {
+    case tapZones::Layout::LeftRight:
+        return strings::get("settings.tap_left_right");
+    case tapZones::Layout::TopBottom:
+        return strings::get("settings.tap_top_bottom");
+    case tapZones::Layout::OneHanded:
+        return strings::get("settings.tap_one_handed");
+    }
+    return {};
+}
+QString navigationExplanation(pageNavigation::Mode mode) {
+    switch (mode) {
+    case pageNavigation::Mode::TapsAndSwipes:
+        return strings::get("settings.navigation_taps_and_swipes_description");
+    case pageNavigation::Mode::TapsOnly:
+        return strings::get("settings.navigation_taps_only_description");
+    case pageNavigation::Mode::SwipesOnly:
+        return strings::get("settings.navigation_swipes_only_description");
+    case pageNavigation::Mode::ButtonsOnly:
+        return strings::get("settings.navigation_buttons_only_description");
+    }
+    return {};
+}
+}
+
+void Reader::showTapZones() {
+    tapZonesButton->setCaption(tapZoneLabel(pageNavigation::tapLayout(preferences)).toUpper());
+}
+
+void Reader::closeTapZones() {
+    if (!tapZonesPopup)
+        return;
+    tapZonesPopup->hide();
+    tapZonesPopup->deleteLater();
+    tapZonesPopup.clear();
+}
+
+void Reader::openTapZones() {
+    if (tapZonesPopup)
+        return;
+    namespace c = m::chrome;
+    tapZonesPopup = new ui::ModalOverlay(this);
+    tapZonesPopup->setObjectName("rrTapZonesPopup");
+    tapZonesPopup->setGeometry(rect());
+    tapZonesPopup->installEventFilter(this);
+    tapZonesPopup->dismissed = [this] {
+        closeTapZones();
+    };
+    auto *card = tapZonesPopup->card();
+    card->rows()->setContentsMargins(c::inset, m::notice::cardMargins.top(), c::inset, m::notice::cardMargins.bottom());
+    card->title(strings::get("settings.tap_zones"), "rrTapZonesTitle");
+    card->message(strings::get("settings.tap_zones_hint"), "rrTapZonesHint");
+    auto *row = new QHBoxLayout;
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(m::control::itemGap);
+    card->rows()->addLayout(row);
+    auto *group = new QButtonGroup(card);
+    const bool rtl = model->state().value("page_progression_rtl").toBool();
+    for (const auto layout : tapZones::layouts) {
+        auto *button = new ui::TapZoneButton(layout, rtl, card);
+        button->setObjectName("rrTapZones_" + pageNavigation::tapValue(layout));
+        button->setText(tapZoneLabel(layout));
+        button->setAccessibleName(button->text());
+        button->setChecked(layout == pageNavigation::tapLayout(preferences));
+        group->addButton(button);
+        row->addWidget(button);
+        connect(button, &QPushButton::clicked, this, [this, layout] {
+            auto next = preferences;
+            next[pageNavigation::tapPreferenceKey] = pageNavigation::tapValue(layout);
+            if (layout == tapZones::Layout::OneHanded)
+                next[pageNavigation::preferenceKey] = pageNavigation::value(pageNavigation::Mode::TapsAndSwipes);
+            if (writePreferences(next)) {
+                preferences = next;
+                showTapZones();
+                showPageNavigation();
+                settingsError->clear();
+                settingsError->hide();
+            } else {
+                settingsError->setText(strings::get("reader.could_not_save_reader_settings"));
+                settingsError->show();
+            }
+            closeTapZones();
+        });
+    }
+    card->message(strings::get("settings.tap_one_handed_hint"), "rrTapZonesOneHandedHint");
+    card->fitToWidth(qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance));
+    tapZonesPopup->centerCard();
+    for (auto *widget : tapZonesPopup->findChildren<QWidget *>())
+        textRefresh(widget);
+    textRefresh(tapZonesPopup);
+    tapZonesPopup->show();
+    tapZonesPopup->raise();
+    tapZonesPopup->setFocus();
+}
+
+void Reader::showPageNavigation() {
+    pageNavigationButton->setCaption(
+        navigationLabel(pageNavigation::mode(preferences, services.pageButtons())).toUpper());
+}
+
+void Reader::closePageNavigation() {
+    if (!pageNavigationPopup) {
+        return;
+    }
+    pageNavigationPopup->hide();
+    pageNavigationPopup->deleteLater();
+    pageNavigationPopup.clear();
+}
+
+void Reader::openPageNavigation() {
+    if (pageNavigationPopup) {
+        return;
+    }
+    namespace c = m::chrome;
+    pageNavigationPopup = new ui::ModalOverlay(this);
+    pageNavigationPopup->setObjectName("rrPageNavigationPopup");
+    pageNavigationPopup->setGeometry(rect());
+    pageNavigationPopup->installEventFilter(this);
+    pageNavigationPopup->dismissed = [this] {
+        closePageNavigation();
+    };
+    auto *card = pageNavigationPopup->card();
+    card->rows()->setContentsMargins(2, 2, 2, 2);
+    card->rows()->setSpacing(0);
+    card->rows()->addSpacing(m::notice::cardMargins.top());
+    auto *title = card->title(strings::get("settings.page_navigation"), "rrPageNavigationTitle");
+    title->setContentsMargins(c::inset, 0, c::inset, 0);
+    auto *hint = card->message(strings::get("settings.navigation_menu_hint"), "rrPageNavigationHint");
+    hint->setContentsMargins(c::inset, 0, c::inset, 0);
+    card->rows()->addSpacing(m::notice::cardMargins.bottom());
+    const int cardWidth = qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance);
+    auto *choices = new ui::RadioList(card);
+    choices->setObjectName("rrPageNavigationChoices");
+    choices->setMinimumRowHeight(c::listActionHeight);
+    choices->setTopDivider(true);
+    for (const auto mode : pageNavigation::modes) {
+        if (mode == pageNavigation::Mode::ButtonsOnly && !services.pageButtons()) {
+            continue;
+        }
+        const bool needsSwipes =
+            pageNavigation::tapLayout(preferences) == tapZones::Layout::OneHanded && !pageNavigation::swipes(mode);
+        auto *option =
+            choices->add("rrNavigation_" + pageNavigation::value(mode), navigationLabel(mode),
+                         needsSwipes ? strings::get("settings.navigation_needs_swipes") : navigationExplanation(mode));
+        option->setEnabled(!needsSwipes);
+        if (mode == pageNavigation::mode(preferences, services.pageButtons())) {
+            choices->setCurrent(choices->options().size() - 1);
+        }
+    }
+    choices->chosen = [this](int index) {
+        auto next = preferences;
+        next[pageNavigation::preferenceKey] = pageNavigation::value(pageNavigation::modes[index]);
+        if (writePreferences(next)) {
+            preferences = next;
+            showPageNavigation();
+            settingsError->clear();
+            settingsError->hide();
+        } else {
+            settingsError->setText(strings::get("reader.could_not_save_reader_settings"));
+            settingsError->show();
+        }
+        closePageNavigation();
+    };
+    card->rows()->addWidget(choices);
+    choices->setFixedHeight(choices->heightForWidth(cardWidth - 4));
+    card->fitToWidth(cardWidth);
+    pageNavigationPopup->centerCard();
+    for (auto *widget : pageNavigationPopup->findChildren<QWidget *>()) {
+        textRefresh(widget);
+    }
+    textRefresh(pageNavigationPopup);
+    pageNavigationPopup->show();
+    pageNavigationPopup->raise();
+    pageNavigationPopup->setFocus();
 }
 
 }

@@ -317,10 +317,16 @@ QVector<ReadingFont> ReaderModel::fontCatalog() {
             present |= font.family == family;
         if (present)
             continue;
-        const auto filename = family == "Noto Serif" ? "NotoSerif-Regular.ttf" : "NotoSerifCJK-Regular.ttc";
-        for (const auto &file : fonts_.fallbackFiles)
-            if (QFileInfo(file).fileName() == filename)
-                result.append({family, {file}, FontOrigin::Interface, false, {}, {}});
+        QStringList files;
+        for (const auto &file : fonts_.fallbackFiles) {
+            const auto name = QFileInfo(file).fileName();
+            if (family == "Noto Serif" ? name.startsWith("NotoSerif-") : name == "NotoSerifCJK-Regular.ttc") {
+                files.append(file);
+            }
+        }
+        if (!files.isEmpty()) {
+            result.append({family, files, FontOrigin::Interface, false, {}, {}});
+        }
     }
     readingFontCatalog = result;
     fontCatalogReady = true;
@@ -394,7 +400,6 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     damage_.clear();
     size_ = size;
     darkMode_ = saved.value("dark_mode").toBool(false);
-    smoothImages_ = saved.value("smooth_images").toBool(true);
     hideNonlinearFragments_ = saved.value("hide_nonlinear_fragments").toBool(false);
     pixels_ = qBound(minimumFontPixels(), saved.value("font_pixels").toInt(defaultFontPixels()), maximumFontPixels());
     spacing_ = qBound(100, saved.value("line_spacing").toInt(defaultLineSpacing), maximumLineSpacing);
@@ -475,7 +480,7 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     // css_font_family_t: serif, sans-serif, cursive, fantasy, monospace, math,
     // emoji and fangsong. Empty entries keep the engine's choice.
     properties->setString(PROP_FONT_FAMILY_FACES,
-                          lString8(QString("|||||%1|||").arg(monospaceFontFace).toUtf8().constData()));
+                          lString8(QString("|||||%1|%2||").arg(monospaceFontFace, mathFontFace).toUtf8().constData()));
     engine_->propsApply(properties);
     engine_->setViewMode(DVM_PAGES, 1);
     engine_->setDefaultFontFace(lString8((face_.isEmpty() ? QString(defaultFontFace) : face_).toUtf8().constData()));
@@ -502,39 +507,66 @@ QString ReaderModel::title() const {
 QString ReaderModel::author() const {
     return engine_ ? qstring(engine_->getAuthors()) : QString();
 }
-QImage ReaderModel::coverThumbnail() const {
-    if (!engine_)
+QImage ReaderModel::coverImage(QSize maximumSize, const QString &preferredPath) const {
+    if (!engine_ || maximumSize.isEmpty() || qint64(maximumSize.width()) * maximumSize.height() > 4 * 1024 * 1024) {
         return {};
-    auto stream = engine_->getCoverPageImageStream();
-    if (stream.isNull())
-        return {};
-    const auto length = stream->GetSize();
-    if (!length || length > ResourceCache::budgetBytes)
-        return {};
-    // A resource stream can decode a placeholder while its image is deferred.
-    // Copy the cover bytes before saving a thumbnail that must outlive the book.
-    auto bytes = LVCreateMemoryStream(stream);
-    if (bytes.isNull())
-        return {};
-    auto cover = LVCreateStreamImageSource(bytes);
-    if (cover.isNull() || cover->GetWidth() <= 0 || cover->GetHeight() <= 0)
-        return {};
-    if (quint64(cover->GetWidth()) * quint64(cover->GetHeight()) > imagePixelLimit)
-        return {};
-    const auto size = QSize(cover->GetWidth(), cover->GetHeight()).scaled(120, 180, Qt::KeepAspectRatio);
-    QImage image(size, QImage::Format_RGB32);
-    image.fill(Qt::white);
-    PageDrawBuffer buffer(image, false, true);
-    buffer.Draw(cover, 0, 0, size.width(), size.height(), false);
-    // CREngine leaves the high byte unused; Qt RGB32 requires opaque pixels.
-    const int width = image.width(), height = image.height();
-    for (int y = 0; y < height; ++y) {
-        auto *pixels = reinterpret_cast<quint32 *>(image.scanLine(y));
-        for (int x = 0; x < width; ++x)
-            pixels[x] |= 0xff000000U;
     }
-    return image;
+    const auto decode = [maximumSize](LVStreamRef stream) -> QImage {
+        if (stream.isNull()) {
+            return {};
+        }
+        const auto length = stream->GetSize();
+        if (!length || length > ResourceCache::budgetBytes) {
+            return {};
+        }
+        // A resource stream can decode a placeholder while its image is deferred.
+        // Copy the cover bytes before rendering an image that must outlive the book.
+        auto bytes = LVCreateMemoryStream(stream);
+        if (bytes.isNull()) {
+            return {};
+        }
+        auto cover = LVCreateStreamImageSource(bytes);
+        // Unrecognised formats produce a dummy image with no source stream.
+        // It must not prevent the next cover source from being tried.
+        if (cover.isNull() || !cover->GetSourceStream() || cover->GetWidth() <= 0 || cover->GetHeight() <= 0) {
+            return {};
+        }
+        if (quint64(cover->GetWidth()) * quint64(cover->GetHeight()) > imagePixelLimit) {
+            return {};
+        }
+        auto size = QSize(cover->GetWidth(), cover->GetHeight());
+        if (size.width() > maximumSize.width() || size.height() > maximumSize.height()) {
+            size.scale(maximumSize, Qt::KeepAspectRatio);
+        }
+        if (size.isEmpty()) {
+            return {};
+        }
+        QImage image(size, QImage::Format_RGB32);
+        if (image.isNull()) {
+            return {};
+        }
+        image.fill(Qt::white);
+        PageDrawBuffer buffer(image, false, true);
+        buffer.Draw(cover, 0, 0, size.width(), size.height(), false);
+        // CREngine leaves the high byte unused; Qt RGB32 requires opaque pixels.
+        const int width = image.width(), height = image.height();
+        for (int y = 0; y < height; ++y) {
+            auto *pixels = reinterpret_cast<quint32 *>(image.scanLine(y));
+            for (int x = 0; x < width; ++x) {
+                pixels[x] |= 0xff000000U;
+            }
+        }
+        return image;
+    };
+    if (!preferredPath.isEmpty()) {
+        const auto image = decode(LVOpenFileStream(cre(preferredPath).c_str(), LVOM_READ));
+        if (!image.isNull()) {
+            return image;
+        }
+    }
+    return decode(engine_->getCoverPageImageStream());
 }
+
 QString ReaderModel::position() const {
     return engine_ ? anchor_ : QString();
 }
@@ -615,7 +647,6 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     const auto alignment = settings.value("text_alignment").toString(alignment_);
     const auto hyphenation = settings.value("hyphenation").toString(hyphenation_);
     const bool dark = settings.value("dark_mode").toBool(darkMode_);
-    const bool smooth = settings.value("smooth_images").toBool(smoothImages_);
     const bool hideNonlinear = settings.value("hide_nonlinear_fragments").toBool(hideNonlinearFragments_);
     if (!engine_ || pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 ||
         spacing > maximumLineSpacing || margin < 0 || margin > maximumMarginPixels() || topMargin < 0 ||
@@ -634,8 +665,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
                         face != face_ || defaultFace != defaultFace_ || margin != margin_ || topMargin != topMargin_ ||
                         bottomMargin != bottomMargin_ || alignment != alignment_ || hyphenation != hyphenation_;
     const bool resized = size != size_;
-    if (!styled && !resized && weight == weight_ && dark == darkMode_ && smooth == smoothImages_ &&
-        hideNonlinear == hideNonlinearFragments_)
+    if (!styled && !resized && weight == weight_ && dark == darkMode_ && hideNonlinear == hideNonlinearFragments_)
         return true;
     const QString anchor = position();
     OpeningCallback callback(engine_, std::move(progress));
@@ -654,7 +684,6 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     bionic_ = bionic;
     darkMode_ = dark;
     activateFontParameters();
-    smoothImages_ = smooth;
     hideNonlinearFragments_ = hideNonlinear;
     if (styled) {
         setExtraFontWeight(0);
@@ -719,8 +748,9 @@ bool ReaderModel::setHyphenation(const QString &mode) {
 void ReaderModel::applyPublisherFontFallbacks() {
     const bool useFallbacks = face_.isEmpty() && embeddedFontCount() == 0;
     const auto sansFace = fontFaces().contains(publisherSansFontFace) ? publisherSansFontFace : "IBM Plex Sans";
-    const auto families = useFallbacks ? QString("|%1|%2|||%3|||").arg(defaultFontFace, sansFace, monospaceFontFace)
-                                       : QString("|||||%1|||").arg(monospaceFontFace);
+    const auto families =
+        useFallbacks ? QString("|%1|%2|||%3|%4||").arg(defaultFontFace, sansFace, monospaceFontFace, mathFontFace)
+                     : QString("|||||%1|%2||").arg(monospaceFontFace, mathFontFace);
     auto properties = LVCreatePropsContainer();
     properties->setString(PROP_FONT_FAMILY_FACES, lString8(families.toUtf8().constData()));
     engine_->propsApply(properties);
@@ -744,8 +774,9 @@ void ReaderModel::applyStyleSheet() {
         overrides +=
             "* { font-family: \"" + escaped +
             "\" !important; }\n"
-            // Code keeps its fixed width under the chosen reading font.
-            "pre, code, kbd, samp, tt, pre *, code *, kbd *, samp *, tt * { font-family: monospace !important; }\n";
+            // Code keeps its fixed width; MathML keeps the math font and its layout metrics.
+            "pre, code, kbd, samp, tt, pre *, code *, kbd *, samp *, tt * { font-family: monospace !important; }\n"
+            "math, math * { font-family: math !important; }\n";
     }
     // Like Nickel's line-height override, leave inline spans and media alone.
     // Relative font sizes, indentation and paragraph margins remain publisher CSS.
@@ -852,7 +883,7 @@ QImage ReaderModel::image(int pageNumber) {
         result = QImage(size_, QImage::Format_RGB32);
     if (result.isNull())
         return {};
-    PageDrawBuffer buffer(result, darkMode_, smoothImages_);
+    PageDrawBuffer buffer(result, darkMode_, true);
     engine_->Draw(buffer, -1, pageNumber, false);
     // CREngine composites into 0x00RRGGBB. Qt's opaque RGB32 contract requires
     // 0xffRRGGBB, including when a painter uses this image as a source.
@@ -1134,7 +1165,6 @@ QJsonObject ReaderModel::state() const {
                                {"bold_reading", bionic_},
                                {"hyphenation", hyphenation_},
                                {"dark_mode", darkMode_},
-                               {"smooth_images", smoothImages_},
                                {"hide_nonlinear_fragments", hideNonlinearFragments_},
                                {"dom_version", domVersion_},
                                {"page_progression_rtl", engine_ && engine_->getDocument()->getProps()->getStringDef(

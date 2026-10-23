@@ -114,7 +114,8 @@ protected:
             auto font = helpFont;
             font.setPixelSize(qRound(side * 0.55));
             painter.setFont(font);
-            painter.drawText(circle, Qt::AlignCenter, QStringLiteral("Aa"));
+            // The sample face may be private to Kobalt, which Qt cannot draw.
+            ui::drawOpticalText(painter, circle, QStringLiteral("Aa"), true);
         }
         if (isChecked() && !placeholder) {
             const int inset = ui::px(16), side = ui::px(36);
@@ -186,7 +187,8 @@ ChoiceScreen::ChoiceScreen(QWidget *parent) : kobalt::ui::Panel(parent), navigat
         }
     });
     fontSectionBar = new ui::Panel(this);
-    readerStyle(fontSectionBar, "background:palette(midlight);");
+    fontSectionBar->setObjectName("rrFontSectionBar");
+    fontSectionBar->setFill(QPalette::Midlight);
     fontSection = new QLabel(fontSectionBar);
     fontSection->setObjectName("rrFontSection");
     fontSection->setFont(ui::captionFont(ui::px(18)));

@@ -9,6 +9,7 @@
 #include "interfaces/reader/ui/style/styles.h"
 #include "host_services.h"
 #include "reader_host.h"
+#include "reading/appearance_settings.h"
 #include "host_presentation.h"
 #include "platform/android/start_screen.h"
 #include "interfaces/reader/views/opening.h"
@@ -21,6 +22,7 @@
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
 #include "interfaces/reader/views/reading_page.h"
+#include "interfaces/reader/views/sleep_screen.h"
 #include "interfaces/reader/settings/dictionaries_page.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/metrics.h"
@@ -134,10 +136,19 @@ public:
         try {
             require(temporary.isValid(), "Cannot create isolated reader state");
             QDir().mkpath(output);
-            require(storage::writeJson(paths.preferences(), {{"dark_mode", theme == "dark"},
-                                                             {"show_clock", true},
-                                                             {"dense_stats_chart", group == "stats-dense"}}),
+            require(storage::writeJson(paths.preferences(),
+                                       {{"dark_mode", theme == "dark"},
+                                        {"dense_stats_chart", group == "stats-dense"},
+                                        {"page_navigation", group == "light" ? "buttons_only" : "taps_and_swipes"}}),
                     "Cannot write fixture preferences");
+            if (group == "layout-saved-field") {
+                auto preferences = storage::readJson(paths.preferences());
+                auto custom = headerfooter::presetLayout(headerfooter::Preset::Default);
+                custom.slotFields[3] = headerfooter::Field::ChapterTimeLeft;
+                preferences[headerfooter::customKey] = headerfooter::toJson(custom);
+                preferences[appearance::lastPresetKey] = headerfooter::presetValue(headerfooter::Preset::Custom);
+                require(storage::writeJson(paths.preferences(), preferences), "Cannot save Custom field fixture");
+            }
             if (group == "sync") {
                 host.progress = std::make_shared<test::HostProgress>();
                 host.positions = {[](const ReaderModel &, const QString &position, QString *) {
@@ -155,7 +166,27 @@ public:
             host.configureServices = [this, state = lookup, desktop = group == "native-ui",
                                       catalogue = discoverReadingFonts(fonts.sources)](ReaderHostServices &services) {
                 services.desktopUi = desktop;
+                services.pageButtons = [this] {
+                    return pageButtonsSupported;
+                };
+                if (!desktop) {
+                    auto automatic = std::make_shared<bool>(true);
+                    services.automaticBookOpening = [automatic] {
+                        return *automatic;
+                    };
+                    services.setAutomaticBookOpening = [automatic](bool enabled) {
+                        *automatic = enabled;
+                        return true;
+                    };
+                    services.presentation = [](QWidget *) {
+                        return std::make_unique<test::HostPresentation>(
+                            std::make_shared<test::SleepPresentationState>());
+                    };
+                }
                 services.systemRotation = this->group == "layout-system-rotation";
+                if (this->group == "light-sensor") {
+                    services.light = test::hostReaderServices(true).light;
+                }
                 if (this->group == "bluetooth")
                     services.observeBluetooth = [this](QObject *, std::function<void(bool)> changed) {
                         bluetoothChanged = std::move(changed);
@@ -345,6 +376,8 @@ public:
             QTest::qWait(20);
         }
         require(stable == 3 && !image.isNull(), "Image did not settle: " + name);
+        auto *target = (surface ? surface : host.window())->findChild<QWidget *>(required);
+        require(target && target->isVisible(), "Capture target disappeared: " + required);
         const QString filename = name + ".png";
         require(image.save(output + "/" + filename), "Could not save " + filename);
         QJsonArray widgets;
@@ -388,6 +421,13 @@ public:
                              {"dpr", image.devicePixelRatio()},
                              {"style", test::hostStyleProfile},
                              {"font_profile", test::hostFontProvenance()}};
+        if (group == "sleep" && required == "rrSleepPreview") {
+            auto *preview = host.window()->findChild<QWidget *>("rrSleepPreview");
+            require(preview, "Sleep preview unavailable");
+            metadata["battery_percent"] = preview->property("sleep_battery").toInt();
+            metadata["sleep_status"] = preview->property("sleep_status").toString();
+            metadata["sleep_background"] = preview->property("sleep_background").toString();
+        }
         if (group == "dictionary")
             metadata["dictionary_reference"] = "koreader-dicts v1.2.0/en-en";
         if (group == "dictionary" && lookup->mode != "definition")
@@ -472,9 +512,11 @@ public:
         auto *panel = dynamic_cast<DictionaryPanel *>(widget("rrDictionary"));
         require(panel, "Dictionary lookup panel missing");
         panel->setLanguage("en");
-        panel->setChoices({{"en-en", "English monolingual", "en", true},
-                           {"downloaded:en-fr", "English to French", "en", false},
-                           {"downloaded:ar-ar", "Arabic monolingual", "ar", false}});
+        panel->setChoices(
+            {{"en-en", "English monolingual", "en", true},
+             {"custom:/mnt/onboard/.kobo/custom-dict/dicthtml-en.zip", "English monolingual (Custom)", "en", true},
+             {"downloaded:en-fr", "English to French", "en", false},
+             {"downloaded:ar-ar", "Arabic monolingual", "ar", false}});
         tap("rrDictionarySelect");
         capture("lookup-choices", "rrDictionaryChoices");
         const int selections = lookup->selections, lookups = lookup->lookups;
@@ -581,6 +623,55 @@ public:
         const bool international = group.startsWith("international-");
         if (international)
             group.remove(0, 14);
+        if (group == "sleep") {
+            find("Alice was beginning");
+            menu();
+            tap("rrSettings");
+            tap("rrSettingsSystem");
+            capture("settings", "rrSleepScreen");
+            tap("rrSleepScreen");
+            capture("choices", "rrSleepScreenPopup");
+            tap("rrSleep_cover");
+            QImage cover;
+            bool coverReady = false;
+            host.session()->coverImage({2048, 2048}, [&](QImage image) {
+                cover = std::move(image);
+                coverReady = true;
+            });
+            waitFor(
+                [&] {
+                    return coverReady;
+                },
+                "Cover image did not load");
+            require(!cover.isNull(), "Reference book cover is missing");
+            auto *page = static_cast<ReadingPage *>(widget("rrPage"));
+            const QImage reading = page->snapshot(true);
+            QLabel preview(host.window());
+            preview.setObjectName("rrSleepPreview");
+            preview.setGeometry(host.window()->rect());
+            const auto show = [&](const QString &name, qint64 remaining, int battery, reader::SleepStatus status,
+                                  bool useCover = false) {
+                preview.setProperty("sleep_battery", battery);
+                preview.setProperty("sleep_status", reader::sleepStatusText(status));
+                preview.setProperty("sleep_background", useCover ? "cover" : "page");
+                preview.setPixmap(QPixmap::fromImage(reader::sleepScreenImage(
+                    useCover ? reader::sleepCoverBackground(cover, reading.size(), theme == "dark") : reading,
+                    strings::get("sleep.percent_read").arg(42), reader::sleepTimeLeft(remaining), theme == "dark",
+                    battery, status, !useCover)));
+                preview.show();
+                preview.raise();
+                capture(name, "rrSleepPreview");
+            };
+            show("reading-page", -1, 100, reader::SleepStatus::Sleeping);
+            show("with-time-left", 37 * 60000, 100, reader::SleepStatus::Sleeping);
+            show("with-hours-left", 217 * 60000, 100, reader::SleepStatus::Sleeping);
+            show("charging", 217 * 60000, 67, reader::SleepStatus::Charging);
+            show("charged", 217 * 60000, 100, reader::SleepStatus::Charged);
+            show("cover-sleeping", 217 * 60000, 100, reader::SleepStatus::Sleeping, true);
+            show("cover-charging", 217 * 60000, 67, reader::SleepStatus::Charging, true);
+            show("cover-charged", 217 * 60000, 100, reader::SleepStatus::Charged, true);
+            return;
+        }
         if (group == "native-ui") {
             find("Alice was beginning");
             capture("reading-defaults");
@@ -593,15 +684,16 @@ public:
             tap("rrSettings");
             capture("display-defaults", "rrDarkMode");
             tap("rrSettingsAdvanced");
-            capture("advanced-defaults", "rrSmoothImages");
+            capture("advanced-defaults", "rrInheritTextLayout");
             tap("rrSettingsUI");
             capture("ui-defaults", "rrHideStatusBar");
             tap("rrHideStatusBar");
             tap("rrHideDeviceOptions");
-            pageTap();
+            tap("rrSettings");
             menu();
             capture("menu-device-chrome", "rrMenuClock");
             tap("rrSettings");
+            tap("rrSettingsDisplay");
             capture("display-device-options", "rrScreenRefresh");
             tap("rrSettingsUI");
             capture("ui-device-chrome", "rrHideStatusBar");
@@ -896,7 +988,7 @@ public:
             tap("rrFont");
             tap("rrFontClose");
             tap("rrSettings");
-            for (const auto &tab : {"Display", "Advanced", "Stats", "About"}) {
+            for (const auto &tab : {"Display", "Controls", "Advanced", "Stats", "System", "About"}) {
                 tap("rrSettings" + QString(tab));
                 capture(QString(tab).toLower(), "rrGeneralSettings");
             }
@@ -921,6 +1013,33 @@ public:
                 tap("rrDictionariesNext");
             capture("dictionaries-other", "rrDictionaries");
             dictionaryManagementFixture = false;
+            tap("rrSettingsControls");
+            tap("rrPageNavigation");
+            capture("page-navigation", "rrPageNavigationPopup");
+            tap("rrNavigation_swipes_only");
+            capture("page-navigation-selected", "rrPageNavigation");
+            tap("rrPageNavigation");
+            tap("rrNavigation_taps_and_swipes");
+            pageButtonsSupported = false;
+            tap("rrPageNavigation");
+            capture("page-navigation-no-buttons", "rrPageNavigationPopup");
+            tap("rrNavigation_taps_and_swipes");
+            pageButtonsSupported = true;
+            tap("rrTapZones");
+            capture("tap-zones", "rrTapZonesPopup");
+            tap("rrTapZones_top_bottom");
+            tap("rrTapZones");
+            capture("tap-zones-top-bottom", "rrTapZonesPopup");
+            tap("rrTapZones_one_handed");
+            capture("tap-zones-one-handed-selected", "rrTapZones");
+            tap("rrTapZones");
+            capture("tap-zones-one-handed", "rrTapZonesPopup");
+            tap("rrTapZones_one_handed");
+            tap("rrPageNavigation");
+            capture("one-handed-navigation", "rrPageNavigationPopup");
+            tap("rrNavigation_taps_and_swipes");
+            tap("rrTapZones");
+            tap("rrTapZones_left_right");
             tap("rrSettingsAdvanced");
             tap("rrRestoreDefaults");
             capture("restore-confirmation", "rrConfirmDefaults");
@@ -941,17 +1060,22 @@ public:
         if (group == "typography") {
             tap("rrNavText");
             capture("text", "rrFont");
-            auto *loading = dynamic_cast<ui::ModalOverlay *>(widget("rrUpdatingText")->parentWidget()->parentWidget());
-            require(loading, "Appearance loading modal missing");
-            loading->setDelayedProgress(true, 999, 37);
-            capture("applying-before-delay", "rrFont");
-            loading->setDelayedProgress(true, 1000, 37, strings::get("reader.applying_appearance_changes"));
-            capture("applying-progress", "rrApplyingProgress");
-            loading->setDelayedProgress(true, 1000, 37, strings::get("reader.enabling_bold_reading"));
-            capture("enabling-bionic", "rrApplyingProgress");
-            loading->setDelayedProgress(true, 1000, 37, strings::get("reader.disabling_bold_reading"));
-            capture("disabling-bionic", "rrApplyingProgress");
-            loading->setDelayedProgress(false, 0, 0);
+            auto *idleProgress = widget("rrApplyingProgress");
+            idleProgress->setObjectName("rrIdleApplyingProgress");
+            {
+                // Reader refreshes dismiss its inactive render notice. Use the
+                // same control independently so it stays visible during capture.
+                ui::ModalOverlay loading(host.window());
+                loading.setDelayedProgress(true, 999, 37);
+                capture("applying-before-delay", "rrFont");
+                loading.setDelayedProgress(true, 1000, 37, strings::get("reader.applying_appearance_changes"));
+                capture("applying-progress", "rrApplyingProgress");
+                loading.setDelayedProgress(true, 1000, 37, strings::get("reader.enabling_bold_reading"));
+                capture("enabling-bionic", "rrApplyingProgress");
+                loading.setDelayedProgress(true, 1000, 37, strings::get("reader.disabling_bold_reading"));
+                capture("disabling-bionic", "rrApplyingProgress");
+            }
+            idleProgress->setObjectName("rrApplyingProgress");
             tap("rrFont");
             const QStringList sections{"RECOMMENDED FONTS", "BUILT-IN FONTS", "SIDELOADED FONTS"};
             for (int i = 0; i < sections.size(); ++i) {
@@ -1001,16 +1125,55 @@ public:
             capture("spacing-preview", "rrFont");
             return;
         }
+        if (group == "layout-saved-field") {
+            tap("rrNavLayout");
+            tap("rrHeaderFooter");
+            require(qobject_cast<QAbstractButton *>(widget("rrHeaderFooterPreset_custom"))->isChecked(),
+                    "New book did not inherit the saved Custom layout");
+            tap("rrHeaderFooterSlot3");
+            capture("first-open", "rrHeaderFooterChooser");
+            return;
+        }
         if (group == "layout" || group == "layout-system-rotation") {
             tap("rrNavLayout");
             capture("layout", "rrMargins");
-            for (const auto &part : {"Header", "Footer"}) {
-                capture(QString(part).toLower() + "-sizes", "rr" + QString(part) + "TextSize");
-                tap("rr" + QString(part) + "TextSize_small");
-            }
             tap("rrWider");
             tap("rrVerticalMarginsMore");
             capture("margin-preview", "rrMargins");
+            if (group == "layout-system-rotation")
+                return;
+            // Header and footer: its view and one slot's choices.
+            tap("rrHeaderFooter");
+            capture("header-footer", "rrHeaderFooterView");
+            tap("rrHeaderFooterSlot2");
+            capture("header-footer-fields", "rrHeaderFooterChooser");
+            tap("rrHeaderFooterFieldsClose");
+            // Large strips make the preview page, and the sheet, taller.
+            tap("rrHeaderTextSize_large");
+            tap("rrFooterTextSize_large");
+            capture("header-footer-large", "rrHeaderFooterView");
+            tap("rrHeaderTextSize_small");
+            tap("rrFooterTextSize_small");
+            // The Layout tab closes the view and the panel. Then show each
+            // preset on the page, with the menus closed.
+            tap("rrNavLayout");
+            for (const auto *preset : {"default", "alternative_a", "alternative_b"}) {
+                menu();
+                tap("rrNavLayout");
+                tap("rrHeaderFooter");
+                tap(QString("rrHeaderFooterPreset_") + preset);
+                tap("rrNavLayout");
+                // A new strip height reflows the book before the menu settles.
+                waitFor(
+                    [&] {
+                        return !host.session()->busy() && !visible("rrMenu");
+                    },
+                    "Layout panel did not close");
+                for (int attempt = 0; attempt < 3 && visible("rrControlsTop"); ++attempt)
+                    pageTap();
+                require(!visible("rrControlsTop"), "Reading menu did not close");
+                capture(QString("reading-") + QString(preset).replace('_', '-'));
+            }
             return;
         }
         if (group == "chapters") {
@@ -1023,9 +1186,25 @@ public:
             }
             throw std::runtime_error("Chapter picker did not reach its last page");
         }
+        if (group == "light-sensor") {
+            tap("rrNavLight");
+            tap("rrAutomaticBrightness");
+            tap("rrAutomaticWarmth");
+            auto *brightness = qobject_cast<QCheckBox *>(widget("rrAutomaticBrightness"));
+            auto *warmth = qobject_cast<QCheckBox *>(widget("rrAutomaticWarmth"));
+            require(brightness && brightness->isChecked(), "Automatic brightness did not turn on");
+            require(warmth && warmth->isChecked(), "Automatic warmth did not turn on");
+            capture("frontlight-both-automatic", "rrLightPanel");
+            return;
+        }
         if (group == "light") {
             tap("rrNavLight");
             capture("frontlight", "rrLightPanel");
+            auto *automaticWarmth = qobject_cast<QCheckBox *>(widget("rrAutomaticWarmth"));
+            require(automaticWarmth, "Automatic warmth checkbox missing");
+            tap("rrAutomaticWarmth");
+            require(automaticWarmth->isChecked(), "Automatic warmth did not turn on");
+            capture("frontlight-automatic-warmth", "rrLightPanel");
             auto *slider = qobject_cast<QSlider *>(widget("rrBrightness"));
             require(slider, "Brightness slider missing");
             const int initial = slider->value();
@@ -1057,6 +1236,7 @@ public:
             menu();
             tap("rrNavLight");
             require(slider->value() > initial, "Brightness swipe did not update the light service");
+            require(automaticWarmth->isChecked(), "Brightness swipe changed automatic warmth");
             tap("rrNavLight");
             pageTap();
             const QPoint warmStart(page->width() * 19 / 20, page->height() / 4);
@@ -1082,6 +1262,9 @@ public:
             settled();
             require(host.session()->state().value("position").toString() == position,
                     "Warmth swipe changed reader position");
+            menu();
+            tap("rrNavLight");
+            require(!automaticWarmth->isChecked(), "Warmth swipe did not turn off automatic warmth");
             return;
         }
         if (group == "stats") {
@@ -1243,6 +1426,7 @@ public:
 
 private:
     bool dictionaryManagementFixture = false;
+    bool pageButtonsSupported = true;
     QString output, group, theme;
     QSize size;
     QTemporaryDir temporary;

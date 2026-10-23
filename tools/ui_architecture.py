@@ -78,7 +78,7 @@ def dependency_errors(root, folders, *, allowed_path=lambda path: True,
 
 UI_ROOT = 'interfaces/reader/ui'
 UI_HELPERS = frozenset(('support/qt_font.h', 'support/qt_compat.h', 'support/strings.h',
-                        'ui/input.h', 'assets/assets.h', 'assets/bundled_fonts.h',
+                        'ui/input.h', 'ui/tap_zones.h', 'assets/assets.h', 'assets/bundled_fonts.h',
                         'assets/font_catalog.h'))
 RETIRED = re.compile(r'reader_(?:action_\w+|list_action|icon_action|toolbar_action|full_toolbar_cell|side_buttons|icon|list_style)\Z')
 
@@ -100,6 +100,35 @@ def retired_property_errors(text):
     return errors
 
 
+PLAIN_BACKGROUNDS = frozenset(('transparent', 'palette(window)'))
+
+
+def plain_background_errors(text):
+    """Reject a colored background in a readerStyle without a selector.
+
+    Panels and custom painters fill from their palette, and the theme sets every
+    widget's palette, so such a background does not last. Selector rules such as
+    QPushButton{...} are drawn by the style sheet itself and stay allowed.
+    """
+    errors = []
+    code = without_literals(text)
+    for match in re.finditer(r'\breaderStyle\s*\(', code):
+        if re.search(r'\bvoid\s*$', code[:match.start()]):
+            continue
+        depth, end = 1, match.end()
+        while depth and end < len(code):
+            depth += {'(': 1, ')': -1}.get(code[end], 0)
+            end += 1
+        source = ''.join(literal[0][1:-1] for literal in LITERAL.finditer(text, match.end(), end - 1)
+                         if literal[0].startswith('"'))
+        if '{' in source:
+            continue
+        for value in re.findall(r'background(?:-color)?\s*:\s*([^;]+)', source):
+            if value.strip() not in PLAIN_BACKGROUNDS:
+                errors.append('plain style sheet background: ' + value.strip() + '; use Panel::setFill')
+    return errors
+
+
 def ui_errors(root):
     root = Path(root).resolve()
     errors = dependency_errors(root, (UI_ROOT,),
@@ -112,8 +141,9 @@ def ui_errors(root):
             if not path.resolve().is_relative_to(root / 'src'):
                 errors.append(path.relative_to(root).as_posix() + ' -> outside source root')
                 continue
+            text = without_comments(path.read_text())
             errors.extend(path.relative_to(root).as_posix() + ' -> ' + message
-                          for message in retired_property_errors(without_comments(path.read_text())))
+                          for message in retired_property_errors(text) + plain_background_errors(text))
     return errors
 
 

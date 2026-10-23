@@ -233,14 +233,82 @@
 
 /* graph */
 
+/* header_footer */
+"header_footer.title" = "Header and footer";
+"header_footer.customize_title" = "Customize header and footer";
+/* Arguments: %1 */
+"header_footer.customize_slot" = "Customize slot: %1";
+"header_footer.custom_hint" = "You may customize six slots: tap one to customize it. Keep in mind that these changes are saved in the Custom preset, and are applied to all books that use it!";
+/* Arguments: %1, %2 */
+"header_footer.slot_value" = "%1: %2";
+"header_footer.close" = "Close header and footer";
+"header_footer.close_fields" = "Close fields";
+"header_footer.fields" = "Fields";
+"header_footer.previous_fields" = "Previous fields";
+"header_footer.next_fields" = "Next fields";
+"header_footer.shows" = "Shows";
+"header_footer.empty" = "Empty";
+"header_footer.unavailable" = "—";
+"header_footer.uppercase" = "Uppercase";
+"header_footer.progress_bar" = "Progress bar";
+/* Arguments: %1 */
+"header_footer.time_left" = "%1 left";
+"header_footer.learning_pace" = "Learning reading speed";
+/* Arguments: %1, %2 */
+"header_footer.pages_left" = "%1 %2";
+"header_footer.preset.default" = "Kobalt";
+"header_footer.preset.alternative_a" = "Bookish";
+"header_footer.preset.alternative_b" = "Ember";
+"header_footer.preset.custom" = "Custom";
+/* Arguments: %1, %2 */
+"header_footer.page_of" = "%1 of %2";
+/* Arguments: %1 */
+"header_footer.preset.modified" = "%1 *";
+/* Arguments: %1 */
+"header_footer.preset.modified_name" = "%1, modified";
+"header_footer.replace_custom_prompt" = "Replace your custom layout?";
+/* Arguments: %1 */
+"header_footer.replace_custom_detail" = "Customizing %1 replaces the layout saved as Custom.";
+"header_footer.replace_custom" = "Replace";
+"header_footer.slot.top_left" = "Top left";
+"header_footer.slot.top_center" = "Top center";
+"header_footer.slot.top_right" = "Top right";
+"header_footer.slot.bottom_left" = "Bottom left";
+"header_footer.slot.bottom_center" = "Bottom center";
+"header_footer.slot.bottom_right" = "Bottom right";
+"header_footer.field.nothing" = "Nothing";
+"header_footer.field.title" = "Title of the book";
+"header_footer.field.author" = "Author";
+"header_footer.field.chapter" = "Chapter";
+"header_footer.field.chapter_page" = "Page in chapter";
+"header_footer.field.book_page" = "Page in book";
+"header_footer.field.chapter_pages_left" = "Pages left in chapter";
+"header_footer.field.chapter_and_page" = "Chapter and page in chapter";
+"header_footer.field.title_and_page" = "Title and page in book";
+"header_footer.field.battery_percent" = "Battery, with percentage";
+"header_footer.field.battery" = "Battery";
+"header_footer.field.time" = "Time";
+"header_footer.field.chapter_time_left" = "Time left in chapter";
+"header_footer.field.book_time_left" = "Time left in book";
+"header_footer.field.chapter_percent" = "Percent of chapter";
+"header_footer.field.book_percent" = "Percent of book";
+"header_footer.field.battery_warning" = "Battery warning";
+/* Arguments: %1 */
+"header_footer.field_description.battery_warning" = "Shows the battery only below %1%.";
+"header_footer.field_description.time_left" = "Estimated from your reading pace.";
+
 /* image */
 "image.unavailable" = "Image could not be loaded";
 
 /* light_panel */
 "light_panel.automatic_brightness" = "Automatic brightness";
 "light_panel.automatic_brightness_description" = "Uses the ambient light sensor. Manual adjustments turn this off.";
+"light_panel.automatic_warmth" = "Follow Kobo warmth schedule";
+"light_panel.automatic_warmth_description" = "Uses the bedtime set in Kobo settings. Manual warmth adjustments turn this off.";
 "light_panel.brightness" = "Brightness";
 "light_panel.warmth" = "Warmth";
+"light_panel.swipe_hint" = "Swipe up or down along the edges for quick control.";
+"light_panel.brightness_swipe_hint" = "Swipe up or down along the left edge for brightness.";
 
 /* link_panel */
 "link_panel.close_footnote_or_link" = "Close footnote or link";
@@ -274,7 +342,6 @@
 "reader.automatic_rotation" = "Automatic rotation";
 "reader.book_marked_finished" = "Book marked finished";
 "reader.book_position" = "Book position";
-"reader.book_progress_bar" = "Book progress bar";
 /* Arguments: %1 */
 "reader.brightness" = "Brightness %1%";
 "reader.brightness_and_warmth" = "Brightness and warmth";
@@ -282,7 +349,6 @@
 "reader.chapter_lengths" = "Chapter lengths";
 /* Arguments: %1, %2 */
 "reader.chapter_position" = "%1 · %2";
-"reader.clock" = "Clock";
 "reader.contents" = "Contents";
 /* Arguments: %1 */
 "reader.contents_detail" = "Contents: %1";
@@ -363,7 +429,6 @@
 "reader.session_minutes" = "You've been reading for %1 minutes now";
 "reader.sideloaded_fonts" = "Sideloaded Fonts";
 "reader.simulate_nickel_progress_these_controls_change_only_the_synthetic" = "Simulate Nickel progress. These controls change only the synthetic progress test book. No server sync is performed.";
-"reader.smooth_images" = "Smooth images";
 "reader.optical_size" = "Optical size";
 "reader.text_size" = "Text size: ";
 /* Arguments: %1 */
@@ -404,7 +469,54 @@
 "settings.unsupported_description" = "This feature is not supported on your device.";
 "settings.dark_description" = "Light text on a dark background.";
 "settings.display" = "Display";
+"settings.controls" = "Controls";
 "settings.advanced" = "Advanced";
+"settings.system" = "System";
+"settings.automatic_book_opening" = "Open books automatically in Kobalt";
+"settings.automatic_book_opening_description" = "Use Kobalt when opening supported books from your library. This is the same setting as in Kobo's Reading settings.";
+"settings.sleep_screen" = "Sleep screen";
+"settings.page_navigation" = "Page navigation";
+"settings.tap_zones" = "Tap zones";
+"settings.tap_left_right" = "Left / right";
+"settings.tap_top_bottom" = "Top / bottom";
+"settings.tap_one_handed" = "One-handed";
+"settings.tap_zones_hint" = "Choose where to tap to turn pages. The marked middle zone always opens the menu.";
+"settings.tap_one_handed_hint" = "One-handed: tap to go forward, swipe to go back or forward.";
+"settings.navigation_needs_swipes" = "Choose another tap-zone preset to turn off swipes.";
+"settings.section_appearance" = "Appearance";
+"settings.section_screen" = "Screen refresh";
+"settings.section_navigation" = "Navigation";
+"settings.section_frontlight" = "Frontlight";
+"settings.section_new_books" = "New-book defaults";
+"settings.section_book_content" = "Book content";
+"settings.section_chapter_graph" = "Chapter graph";
+"settings.section_reading_menu" = "Reading menu";
+"settings.section_reader" = "Reader";
+"settings.section_sleep" = "Sleep and wake";
+"settings.section_window" = "Window";
+"settings.section_device_preview" = "Device preview";
+"settings.navigation_taps_and_swipes" = "Swipes and taps";
+"settings.navigation_taps_and_swipes_description" = "Default";
+"settings.navigation_taps_only" = "Taps only";
+"settings.navigation_taps_only_description" = "Tap the page-turn zones to turn pages.";
+"settings.navigation_swipes_only" = "Swipes only";
+"settings.navigation_swipes_only_description" = "Swipe left and right to turn pages.";
+"settings.navigation_buttons_only" = "Hardware page turn buttons only";
+"settings.navigation_buttons_only_description" = "Use the page buttons to turn pages.";
+"settings.navigation_menu_hint" = "Tap the middle of the page to open the menu in any mode.";
+"settings.sleep_stock" = "Kobo's built-in sleep screen";
+"settings.sleep_stock_description" = "Default";
+"settings.sleep_cover" = "Kobalt with book cover";
+"settings.sleep_cover_description" = "Shows the book cover with reading progress and battery status.";
+"settings.sleep_page" = "Kobalt with reading page";
+"settings.sleep_page_description" = "Dims the current page and shows reading progress and battery status.";
+"sleep.sleeping" = "Sleeping";
+"sleep.charging" = "Charging";
+"sleep.charged" = "Charged";
+/* Arguments: %1 */
+"sleep.percent_read" = "%1% read";
+/* Arguments: %1 */
+"sleep.time_left" = "%1 to go";
 "settings.stats" = "Stats";
 "settings.about" = "About";
 "settings.ui" = "UI";
@@ -412,8 +524,6 @@
 "settings.hide_status_bar_description" = "Hide the clock, battery and menu status row on this Mac.";
 "settings.hide_device_options" = "Hide device-only options";
 "settings.hide_device_options_description" = "Hide e-ink refresh, page animations and frontlight gestures. Turn this off to inspect the reader controls.";
-"settings.progress_description" = "Reading progress along the bottom edge.";
-"settings.smoothing_description" = "Softer edges on scaled images.";
 "settings.edge_light_description" = "Swipe up or down along the left edge for brightness, and along the right edge for warmth.";
 "settings.edge_brightness_description" = "Swipe up or down along the left edge for brightness.";
 
@@ -515,8 +625,6 @@
 "settings.dense_graph_description" = "When turned on, the Stats panel shows more chapters at once. If you want wider bars, turn this off.";
 "reader.pin_stats" = "Always show statistics";
 "settings.pin_stats_description" = "Stats stays open above the bottom bar whenever the reading controls are open.";
-"reader.heavier_interface_text" = "More readable interface text";
-"settings.heavier_interface_text_description" = "Draws the text of menus and panels slightly heavier. The book keeps its own weight setting.";
 /* Arguments: %1 */
 "stats.time_left" = "≈ %1 left";
 /* Arguments: %1 */
@@ -596,3 +704,7 @@
 
 "reader.hide_nonlinear_fragments" = "Hide non-linear fragments";
 "settings.hide_nonlinear_fragments_description" = "Skip non-linear sections when turning pages. Links, Chapters and page numbers can still open them.";
+"settings.inherit_text_layout" = "Inherit text and layout from the last book";
+"settings.inherit_text_layout_description" = "New books start with the last book's text style and page margins. Custom presets are planned for a future beta.";
+"settings.inherit_header_footer" = "Inherit header and footer from the last book";
+"settings.inherit_header_footer_description" = "New books start with the last book's header and footer. Books with saved settings keep them.";

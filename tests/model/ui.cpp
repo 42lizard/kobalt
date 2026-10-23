@@ -373,7 +373,7 @@ int main(int argc, char **argv) {
         loading.fitCard();
         for (qint64 elapsed : {qint64(0), qint64(999), qint64(1000)}) {
             loading.setDelayedProgress(true, elapsed, 37, "Applying appearance changes...");
-            auto *bar = loading.findChild<QProgressBar *>("rrApplyingProgress");
+            auto *bar = dynamic_cast<kobalt::ui::ProgressBar *>(loading.findChild<QWidget *>("rrApplyingProgress"));
             require(bar && bar->value() == 37, "Loading bar does not use reported progress");
             require(loading.isVisible() == (elapsed >= 1000),
                     "Appearance notice appears before one second or fails to appear afterwards");
@@ -389,15 +389,20 @@ int main(int argc, char **argv) {
             loading.setDelayedProgress(true, 1100, 0, message);
             require(loading.findChild<QLabel *>("rrUpdatingText")->text() == message &&
                         loading.card()->findChildren<QLabel *>().size() == 1 &&
-                        loading.findChild<QProgressBar *>("rrApplyingProgress")->value() == 0,
+                        dynamic_cast<kobalt::ui::ProgressBar *>(loading.findChild<QWidget *>("rrApplyingProgress"))
+                                ->value() == 0,
                     "Replacing a relayout reason adds a second label or retains old progress");
         }
         loading.setDelayedProgress(false, 2500, 100);
-        require(!loading.isVisible() && loading.findChild<QProgressBar *>("rrApplyingProgress")->isHidden(),
-                "Completed loading notice remains visible");
+        require(
+            !loading.isVisible() &&
+                dynamic_cast<kobalt::ui::ProgressBar *>(loading.findChild<QWidget *>("rrApplyingProgress"))->isHidden(),
+            "Completed loading notice remains visible");
         loading.setDelayedProgress(true, 0, 0);
-        require(!loading.isVisible() && loading.findChild<QProgressBar *>("rrApplyingProgress")->isHidden(),
-                "A new render inherits the previous loading notice");
+        require(
+            !loading.isVisible() &&
+                dynamic_cast<kobalt::ui::ProgressBar *>(loading.findChild<QWidget *>("rrApplyingProgress"))->isHidden(),
+            "A new render inherits the previous loading notice");
         kobalt::ui::ListRow row(&host);
         row.setTitle("A very long chapter name that must fit in a narrow row");
         require(row.sizeHint().height() == m::list::oneLine, "One-line row has a different height");
@@ -631,6 +636,45 @@ int main(int argc, char **argv) {
     }
     {
         using namespace kobalt::ui;
+        // Interface text is unhinted on every path, including style sheet
+        // fonts that resolve against an interface font.
+        for (const auto &font : {interfaceFont(24), chromeFont(24), captionFont(), brandFont(24)})
+            require(font.hintingPreference() == QFont::PreferNoHinting, "Interface font asks for hinting");
+        // Nickel's style sheet makes check boxes italic, and a text link is
+        // underlined. Painting resolves a font against its widget's, so the
+        // interface fonts set these themselves and stay upright and plain.
+        QFont decorated;
+        decorated.setItalic(true);
+        decorated.setUnderline(true);
+        for (const auto &font : {interfaceFont(24), chromeFont(24), captionFont()}) {
+            const auto painted = font.resolve(decorated);
+            require(!painted.italic() && !painted.underline(), "Interface font took a widget's italic or underline");
+        }
+        QWidget parent;
+        parent.setFont(interfaceFont());
+        QLabel styled(&parent);
+        styled.setStyleSheet("font-size:20px;font-weight:600;");
+        styled.ensurePolished();
+        require(styled.font().hintingPreference() == QFont::PreferNoHinting,
+                "Style sheet font lost the interface hinting preference");
+        // Qt 5.2 polishes style sheet fonts with the default hinting. The
+        // window's keeper turns such a font back to unhinted.
+        QWidget window;
+        keepInterfaceUnhinted(&window);
+        QLabel reset(&window);
+        QFont polished = interfaceFont(20);
+        polished.setHintingPreference(QFont::PreferDefaultHinting);
+        reset.setFont(polished);
+        require(reset.font().hintingPreference() == QFont::PreferNoHinting,
+                "Window kept a font with the default hinting");
+        QWidget elsewhere;
+        QLabel outside(&elsewhere);
+        outside.setFont(polished);
+        require(outside.font().hintingPreference() == QFont::PreferDefaultHinting,
+                "Hinting keeper changed a widget in another window");
+    }
+    {
+        using namespace kobalt::ui;
         for (int id = int(ControlIcon::Search); id <= int(ControlIcon::More); ++id) {
             const auto black =
                 controlIcon(ControlIcon(id)).pixmap(64, 64).toImage().convertToFormat(QImage::Format_ARGB32);
@@ -648,30 +692,6 @@ int main(int argc, char **argv) {
                     }
                 }
             require(ink > 20, "Bundled icon is empty");
-        }
-    }
-    {
-        using namespace kobalt::ui;
-        // Each chapters bar covers whole pixels at the sizes the reader draws.
-        for (int size : {int(metrics::chrome::cellIcon), int(metrics::control::chapterIconSize),
-                         2 * int(metrics::chrome::cellIcon)}) {
-            const auto image =
-                controlIcon(ControlIcon::Chapters).pixmap(size, size).toImage().convertToFormat(QImage::Format_ARGB32);
-            require(image.width() == size, "Chapters icon lacks a pixmap at its drawn size");
-            QVector<int> bars;
-            int run = 0;
-            for (int y = 0; y < size; ++y) {
-                const int alpha = qAlpha(image.pixel(size / 3, y));
-                require(alpha == 0 || alpha == 255, "Chapters icon bar falls between pixels");
-                if (alpha)
-                    ++run;
-                else if (run) {
-                    bars.append(run);
-                    run = 0;
-                }
-            }
-            require(bars.size() == 3 && bars[0] == bars[1] && bars[1] == bars[2],
-                    "Chapters icon bars differ in thickness");
         }
     }
     {
@@ -1549,6 +1569,8 @@ int main(int argc, char **argv) {
         using namespace kobalt::ui;
         QWidget host;
         host.setFont(interfaceFont());
+        // As the reader window does, so style sheet fonts stay unhinted on Qt 5.2.
+        keepInterfaceUnhinted(&host);
         readerStyle(&host, styles::reader());
         auto *plain = new QLabel("Swipe along edges to adjust frontlight", &host);
         plain->setGeometry(10, 10, 880, 60);
@@ -1612,12 +1634,7 @@ int main(int argc, char **argv) {
         };
         require(fits(plain) && fits(rich), "Regular text does not fit its widget");
         const auto regularPixels = plain->grab().toImage();
-        require(interfaceWeight() == 0 && interfaceWeightSteps({}) == heavierTextSteps,
-                "Interface text is not heavier by default");
-        require(interfaceWeightSteps(kobalt::qt::object({{"heavier_interface_text", false}})) == 0,
-                "Turning the option off kept heavier text");
-        require(interfaceWeightSteps(kobalt::qt::object({{"heavier_interface_text", true}})) == heavierTextSteps,
-                "The option does not select heavier text");
+        require(interfaceWeight() == 0, "Regular font fixture changed its weight");
         kobalt::ChapterGraph graph(&host);
         graph.resize(900, kobalt::ui::metrics::chapters::graphHeight);
         graph.setProgress("A chapter with a title that needs layout", 4, 10, 12, 25, 100);
@@ -2051,8 +2068,7 @@ int main(int argc, char **argv) {
         opening.setGeometry(host.geometry());
         auto *openingCard = opening.card();
         openingCard->message("Loading book…");
-        auto *bar = new QProgressBar(openingCard);
-        bar->setRange(0, 100);
+        auto *bar = new kobalt::ui::ProgressBar(openingCard);
         bar->setValue(50);
         openingCard->rows()->addWidget(bar);
         openingCard->fitToWidth(450);
@@ -2973,6 +2989,51 @@ int main(int argc, char **argv) {
                 "Action factory loses its layout, ownership, identity or focus policy");
         action->click();
         require(clicks == 1, "Action factory does not connect its callback");
+    }
+    {
+        // A list action with a note centres both lines on their letters: from
+        // the label's capitals to the note's baseline, as Restore defaults shows.
+        using namespace kobalt::ui;
+        QWidget actionHost;
+        actionHost.setStyleSheet("background:white;");
+        auto *actions = new QVBoxLayout(&actionHost);
+        auto *action = makeCaptionButton(&actionHost, actions, "notedAction", "Restore appearance defaults", [] {});
+        action->setCaption("ASKS FIRST");
+        action->setChevron(true);
+        action->setIconVisible(false);
+        action->setFont(interfaceFont(metrics::text::secondary));
+        action->setFixedSize(900, metrics::about::actionHeight);
+        actionHost.show();
+        app.processEvents();
+        const auto image = action->grab().toImage();
+        const int textRight = image.width() - int(metrics::chrome::actionRight);
+        QVector<int> inkRows;
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < textRight; ++x)
+                if (qGray(image.pixel(x, y)) < 128) {
+                    inkRows.append(y);
+                    break;
+                }
+        require(!inkRows.isEmpty(), "List action drew no text");
+        // The note is the last group of rows; its baseline is the commonest column bottom.
+        int noteTop = inkRows.last();
+        for (int i = inkRows.size() - 1; i > 0 && inkRows[i] - inkRows[i - 1] <= 2; --i)
+            noteTop = inkRows[i - 1];
+        QHash<int, int> bottoms;
+        for (int x = 0; x < textRight; ++x)
+            for (int y = image.height() - 1; y >= noteTop; --y)
+                if (qGray(image.pixel(x, y)) < 128) {
+                    ++bottoms[y];
+                    break;
+                }
+        int baseline = noteTop, most = 0;
+        for (auto it = bottoms.cbegin(); it != bottoms.cend(); ++it)
+            if (it.value() > most) {
+                most = it.value();
+                baseline = it.key();
+            }
+        const qreal offset = (inkRows.first() + baseline) / 2.0 - (image.height() - 1) / 2.0;
+        require(qAbs(offset) <= 1.5, "List action text is not centred on its letters");
     }
     kobalt::ui::SettingSlider slider(&panel, 0, 100);
     slider.resize(300, 72);

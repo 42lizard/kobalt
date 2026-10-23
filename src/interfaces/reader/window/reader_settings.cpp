@@ -24,19 +24,173 @@ using kobalt::ui::ControlIcon;
 using kobalt::ui::buttonIcon;
 using kobalt::platform::textRefresh;
 
-void Reader::syncChromeSizeButtons() {
-    for (const auto &key : {QString("header"), QString("footer")}) {
-        const auto value = preferences.value("show_" + key).toBool(true)
-                               ? m::reading::textSize(preferences.value(key + "_text_size").toString())
-                               : QString("off");
-        for (auto *button : key == "header" ? headerSizeButtons : footerSizeButtons) {
-            button->setChecked(button->property("text_size").toString() == value);
-        }
+kobalt::headerfooter::Values Reader::chromeValues() {
+    kobalt::headerfooter::Values values;
+    values.title = model->title();
+    values.author = model->author();
+    values.chapter = model->chapterTitle().isEmpty() ? strings::get("reader.reading") : model->chapterTitle();
+    values.time = services.clock();
+    values.chapterPage = model->chapterPage();
+    values.chapterPages = model->chapterPages();
+    values.page = model->page() + 1;
+    values.pages = model->pages();
+    const auto battery = services.battery();
+    values.battery = battery.percent;
+    values.charging = battery.charging;
+    values.deviceStatus = !hideNativeStatus();
+    const auto estimates = book->estimates();
+    values.chapterMilliseconds = estimates.chapterMilliseconds;
+    values.bookMilliseconds = estimates.bookMilliseconds;
+    values.learningPace = estimates.learningPace;
+    return values;
+}
+
+kobalt::headerfooter::Layout Reader::customChrome() const {
+    // Until Custom has a layout of its own, it starts from the layout in force.
+    return kobalt::headerfooter::customLayout(preferences, page->chrome);
+}
+
+bool Reader::customModified() const {
+    using namespace kobalt::headerfooter;
+    const auto saved = preferences.value(customKey);
+    return saved.isObject() &&
+           fromJson(saved.toObject(), presetLayout(Preset::Default)) != presetLayout(Preset::Default);
+}
+
+bool Reader::chromeTicks() const {
+    using kobalt::headerfooter::Field;
+    for (const auto field : page->chrome.slotFields)
+        if (field == Field::Time || field == Field::Battery || field == Field::BatteryPercent ||
+            field == Field::BatteryWarning || field == Field::ChapterTimeLeft || field == Field::BookTimeLeft)
+            return true;
+    return false;
+}
+
+void Reader::loadChrome() {
+    const auto chrome = kobalt::headerfooter::select(preferences);
+    chromePreset = chrome.preset;
+    const int top = page->topHeight(), bottom = page->bottomHeight();
+    page->chrome = chrome.layout;
+    showChapterText();
+    syncChromeControls();
+    if (top == page->topHeight() && bottom == page->bottomHeight())
+        return;
+    // The strips changed height, so the book gets a new viewport. With a
+    // panel open the preview takes it, and closing the panel applies it.
+    const QSize viewport(width(), height() - page->topHeight() - page->bottomHeight());
+    if (appearanceEdit.panelOpen())
+        mutateAppearance([viewport](ReaderSession &preview) {
+            preview.resize(viewport);
+        });
+    header->setGeometry(0, 0, width(), page->topHeight());
+    header->setVisible(page->topHeight() > 0);
+}
+
+bool Reader::saveChrome(kobalt::headerfooter::Preset preset, const kobalt::headerfooter::Layout *custom) {
+    auto next = preferences;
+    next[kobalt::headerfooter::presetKey] = kobalt::headerfooter::presetValue(preset);
+    if (custom)
+        next[kobalt::headerfooter::customKey] = kobalt::headerfooter::toJson(*custom);
+    if (next != preferences && !writePreferences(next)) {
+        syncChromeControls();
+        appearanceEdit.setError(strings::get("reader.could_not_save_reader_settings"));
+        refresh();
+        return false;
     }
+    preferences = next;
+    appearanceEdit.clearError();
+    loadChrome();
+    refresh();
+    return true;
+}
+
+void Reader::syncChromeControls() {
+    using namespace kobalt::headerfooter;
+    const auto values = chromeValues();
+    const auto contents = [&values](const Layout &layout) {
+        kobalt::reader::SlotContents result;
+        for (int slot = 0; slot < slotCount; ++slot)
+            result[slot] = content(layout.slotFields[slot], values, layout.uppercase[slot]);
+        return result;
+    };
+    // The view shows and edits the layout in force.
+    const auto &current = page->chrome;
+    slotMap->setSlots(current, contents(current));
+    const auto custom = customChrome();
+    const bool modified = customModified();
+    for (auto *card : presetCards) {
+        card->setLayout(card->preset() == Preset::Custom ? custom : presetLayout(card->preset()));
+        card->setModified(card->preset() == Preset::Custom && modified);
+        card->setChecked(card->preset() == chromePreset);
+    }
+    for (auto *button : headerSizeButtons)
+        button->setChecked(button->property("text_size").toString() == current.headerSize);
+    for (auto *button : footerSizeButtons)
+        button->setChecked(button->property("text_size").toString() == current.footerSize);
+    for (auto *button : progressBarButtons)
+        button->setChecked(button->property("switch_on").toBool() == current.progressBar);
+    // A modified Custom layout carries a star, as on its card.
+    const bool starred = chromePreset == Preset::Custom && modified;
+    headerFooterRow->setText(starred ? strings::get("header_footer.preset.modified").arg(presetLabel(chromePreset))
+                                     : presetLabel(chromePreset));
+    headerFooterRow->setAccessibleName(
+        strings::get("header_footer.slot_value")
+            .arg(strings::get("header_footer.title"),
+                 starred ? strings::get("header_footer.preset.modified_name").arg(presetLabel(chromePreset))
+                         : presetLabel(chromePreset)));
+    if (fieldChooser->isVisible())
+        fieldChooser->open(fieldChooser->slot(), current.slotFields[fieldChooser->slot()], values,
+                           current.uppercase[fieldChooser->slot()]);
+}
+
+QWidget *Reader::chromeView() const {
+    if (fieldChooser && fieldChooser->isVisible())
+        return fieldChooser;
+    if (headerFooterView && headerFooterView->isVisible())
+        return headerFooterView;
+    return nullptr;
+}
+
+void Reader::openHeaderFooterView() {
+    if (model->temporaryTypography() || !menu->isVisible())
+        return;
+    fieldChooser->hide();
+    syncChromeControls();
+    headerFooterView->show();
+    headerFooterView->raise();
+    refresh();
+}
+
+void Reader::closeChromeViews() {
+    if (!chromeView())
+        return;
+    fieldChooser->hide();
+    headerFooterView->hide();
+    refresh();
+}
+
+void Reader::openFieldChooser(int slot) {
+    if (model->temporaryTypography() || !menu->isVisible())
+        return;
+    const auto &current = page->chrome;
+    fieldChooser->open(slot, current.slotFields[slot], chromeValues(), current.uppercase[slot]);
+    headerFooterView->hide();
+    fieldChooser->show();
+    fieldChooser->raise();
+    refresh();
+}
+
+// A choice or the close cell returns to Header and footer.
+void Reader::closeFieldChooser() {
+    if (!fieldChooser->isVisible())
+        return;
+    fieldChooser->hide();
+    headerFooterView->show();
+    headerFooterView->raise();
+    refresh();
 }
 
 void Reader::refreshHostPresentation() {
-    page->hideDeviceStatus = hideNativeStatus();
     static_cast<reader::SettingsPanel *>(general)->showDictionaries(
         services.downloadableDictionaries && !(services.devicePreview && services.devicePreview()));
     updateMenuStatus();
@@ -80,16 +234,20 @@ void Reader::openSettings() {
     settingsError->clear();
     settingsError->hide();
     darkOption->setChecked(model->state().value("dark_mode").toBool(false));
-    smoothOption->setChecked(model->state().value("smooth_images").toBool(true));
+    inheritTextLayoutOption->setChecked(preferences.value(appearance::inheritTextLayoutKey).toBool(true));
     hideNonlinearOption->setChecked(model->state().value("hide_nonlinear_fragments").toBool(false));
-    progressOption->setChecked(page->showProgress);
     animationOption->setChecked(preferences.value("page_animations").toBool(false));
     bionicOption->setChecked(model->state().value("bold_reading").toString("off") == "bold");
     linkIndicatorOption->setChecked(preferences.value("show_link_indicator").toBool(false));
     edgeLightOption->setChecked(preferences.value("edge_light_gestures").toBool(true));
     denseGraphOption->setChecked(preferences.value("dense_stats_chart").toBool(false));
     pinStatsOption->setChecked(preferences.value("pin_stats").toBool(false));
-    heavierTextOption->setChecked(preferences.value("heavier_interface_text").toBool(true));
+    inheritHeaderFooterOption->setChecked(preferences.value(appearance::inheritHeaderFooterKey).toBool(true));
+    showSleepScreen();
+    showPageNavigation();
+    showTapZones();
+    if (services.automaticBookOpening)
+        automaticOpeningOption->setChecked(services.automaticBookOpening());
     screenRefreshMode = kobalt::screenRefresh(preferences.value("screen_refresh").toString());
     showScreenRefresh();
     fitSettings();
@@ -113,7 +271,8 @@ void Reader::fitAppearance() {
 }
 
 bool Reader::writePreferences(const QJsonObject &next) {
-    const auto global = appearance::globalPreferences(next);
+    auto global = appearance::globalPreferences(next);
+    appearance::rememberTextLayout(global, model->state());
     const auto previous = storage::readJson(book->paths().preferences());
     if (!writeJson(book->paths().preferences(), global)) {
         showSettingsWriteError();
@@ -138,29 +297,24 @@ void Reader::applySettings() {
         return;
     }
     auto next = preferences;
-    next["show_clock"] = clockOption->isChecked();
     next["bold_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
     next["dark_mode"] = darkOption->isChecked();
-    next["smooth_images"] = smoothOption->isChecked();
+    next[appearance::inheritTextLayoutKey] = inheritTextLayoutOption->isChecked();
     next["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
-    next["show_progress_bar"] = progressOption->isChecked();
     next["page_animations"] = animationOption->isChecked();
     next["show_link_indicator"] = linkIndicatorOption->isChecked();
     next["edge_light_gestures"] = edgeLightOption->isChecked();
     next["dense_stats_chart"] = denseGraphOption->isChecked();
     next["pin_stats"] = pinStatsOption->isChecked();
-    next["heavier_interface_text"] = heavierTextOption->isChecked();
+    next[appearance::inheritHeaderFooterKey] = inheritHeaderFooterOption->isChecked();
     next["screen_refresh"] = kobalt::screenRefreshValue(screenRefreshMode);
     if (services.desktopUi) {
         next["native_hide_status_bar"] = hideStatusOption->isChecked();
         next["native_hide_device_options"] = hideDeviceOptionsOption->isChecked();
     }
-    if (restoringDefaults) {
-        next["show_header"] = true;
-        next["show_footer"] = true;
-        next["header_text_size"] = QStringLiteral("small");
-        next["footer_text_size"] = QStringLiteral("small");
-    }
+    if (restoringDefaults)
+        next[kobalt::headerfooter::presetKey] =
+            kobalt::headerfooter::presetValue(kobalt::headerfooter::Preset::Default);
     const auto rotation = orientation->settings();
     for (auto it = rotation.begin(); it != rotation.end(); ++it)
         next[it.key()] = it.value();
@@ -173,25 +327,17 @@ void Reader::applySettings() {
         return;
     }
     preferences = next;
-    page->hideDeviceStatus = hideNativeStatus();
     navigation->setStatusVisible(!hideNativeStatus());
-    page->showHeader = preferences.value("show_header").toBool(true);
-    page->showFooter = preferences.value("show_footer").toBool(true);
-    page->headerSize = m::reading::textSize(preferences.value("header_text_size").toString());
-    page->footerSize = m::reading::textSize(preferences.value("footer_text_size").toString());
-    page->headerTextPixels = m::reading::textPixels(page->headerSize, false);
-    page->footerTextPixels = m::reading::textPixels(page->footerSize, true);
-    syncChromeSizeButtons();
-    page->showClock = clockOption->isChecked();
-    page->showProgress = progressOption->isChecked();
+    const auto chrome = kobalt::headerfooter::select(preferences);
+    chromePreset = chrome.preset;
+    page->chrome = chrome.layout;
+    syncChromeControls();
     applyEdgeLight();
     chapterGraph->setDense(preferences.value("dense_stats_chart").toBool(false));
     pinStats = preferences.value("pin_stats").toBool(false);
-    page->clockText = services.clock();
     auto settings =
         appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview()->requestedState() : model->state();
     settings["dark_mode"] = darkOption->isChecked();
-    settings["smooth_images"] = smoothOption->isChecked();
     settings["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
     settings["bold_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
     if (restoringDefaults) {
@@ -260,30 +406,18 @@ void Reader::applyBoldReading(bool enabled) {
     refresh();
 }
 
-// Like dark mode, the text weight changes as soon as it is chosen, so the
-// two weights can be compared with Settings open.
-void Reader::applyHeavierText(bool enabled) {
-    if (model->temporaryTypography())
+void Reader::applyAutomaticOpening(bool enabled) {
+    if (!services.automaticBookOpening || !services.setAutomaticBookOpening)
         return;
-    auto next = preferences;
-    next["heavier_interface_text"] = enabled;
-    if (!writePreferences(next)) {
-        heavierTextOption->setChecked(preferences.value("heavier_interface_text").toBool(true));
-        settingsError->setText(strings::get("reader.could_not_save_reader_settings"));
+    const bool saved = services.setAutomaticBookOpening(enabled);
+    automaticOpeningOption->setChecked(services.automaticBookOpening());
+    if (!saved) {
+        settingsError->setText(strings::get("native_ui.could_not_save_reader_preference"));
         settingsError->show();
         return;
     }
-    preferences = next;
     settingsError->clear();
     settingsError->hide();
-    QElapsedTimer timer;
-    timer.start();
-    if (kobalt::ui::setInterfaceWeight(kobalt::ui::interfaceWeightSteps(preferences))) {
-        kobalt::ui::refreshInterfaceText(this);
-        kobalt::diagnostic("ui-weight",
-                           {{"steps", kobalt::ui::interfaceWeight()}, {"elapsed_ms", double(timer.elapsed())}}, false);
-    }
-    refresh();
 }
 
 void Reader::applyTheme(bool dark) {
@@ -301,14 +435,25 @@ void Reader::applyTheme(bool dark) {
     colors.setColor(QPalette::Mid, QColor("#999999"));
     colors.setColor(QPalette::Midlight, dark ? QColor("#333333") : QColor("#dddddd"));
     // Theme this window only. Nickel keeps its own palette when we close.
-    setProperty("reader_dark", dark);
-    setPalette(colors);
-    readerStyle(this, property("reader_style").toString());
-    textRefresh(this);
-    for (auto *widget : findChildren<QWidget *>()) {
+    // Set the palette, then the style sheet, so the sheet's own background
+    // and text colors reach widgets that paint from their palette. Setting a
+    // style sheet takes the gray roles from the platform; no sheet sets them,
+    // so restore the theme's rule and pressed grays afterwards.
+    const auto applyColors = [&colors](QWidget *widget) {
         widget->setPalette(colors);
         if (widget->property("reader_style").isValid())
             readerStyle(widget, widget->property("reader_style").toString());
+        auto styled = widget->palette();
+        for (const auto role : {QPalette::Mid, QPalette::Midlight})
+            for (const auto group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled})
+                styled.setColor(group, role, colors.color(group, role));
+        widget->setPalette(styled);
+    };
+    setProperty("reader_dark", dark);
+    applyColors(this);
+    textRefresh(this);
+    for (auto *widget : findChildren<QWidget *>()) {
+        applyColors(widget);
         textRefresh(widget);
         if (auto *button = qobject_cast<QPushButton *>(widget))
             kobalt::ui::refreshButtonIcon(button);
@@ -412,7 +557,10 @@ void Reader::selectPanel(int index) {
     if (general->isVisible()) {
         appearanceEdit.request(index == 0 ? AppearanceDestination::Text : AppearanceDestination::Layout);
         applySettings();
-    } else if (menu->isVisible() && panels->currentIndex() == index) {
+    } else if (menu->isVisible() &&
+               (panels->currentIndex() == index ||
+                (index == kobalt::reader::LayoutPage && panels->currentIndex() != kobalt::reader::TypographyPage))) {
+        // The Layout tab closes the header and footer pages too.
         finishPreview();
     } else
         openPanel(index);
@@ -518,7 +666,6 @@ void Reader::finishPreview() {
         // A failed preview has no settings to apply. Dismiss it without
         // trapping the reader now that panels have no Cancel action.
         orientation->configure(preferences);
-        (page->showClock ? clockOption : clockHideOption)->setChecked(true);
         appearanceEdit.resetPreview();
         appearanceEdit.setPanelOpen(false);
         appearanceEdit.cancelDeferredApply();
@@ -542,7 +689,6 @@ void Reader::finishPreview() {
     }
     appearanceEdit.cancelDeferredApply();
     auto next = preferences;
-    next["show_clock"] = clockOption->isChecked();
     const auto rotation = orientation->settings();
     for (auto it = rotation.begin(); it != rotation.end(); ++it)
         next[it.key()] = it.value();
@@ -554,7 +700,6 @@ void Reader::finishPreview() {
     }
     preferences = next;
     appearanceEdit.clearError();
-    page->showClock = clockOption->isChecked();
     const QSize viewport(width(), height() - page->topHeight() - page->bottomHeight());
     if (appearanceEdit.ready())
         model->apply(appearanceEdit.preview()->requestedState(), viewport);

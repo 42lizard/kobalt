@@ -43,11 +43,11 @@ Dependency revisions and checksums are recorded in [dependencies/manifest.json](
 | Project | Authors and contributors | Use in Kobalt | Notices |
 | --- | --- | --- | --- |
 | [IBM Plex](https://github.com/IBM/plex) | IBM and the Plex contributors. | Plex Sans and Plex Mono for the interface and reading bar. | [IBM Plex](resources/notices/IBM-Plex-OFL) |
-| [Noto](https://github.com/notofonts) | The Noto Project Authors. | Noto Serif, Noto Sans Math, Noto Naskh Arabic and Noto Serif fallback fonts for Hebrew, Armenian, Georgian, Devanagari, Bengali, Tamil and Thai. | [Noto](resources/notices/Noto-OFL) |
+| [Noto](https://github.com/notofonts) | The Noto Project Authors. | Noto Serif, Noto Sans Math, Noto Naskh Arabic and Noto Serif fallback fonts for Hebrew, Armenian, Georgian, Devanagari, Bengali, Tamil and Thai, including their available bold and italic faces. | [Noto](resources/notices/Noto-OFL) |
 | [Noto Serif CJK](https://github.com/notofonts/noto-cjk) | Adobe and the Noto Project Authors. | Chinese, Japanese and Korean fallback glyphs. | [Noto Serif CJK](resources/notices/Noto-Serif-CJK-OFL) |
 | [Instrument Serif](https://github.com/Instrument/instrument-serif) | The Instrument Serif Project Authors. | Loading-screen wordmark and caption. | [Instrument Serif](resources/notices/Instrument-Serif-OFL) |
 | [eBook Fonts](https://github.com/nicoverbruggen/ebook-fonts) | Nico Verbruggen, collection and font adaptations; original font authors listed below. | Reading fonts listed below. | [Font credits](resources/notices/eBook-Fonts), [Atkinson Hyperlegible Next](resources/notices/Atkinson-Hyperlegible-Next-OFL), [Domitian](resources/notices/Domitian) |
-| [Lucide](https://github.com/lucide-icons/lucide) and [Feather](https://github.com/feathericons/feather) | The Lucide contributors; Cole Bemis and the Feather contributors for Feather-derived artwork. | Reader interface icons. | [Lucide and Feather](resources/notices/Lucide) |
+| [Phosphor Icons](https://github.com/phosphor-icons/core) | Helena Zhang, Tobias Fried and the Phosphor contributors. | Reader interface icons, regular weight. | [MIT](resources/notices/Phosphor-MIT) |
 | [TeX hyphenation](https://github.com/hyphenation/tex-hyphen), [wortliste](https://repo.or.cz/wortliste.git), [LibreOffice dictionaries](https://github.com/LibreOffice/dictionaries) and [TeX Users Group exceptions](https://ctan.org/tex-archive/info/digests/tugboat/hyphenex) | The TeX hyphenation, wortliste, LibreOffice dictionary and TeX Users Group authors; conversions by the KOReader contributors. Individual pattern authors are listed below. | Bundled hyphenation patterns. | [Pattern credits and licenses](resources/notices/Hyphenation-patterns) |
 
 Nico Verbruggen maintains the eBook Fonts collection and its NV font adaptations. The original font designs remain credited to their authors below:
@@ -89,7 +89,7 @@ The individual hyphenation pattern credits are preserved in the [pattern notices
 | Slovenian | Matjaž Vrečko. |
 | Ukrainian | Maksym Polyakov. |
 
-The [font manifests](resources/fonts/) and [icon manifest](resources/icons/lucide/manifest.json) record source revisions and checksums.
+The [font manifests](resources/fonts/) and [icon manifest](resources/icons/phosphor/manifest.json) record source revisions and checksums.
 
 ## Optional dictionaries and test data
 

@@ -1,4 +1,5 @@
 #include "buttons.h"
+#include "text.h"
 #include "../style/private_text.h"
 #include "support/strings.h"
 #include "assets/font_catalog.h"
@@ -10,6 +11,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPointer>
+#include <QtMath>
 #include <QStyle>
 #include <QStyleOptionButton>
 #include <QVariant>
@@ -72,6 +74,17 @@ void Button::paintEvent(QPaintEvent *) {
             painter.setFont(font());
             const int labelWidth = interfaceTextWidth(text(), font());
             const int gap = text().isEmpty() ? 0 : iconLabelGap;
+            if (iconAboveLabel) {
+                // Capitals' height is the label's ink, so the icon and that
+                // ink centre as one group, as in the bottom tabs.
+                const int capital = qCeil(QFontMetricsF(font()).tightBoundingRect(QStringLiteral("H")).height());
+                const int top = (height() - iconSize().height() - gap - capital) / 2;
+                const QRect area((width() - iconSize().width()) / 2, top, iconSize().width(), iconSize().height());
+                icon().paint(&painter, area, Qt::AlignCenter, isEnabled() ? QIcon::Normal : QIcon::Disabled,
+                             active ? QIcon::On : QIcon::Off);
+                drawOpticalText(painter, QRect(0, area.bottom() + 1 + gap, width(), capital), text(), true);
+                return;
+            }
             const int left = (width() - iconSize().width() - gap - labelWidth) / 2;
             icon().paint(
                 &painter, QRect(left, (height() - iconSize().height()) / 2, iconSize().width(), iconSize().height()),
@@ -151,6 +164,61 @@ void BackButton::paintEvent(QPaintEvent *) {
     const auto bounds = QFontMetricsF(painter.font()).tightBoundingRect(label);
     painter.setPen(ink);
     painter.drawText(QPointF(m::navigation::labelLeft, center - bounds.center().y() + labelOffset), label);
+}
+TapZoneButton::TapZoneButton(tapZones::Layout layout, bool rightToLeft, QWidget *parent)
+    : Button(parent), layout(layout), rightToLeft(rightToLeft) {
+    setCheckable(true);
+    setFocusPolicy(Qt::NoFocus);
+    readerStyle(this, "QPushButton{border:0;padding:0;min-width:0;min-height:0;}");
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setFixedHeight(sizeHint().height());
+}
+QSize TapZoneButton::sizeHint() const {
+    return {px(200), px(288)};
+}
+void TapZoneButton::paintEvent(QPaintEvent *) {
+    QPainter painter(this);
+    const auto paper = palette().color(QPalette::Window);
+    const auto ink = palette().color(QPalette::WindowText);
+    const auto gray = darkTheme(this) ? QColor("#333333") : QColor("#dddddd");
+    painter.fillRect(rect(), isDown() ? gray : paper);
+    const int diagramHeight = px(200);
+    const int diagramWidth = qMin(px(142), width() - px(24));
+    const QRectF diagram((width() - diagramWidth) / 2, px(16), diagramWidth, diagramHeight);
+    painter.setPen(QPen(ink, px(2)));
+    for (const auto &region : tapZones::regions(layout)) {
+        const auto &r = region.bounds;
+        const QRectF area(diagram.x() + r.x() * diagram.width(), diagram.y() + r.y() * diagram.height(),
+                          r.width() * diagram.width(), r.height() * diagram.height());
+        painter.fillRect(area, region.action == tapZones::Action::Menu ? gray : paper);
+        painter.drawRect(area);
+    }
+    const auto glyph = [&](tapZones::Action action, qreal x, qreal y) {
+        const int side = px(24);
+        const QPointF center(diagram.x() + x * diagram.width(), diagram.y() + y * diagram.height());
+        const QRectF area(center.x() - side / 2., center.y() - side / 2., side, side);
+        if (action == tapZones::Action::Menu) {
+            for (int line = -1; line <= 1; ++line)
+                painter.drawLine(QPointF(area.left(), center.y() + line * px(5)),
+                                 QPointF(area.right(), center.y() + line * px(5)));
+        } else {
+            bool next = action == tapZones::Action::Next;
+            paintOpeningIcon(painter, next != rightToLeft ? ControlIcon::Next : ControlIcon::Previous, area, ink);
+        }
+    };
+    if (layout == tapZones::Layout::OneHanded) {
+        glyph(tapZones::Action::Next, .5, .2);
+        glyph(tapZones::Action::Next, .5, .8);
+        glyph(tapZones::Action::Menu, .5, .5);
+    } else {
+        for (const auto &region : tapZones::regions(layout))
+            glyph(region.action, region.bounds.center().x(), region.bounds.center().y());
+    }
+    painter.setPen(QPen(isChecked() ? ink : gray, px(6)));
+    painter.drawRect(diagram.adjusted(-px(4), -px(4), px(4), px(4)));
+    painter.setPen(ink);
+    painter.setFont(interfaceFont(px(25)));
+    drawInterfaceText(painter, QRect(0, px(232), width(), px(40)), text(), Qt::AlignCenter);
 }
 QPushButton *makeButton(QWidget *parent, QBoxLayout *layout, const char *name, const QString &text,
                         std::function<void()> action) {
@@ -261,7 +329,10 @@ void DropdownButton::paintEvent(QPaintEvent *) {
         drawInterfaceText(painter, label, elideInterfaceText(text(), painter.font(), label.width()),
                           Qt::AlignLeft | Qt::AlignVCenter);
     const int size = m::choices::fontArrowSize;
-    controlIcon(property("opens_upward").toBool() ? ControlIcon::Up : ControlIcon::Down, ink)
+    const auto arrow = forward                             ? ControlIcon::Next
+                       : property("opens_upward").toBool() ? ControlIcon::Up
+                                                           : ControlIcon::Down;
+    controlIcon(arrow, ink)
         .paint(&painter, QRect(width() - m::choices::fontArrowRight - size / 2, (height() - size) / 2, size, size));
 }
 
@@ -298,8 +369,14 @@ void CaptionButton::paintEvent(QPaintEvent *) {
             icon().paint(&painter,
                          QRect(c::inset - px(7), (height() - c::cellIcon) / 2 + px(1), c::cellIcon, c::cellIcon));
         const int textWidth = width() - left - c::actionRight;
-        painter.drawText(QRect(left, 0, textWidth, height() - (note.isEmpty() ? 0 : px(30))),
-                         Qt::AlignVCenter | Qt::AlignLeft,
+        // The label and its note are one block, centred on its letters. Their
+        // line boxes keep the same centre-to-centre distance as before.
+        const QFont noteFont = captionFont();
+        const int labelHeight = QFontMetrics(label).height(), noteHeight = QFontMetrics(noteFont).height();
+        const int pitch = px(40);
+        const int blockHeight = note.isEmpty() ? labelHeight : labelHeight / 2 + pitch + noteHeight / 2;
+        const int top = (height() - blockHeight) / 2 - opticalCenterShift(label, note.isEmpty() ? label : noteFont);
+        painter.drawText(QRect(left, top, textWidth, labelHeight), Qt::AlignVCenter | Qt::AlignLeft,
                          painter.fontMetrics().elidedText(text(), Qt::ElideRight, textWidth));
         painter.setPen(QPen(palette().color(QPalette::WindowText), px(2)));
         const int x = width() - c::chevronRight, y = height() / 2;
@@ -308,9 +385,9 @@ void CaptionButton::paintEvent(QPaintEvent *) {
             painter.drawLine(x + px(2), y, x - px(8), y + px(10));
         }
         if (!note.isEmpty()) {
-            painter.setFont(captionFont());
+            painter.setFont(noteFont);
             painter.setPen(noteColor(this));
-            painter.drawText(QRect(c::inset, height() / 2 + px(10), textWidth, px(30)),
+            painter.drawText(QRect(c::inset, top + labelHeight / 2 + pitch - noteHeight / 2, textWidth, noteHeight),
                              Qt::AlignLeft | Qt::AlignVCenter,
                              painter.fontMetrics().elidedText(note, Qt::ElideRight, textWidth));
         }

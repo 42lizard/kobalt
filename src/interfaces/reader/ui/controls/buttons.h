@@ -1,5 +1,6 @@
 #pragma once
 #include "icons.h"
+#include "ui/tap_zones.h"
 #include "text.h"
 #include "../style/theme.h"
 #include "../style/metrics.h"
@@ -32,6 +33,15 @@ public:
         iconLabelGap = pixels;
         update();
     }
+    // With a gap set, draw the icon centred above the label, as the bottom
+    // tabs do, instead of beside it.
+    void setIconAboveLabel(bool above) {
+        if (iconAboveLabel == above) {
+            return;
+        }
+        iconAboveLabel = above;
+        update();
+    }
 
 protected:
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -47,7 +57,22 @@ private:
     ButtonPaintMode mode = ButtonPaintMode::Native;
     ButtonIcon configuredIcon;
     int iconLabelGap = 0;
+    bool iconAboveLabel = false;
     bool hasConfiguredIcon = false, hasIconTheme = false, iconDark = false;
+};
+
+// A selectable diagram of the actual page hit regions, with a label below it.
+class TapZoneButton : public Button {
+public:
+    TapZoneButton(tapZones::Layout layout, bool rightToLeft, QWidget *parent);
+    QSize sizeHint() const override;
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+
+private:
+    tapZones::Layout layout;
+    bool rightToLeft;
 };
 
 class BackButton : public Button {
@@ -88,6 +113,14 @@ private:
 class DropdownButton : public Button {
 public:
     explicit DropdownButton(QWidget *parent);
+    // A forward button opens another page instead of a list, so it shows a
+    // right chevron in place of the arrow.
+    void setForward(bool value) {
+        if (forward == value)
+            return;
+        forward = value;
+        update();
+    }
 
 protected:
     void paintEvent(QPaintEvent *) override;
@@ -100,6 +133,9 @@ protected:
     virtual SampleAppearance sampleAppearance() const {
         return {};
     }
+
+private:
+    bool forward = false;
 };
 class FontButton : public DropdownButton {
 public:

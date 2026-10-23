@@ -1,8 +1,12 @@
 #include "interfaces/reader/ui/style/theme.h"
 #include "support/qt_font.h"
+#include "interfaces/reader/ui/controls/text.h"
+#include "interfaces/reader/ui/controls/icons.h"
 #include "reading_page.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/private_text.h"
+#include "interfaces/reader/ui/controls/panels.h"
+#include "support/strings.h"
 #include "ui/input.h"
 #include "ui/image_damage.h"
 #include "model/page_refresh_regions.h"
@@ -19,36 +23,111 @@ namespace kobalt {
 namespace m = ui::metrics;
 using platform::textRefresh;
 namespace {
-qreal progressWidth(const QFontMetrics &metrics, const QString &text) {
-    return qt::textWidth(metrics, text) - text.count(' ') * qt::textWidth(metrics, QStringLiteral(" ")) / 2.0;
+using headerfooter::Content;
+using headerfooter::Field;
+// The battery sits beside the text at a little below the text height.
+qreal batteryBody(const QFont &font) {
+    return qRound(font.pixelSize() * .75);
 }
-void paintProgress(QPainter &painter, const QRect &bounds, const QString &text, bool rightAligned) {
-    const auto metrics = painter.fontMetrics();
-    qreal x = rightAligned ? bounds.x() + bounds.width() - progressWidth(metrics, text)
-                           : bounds.x() + (bounds.width() - progressWidth(metrics, text)) / 2;
-    const qreal baseline = bounds.y() + (bounds.height() - metrics.height()) / 2.0 + metrics.ascent();
-    // A Unicode thin space still occupies a full cell in some mono fonts.
-    const qreal space = qt::textWidth(metrics, QStringLiteral(" ")) / 2.0;
-    for (const auto &word : text.split(' ')) {
-        painter.drawText(QPointF(x, baseline), word);
-        x += qt::textWidth(metrics, word) + space;
+int textWidth(const QFont &font, Field field, const QString &text) {
+    if (text.isEmpty())
+        return 0;
+    return headerfooter::pageCount(field) ? qCeil(ui::halfSpacedWidth(QFontMetrics(font), text))
+                                          : ui::interfaceTextWidth(text, font);
+}
+int iconWidth(const QFont &font, const Content &content) {
+    if (!content.batteryIcon)
+        return 0;
+    return qCeil(ui::batteryWidth(batteryBody(font))) + (content.text.isEmpty() ? 0 : int(m::reading::batteryGap));
+}
+int contentWidth(const QFont &font, Field field, const Content &content, bool sleeping = false) {
+    if (sleeping && field == Field::Time)
+        return font.pixelSize();
+    return textWidth(font, field, content.text) + iconWidth(font, content);
+}
+// Draws one slot within `bounds`, eliding its text when it does not fit.
+void paintContent(QPainter &painter, const QRect &bounds, Field field, const Content &content, Qt::Alignment align,
+                  const QColor &ink, const QColor &paper, bool sleeping) {
+    if (sleeping && field == Field::Time) {
+        const int size = qMin(painter.font().pixelSize(), qMin(bounds.width(), bounds.height()));
+        if (size <= 0)
+            return;
+        const int x = align & Qt::AlignRight     ? bounds.right() + 1 - size
+                      : align & Qt::AlignHCenter ? bounds.x() + (bounds.width() - size) / 2
+                                                 : bounds.x();
+        ui::paintOpeningIcon(painter, ui::ControlIcon::Lock,
+                             QRectF(x, bounds.y() + (bounds.height() - size) / 2.0, size, size), ink);
+        return;
+    }
+    if (content.empty() || bounds.width() <= 0)
+        return;
+    const QFont font = painter.font();
+    const int icon = iconWidth(font, content);
+    const int room = qMax(0, bounds.width() - icon);
+    QString text = content.text;
+    int width = textWidth(font, field, text);
+    if (width > room) {
+        text = ui::elideInterfaceText(text, font, room);
+        width = ui::interfaceTextWidth(text, font);
+        field = Field::Nothing;
+    }
+    const int total = width + icon;
+    const int x = align & Qt::AlignRight     ? bounds.right() + 1 - total
+                  : align & Qt::AlignHCenter ? bounds.x() + (bounds.width() - total) / 2
+                                             : bounds.x();
+    if (!text.isEmpty()) {
+        if (headerfooter::pageCount(field))
+            ui::drawHalfSpaced(painter, x, bounds, text);
+        else
+            ui::drawInterfaceText(painter, QRect(x, bounds.y(), width, bounds.height()), text,
+                                  Qt::AlignLeft | Qt::AlignVCenter);
+    }
+    if (content.batteryIcon) {
+        const qreal height = batteryBody(font);
+        const qreal left = x + total - ui::batteryWidth(height);
+        ui::paintBattery(painter,
+                         QRectF(left, bounds.y() + (bounds.height() - height) / 2.0,
+                                height * int(m::panel::batteryBodyWidth) / int(m::panel::batteryBodyHeight), height),
+                         content.battery, content.charging, ink, paper);
     }
 }
 }
-int ReadingPage::headerProgressWidth() const {
-    QFont header = font();
-    header.setPixelSize(headerTextPixels);
-    return qCeil(progressWidth(QFontMetrics(header), chapterProgress));
+QString ReadingPage::headerText() const {
+    QString text;
+    for (int slot = 0; slot < 3; ++slot) {
+        const auto &content = slotContents[slot];
+        const auto part = !content.text.isEmpty() ? content.text
+                          : content.batteryIcon && content.battery >= 0
+                              ? strings::get("common.percent").arg(content.battery)
+                              : QString();
+        if (part.isEmpty())
+            continue;
+        text = text.isEmpty() ? part : strings::get("reader.chapter_position").arg(text, part);
+    }
+    return text;
 }
-// The ribbon hangs just left of the header's chapter progress and runs a
+ReadingPage::Slots ReadingPage::stripSlots(bool footer) const {
+    const int first = footer ? 3 : 0;
+    return {slotContents[first], slotContents[first + 1], slotContents[first + 2]};
+}
+std::array<headerfooter::Field, 3> ReadingPage::stripFields(bool footer) const {
+    const int first = footer ? 3 : 0;
+    return {chrome.slotFields[first], chrome.slotFields[first + 1], chrome.slotFields[first + 2]};
+}
+int ReadingPage::headerRightWidth() const {
+    QFont header = font();
+    header.setPixelSize(headerTextPixels());
+    return qMin(contentWidth(header, chrome.slotFields[2], slotContents[2]), width() / 3);
+}
+// The ribbon hangs just left of the header's top-right slot and runs a
 // little past the strip. Without a strip it is shorter and stays in the top
 // margin. Its size follows the screen, so it is the same on every density.
 QRect ReadingPage::ribbonRect() const {
     const int ribbonWidth = qRound(width() * .036);
     const int strip = topHeight();
     const int ribbonHeight = strip ? qRound(strip * 1.2) : qRound(height() * .032);
-    const int right = showHeader ? width() - m::reading::headerSide - headerProgressWidth() - m::reading::headerTextGap
-                                 : width() - m::reading::headerSide;
+    const int rightWidth = showHeader() ? headerRightWidth() : 0;
+    const int right = width() - m::reading::headerSide - (rightWidth ? rightWidth + m::reading::headerTextGap : 0);
     return QRect(right - ribbonWidth, 0, ribbonWidth, ribbonHeight);
 }
 QRect ReadingPage::bookmarkCorner() const {
@@ -56,22 +135,32 @@ QRect ReadingPage::bookmarkCorner() const {
     return QRect(width() - w, 0, w, h);
 }
 int ReadingPage::topHeight() const {
-    return showHeader ? m::reading::stripHeight(headerSize) : clockVisible() ? m::reading::clockHeight : 0;
+    return showHeader() ? m::reading::stripHeight(chrome.headerSize) : 0;
 }
 
 int ReadingPage::bottomHeight() const {
-    return (showFooter ? m::reading::stripHeight(footerSize) : 0) +
-           (showProgress ? ui::metrics::reading::progressHeight : 0);
+    return (showFooter() ? m::reading::stripHeight(chrome.footerSize) : 0) +
+           (showProgress() ? ui::metrics::reading::progressHeight : 0);
+}
+// Strip text keeps the Small strip's distance from the page edge at every
+// size: it is centred in a band as tall as that strip, at the edge. A larger
+// strip only adds space between its text and the book.
+QRect ReadingPage::headerTextRect() const {
+    if (!showHeader())
+        return {};
+    return {0, 0, width(), m::reading::stripHeight(QStringLiteral("small"))};
 }
 QRect ReadingPage::footerTextRect() const {
-    if (!showFooter)
+    if (!showFooter())
         return {};
     // Keep the same edge gap above the progress fill as below the top
     // of the header. The progress strip adds space below the text.
-    const int offset = showProgress ? int(m::reading::progressHeight) - int(m::reading::progressBottom) -
-                                          int(m::reading::progressFillHeight)
-                                    : 0;
-    return {0, height() - bottomHeight() + offset, width(), m::reading::stripHeight(footerSize)};
+    const int offset = showProgress() ? int(m::reading::progressHeight) - int(m::reading::progressBottom) -
+                                            int(m::reading::progressFillHeight)
+                                      : 0;
+    const int band = m::reading::stripHeight(QStringLiteral("small"));
+    const int bottom = height() - bottomHeight() + offset + m::reading::stripHeight(chrome.footerSize);
+    return {0, bottom - band, width(), band};
 }
 
 void ReadingPage::cancelHold() {
@@ -92,6 +181,7 @@ void ReadingPage::revealLinks(const QVector<QRect> &rectangles) {
     QRegion dirty;
     for (const auto &outline : revealedOutlines)
         dirty += outline;
+    const bool wereShown = !revealedLinks.isEmpty();
     revealedLinks = rectangles;
     // Pad each link, then split the space where padded links meet so that
     // links on consecutive lines, as in a contents page, keep separate outlines.
@@ -119,6 +209,13 @@ void ReadingPage::revealLinks(const QVector<QRect> &rectangles) {
                 after.setTop(qMax(after.top(), middle + gap - gap / 2));
             }
         }
+    // Showing or hiding the outlines repaints the whole page as one rectangle:
+    // MediaTek refreshes each page rectangle on its own, which would flash
+    // once per link. A change between two sets of links repaints only their outlines.
+    if (rectangles.isEmpty() == wereShown) {
+        update();
+        return;
+    }
     for (const auto &outline : revealedOutlines)
         dirty += outline;
     if (!dirty.isEmpty())
@@ -171,10 +268,11 @@ void ReadingPage::refreshContent(bool reading, bool now) {
     const bool geometryChanged =
         renderedSize != size() || renderedTop != topHeight() || renderedBottom != bottomHeight();
     const int weight = kobalt::ui::interfaceWeight();
-    const HeaderState nextHeader{chapterTitle,     chapterProgress, clockText,        showHeader,        clockVisible(),
-                                 panelBelowHeader, width(),         headerTextPixels, colors.cacheKey(), weight};
-    const FooterState nextFooter{progress, showFooter,       showProgress,      progressFraction,
-                                 width(),  footerTextPixels, colors.cacheKey(), weight};
+    const HeaderState nextHeader{stripSlots(false), stripFields(false), showHeader(),      panelBelowHeader,
+                                 width(),           headerTextPixels(), colors.cacheKey(), weight};
+    const FooterState nextFooter{
+        stripSlots(true),   stripFields(true), notice, showFooter(), showProgress(), progressFraction, width(),
+        footerTextPixels(), colors.cacheKey(), weight};
     kobalt::platform::pageRefresh(this, false,
                                   reading && !geometryChanged && renderedPalette == colors.cacheKey() &&
                                       renderedBody.text("kobalt.animation_text_only") == "true" &&
@@ -245,6 +343,19 @@ void ReadingPage::refreshContent(bool reading, bool now) {
 
 void ReadingPage::paintEvent(QPaintEvent *) {
     QPainter painter(this);
+    paintContents(painter);
+}
+
+QImage ReadingPage::snapshot(bool sleeping) const {
+    QImage frame(size(), QImage::Format_RGB32);
+    if (!frame.isNull()) {
+        QPainter painter(&frame);
+        paintContents(painter, sleeping);
+    }
+    return frame;
+}
+
+void ReadingPage::paintContents(QPainter &painter, bool sleeping) const {
     painter.fillRect(rect(), palette().color(QPalette::Window));
     painter.drawImage(0, topHeight(), renderedBody);
     if (!revealedOutlines.isEmpty()) {
@@ -270,8 +381,18 @@ void ReadingPage::paintEvent(QPaintEvent *) {
     for (const auto &r : selection)
         painter.fillRect(r.translated(0, topHeight()), Qt::white);
     painter.restore();
-    painter.drawImage(0, 0, headerPixels);
-    painter.drawImage(0, height() - bottomHeight(), footerPixels);
+    if (sleeping) {
+        painter.save();
+        painter.setFont(font());
+        painter.setPen(palette().color(QPalette::WindowText));
+        paintHeader(painter, true);
+        painter.translate(0, height() - bottomHeight());
+        paintFooter(painter, true);
+        painter.restore();
+    } else {
+        painter.drawImage(0, 0, headerPixels);
+        painter.drawImage(0, height() - bottomHeight(), footerPixels);
+    }
     if (!renderedRibbon.isEmpty()) {
         const QRectF r = renderedRibbon;
         QPolygonF ribbon;
@@ -363,41 +484,69 @@ QImage ReadingPage::renderStrip(int height, const std::function<void(QPainter &)
     return result;
 }
 
-void ReadingPage::paintHeader(QPainter &painter) const {
-    QFont font = painter.font();
-    font.setPixelSize(headerTextPixels);
-    painter.setFont(font);
-    const int clockWidth = showClock ? kobalt::qt::textWidth(painter.fontMetrics(), clockText) +
-                                           m::reading::headerSide + m::reading::headerTextGap
-                                     : m::reading::headerSide;
-    if (showHeader) {
-        const int ribbonSpace = qRound(width() * .036) + m::reading::headerTextGap;
-        const int sideWidth = qMax(clockWidth, qCeil(progressWidth(painter.fontMetrics(), chapterProgress)) +
-                                                   m::reading::headerSide + m::reading::headerTextGap + ribbonSpace);
-        const QRect titleBounds(sideWidth, 0, qMax(0, width() - 2 * sideWidth), m::reading::stripHeight(headerSize));
-        ui::drawInterfaceText(painter, titleBounds,
-                              ui::elideInterfaceText(chapterTitle.toUpper(), painter.font(), titleBounds.width()),
-                              Qt::AlignCenter);
-        paintProgress(
-            painter,
-            QRect(m::reading::headerSide, 0, width() - 2 * m::reading::headerSide, m::reading::stripHeight(headerSize)),
-            chapterProgress, true);
+// The centre slot is centred on the page, not in a third of it, so a long
+// centre keeps its middle while the sides keep their own width. When the
+// three do not fit, the sides give way first, down to a third each.
+void ReadingPage::paintSlots(QPainter &painter, const QRect &bounds, bool footer, bool sleeping) const {
+    const int first = footer ? 3 : 0;
+    const QFont font = painter.font();
+    int widths[3];
+    for (int slot = 0; slot < 3; ++slot)
+        widths[slot] = contentWidth(font, chrome.slotFields[first + slot], slotContents[first + slot], sleeping);
+    const int side = m::reading::headerSide, gap = m::reading::headerTextGap;
+    // The bookmark ribbon hangs left of the top-right slot; keep text off it.
+    const int ribbon = footer ? 0 : qRound(width() * .036) + gap;
+    int leftRoom = width() - 2 * side, rightRoom = leftRoom - ribbon;
+    QRect centre;
+    if (widths[1]) {
+        int edge = qMax(side + (widths[0] ? widths[0] + gap : 0), side + (widths[2] ? widths[2] + gap : 0) + ribbon);
+        int centreWidth = width() - 2 * edge;
+        const int least = qMin(widths[1], width() / 3);
+        if (centreWidth < least) {
+            centreWidth = least;
+            edge = (width() - centreWidth) / 2;
+        }
+        centre = QRect(edge, bounds.y(), centreWidth, bounds.height());
+        leftRoom = edge - side - gap;
+        rightRoom = edge - side - gap - ribbon;
+    } else if (widths[0] && widths[2] && widths[0] + widths[2] + gap > leftRoom - ribbon) {
+        const int shared = leftRoom - ribbon - gap;
+        leftRoom = shared * widths[0] / (widths[0] + widths[2]);
+        rightRoom = shared - leftRoom;
     }
-    if (clockVisible())
-        painter.drawText(QRect(m::reading::headerSide, 0, width() - 2 * m::reading::headerSide, topHeight()),
-                         Qt::AlignLeft | Qt::AlignVCenter, clockText);
+    const auto ink = palette().color(QPalette::WindowText), paper = palette().color(QPalette::Window);
+    paintContent(painter, QRect(side, bounds.y(), qMax(0, leftRoom), bounds.height()), chrome.slotFields[first],
+                 slotContents[first], Qt::AlignLeft, ink, paper, sleeping);
+    if (!centre.isEmpty())
+        paintContent(painter, centre, chrome.slotFields[first + 1], slotContents[first + 1], Qt::AlignHCenter, ink,
+                     paper, sleeping);
+    paintContent(painter, QRect(width() - side - qMax(0, rightRoom), bounds.y(), qMax(0, rightRoom), bounds.height()),
+                 chrome.slotFields[first + 2], slotContents[first + 2], Qt::AlignRight, ink, paper, sleeping);
+}
+
+void ReadingPage::paintHeader(QPainter &painter, bool sleeping) const {
+    QFont font = painter.font();
+    font.setPixelSize(headerTextPixels());
+    painter.setFont(font);
+    if (showHeader())
+        paintSlots(painter, headerTextRect(), false, sleeping);
     if (panelBelowHeader)
         painter.fillRect(0, topHeight() - m::control::border, width(), m::control::border, ui::dividerColor(this));
 }
 
-void ReadingPage::paintFooter(QPainter &painter) const {
-    if (showFooter) {
+void ReadingPage::paintFooter(QPainter &painter, bool sleeping) const {
+    if (showFooter()) {
         QFont font = painter.font();
-        font.setPixelSize(footerTextPixels);
+        font.setPixelSize(footerTextPixels());
         painter.setFont(font);
-        paintProgress(painter, footerTextRect().translated(0, bottomHeight() - height()), progress, false);
+        const auto bounds = footerTextRect().translated(0, bottomHeight() - height());
+        if (!notice.isEmpty()) {
+            const int room = width() - 2 * m::reading::headerSide;
+            ui::drawInterfaceText(painter, bounds, ui::elideInterfaceText(notice, font, room), Qt::AlignCenter);
+        } else
+            paintSlots(painter, bounds, true, sleeping);
     }
-    if (showProgress) {
+    if (showProgress()) {
         const auto ink = palette().color(QPalette::WindowText);
         painter.fillRect(QRect(0, bottomHeight() - m::reading::progressBottom, width(), m::control::border), ink);
         painter.fillRect(QRect(0, bottomHeight() - m::reading::progressBottom - m::reading::progressFillHeight,

@@ -66,6 +66,12 @@ namespace light {
 inline constexpr auto hintPaperLight = "#e6e6e6", hintPaperDark = "#222222";
 inline constexpr int pollMilliseconds = 500;
 }
+namespace sleep {
+inline constexpr Px inset{48}, bottom{96}, width{620}, padding{36}, gap{20}, lineGap{8}, border{2};
+inline constexpr Px titleText{60}, detailText{32}, batteryText{28}, batteryGap{12};
+inline constexpr int dimAlpha = 40;
+inline constexpr auto lightPaper = "#ffffff", darkPaper = "#202020";
+}
 namespace settings {
 inline constexpr PxMargins displayMargins{16, 24, 16, 24}, screenMargins{16, 24, 16, 24};
 inline constexpr PxMargins miscellaneousMargins{16, 24, 16, 24};
@@ -114,10 +120,14 @@ inline constexpr auto dividerLight = "#b8b8b8", dividerDark = "#666666";
 inline constexpr Px statusHeight{60}, actionHeight{112}, heavyRule{3};
 inline constexpr Px headerHeight{statusHeight + actionHeight};
 inline constexpr Px cellWidth{118}, cellIcon{40}, backIcon{44}, inset{36};
-inline constexpr Px labelText{30}, descriptionText{25}, countText{28}, tabText{24}, titleText{about::exitText};
+inline constexpr Px labelText{30}, descriptionText{25}, countText{28}, tabText{26}, titleText{about::exitText};
+// A bottom tab centers its icon and label as one group.
+inline constexpr Px tabIcon{48}, tabGap{10};
 inline constexpr Px captionText{22}, captionSpacing{2}, numberText{22};
 inline constexpr Px listActionHeight{list::twoLines}, optionHeight{186}, checkSize{48};
-inline constexpr Px railWidth{268}, railRowHeight{120}, railText{28}, railInset{28};
+// Settings tabs stack an icon over a label, as the bottom tabs do. The rail
+// is as wide as its widest label with this margin on each side.
+inline constexpr Px railRowHeight{120}, railInset{28};
 inline constexpr Px chevronRight{42}, actionRight{112}, statsTopPadding{heavyRule};
 inline constexpr Px queryText{36}, selectorGap{16}, selectorIcon{36};
 // A label and its description, or a caption and the text below it.
@@ -165,9 +175,30 @@ inline QString textSize(const QString &size) {
 inline int stripHeight(const QString &size) {
     return px(size == "large" ? 80 : size == "medium" ? 64 : 48);
 }
-inline constexpr Px clockHeight{36}, progressHeight{24};
-inline constexpr Px headerSide{28}, headerTextGap{24};
+inline constexpr Px progressHeight{24};
+inline constexpr Px headerSide{28}, headerTextGap{24}, batteryGap{8};
 inline constexpr Px progressBottom{14}, progressFillHeight{4};
+}
+namespace headerFooter {
+// The slot map is a short page: one-line slot rows, their text at the top
+// and bottom edges as on the page, and a few lines between them.
+inline constexpr Px mapRowHeight{list::oneLine}, mapLineHeight{4};
+inline constexpr Px mapLineGap{spacing::section}, mapLineInset{list::inset}, mapEdgeInset{10};
+// Each slot is a dashed box around its text, so it reads as something to tap.
+inline constexpr Px slotGap{8}, slotPadding{8}, slotDash{4}, mapSideInset{7};
+inline constexpr Px valueText{control::captionValueText}, emptyText{chrome::captionText};
+// Preset miniatures: a page, then its name in a block as tall as a segment.
+inline constexpr Px miniatureWidth{184}, selectedBorder{5};
+inline constexpr Px miniatureTop{spacing::section}, nameGap{spacing::row}, nameHeight{control::segmentHeight};
+inline constexpr Px namePadding{control::segmentHorizontalPadding};
+// Field rows are one-line list rows, as in Chapters. Described fields grow.
+inline constexpr Px fieldRowHeight{list::oneLine};
+// Dashes stand for slot text inside a miniature; they are drawing sizes.
+inline constexpr Px dashHeight{6}, shortDash{22}, longDash{46};
+// A sheet that would stop this close below the toolbar meets it instead, so
+// the two heavy rules do not read as one thick line.
+inline constexpr Px toolbarSnap{spacing::section};
+
 }
 namespace opening {
 inline constexpr int hintDelayMilliseconds = 4000;

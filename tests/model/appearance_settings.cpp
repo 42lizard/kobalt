@@ -10,7 +10,7 @@ using namespace kobalt;
 int main() {
     // Appearance settings decide the layout. The list must stay complete, because a
     // missing key would let a retained layout survive a changed setting.
-    require(appearance::keys.size() == 17, "The appearance keys changed without this check");
+    require(appearance::keys.size() == 16, "The appearance keys changed without this check");
 
     const auto from = qt::object({{"font_pixels", 40},
                                   {"line_spacing", QJsonValue(QJsonValue::Null)},
@@ -136,6 +136,25 @@ int main() {
         require(migrated.value("bold_reading") == value && !migrated.contains("bionic_reading"),
                 "Legacy Bionic reading replaced an explicit Bold reading choice");
     }
+    // A book without a header and footer of its own starts with the last preset;
+    // a book with one, even from before presets, keeps it.
+    const auto last = qt::object({{appearance::lastPresetKey, "alternative_b"}});
+    require(appearance::readerPreferences(last, {}).value("header_footer").toString() == "alternative_b" &&
+                appearance::readerPreferences(last, qt::object({{"orientation", "portrait"}}))
+                        .value("header_footer")
+                        .toString() == "alternative_b",
+            "A new book did not start with the last preset");
+    require(appearance::readerPreferences(last, qt::object({{"header_footer", "default"}}))
+                        .value("header_footer")
+                        .toString() == "default" &&
+                !appearance::readerPreferences(last, qt::object({{"show_clock", false}})).contains("header_footer") &&
+                !appearance::readerPreferences({}, {}).contains("header_footer"),
+            "The last preset replaced a book's own header and footer");
+    const auto custom = qt::object({{"header_footer", "custom"}, {appearance::lastPresetKey, "default"}});
+    require(appearance::globalPreferences(custom) == qt::object({{appearance::lastPresetKey, "custom"}}),
+            "A global save did not record the book's preset as the last one");
+    require(appearance::globalPreferences(qt::object({{"header_footer", "default"}})).isEmpty(),
+            "A profile that only uses Kobalt saved a last preset");
     require(!appearance::readerPreferences({}, qt::object({{"bionic_reading", "bold"}})).contains("bold_reading") &&
                 !appearance::readerPreferences({}, {}).contains("bold_reading"),
             "A book-specific legacy setting or a fresh profile enabled global Bold reading");
@@ -146,6 +165,65 @@ int main() {
                 "Engine size limits do not match the 7 to 48 point controls");
     }
     readingPpi.store(300);
+    auto inherited = appearance::typographyDefaults();
+    inherited["font_face"] = QStringLiteral("NV Literata");
+    inherited["font_pixels"] = 60;
+    inherited["line_spacing"] = 175;
+    inherited["margin_pixels"] = 60;
+    inherited["top_margin_pixels"] = 30;
+    inherited["bottom_margin_pixels"] = 36;
+    inherited["text_alignment"] = QStringLiteral("justify");
+    inherited["font_weight"] = 550;
+    inherited["weight_steps"] = 2;
+    inherited["font_optical_size"] = 12;
+    inherited["hyphenation"] = QStringLiteral("on");
+    inherited["position"] = QStringLiteral("chapter#last");
+    inherited["dark_mode"] = true;
+    inherited["header_footer"] = QStringLiteral("alternative_a");
+    QJsonObject nextBook;
+    appearance::rememberTextLayout(nextBook, inherited);
+    require(nextBook.value(appearance::lastTextLayoutKey).toObject().size() == 13,
+            "Last text and layout included unrelated book state");
+    auto initial = appearance::bookDefaults(nextBook);
+    for (const auto *key : appearance::typographyKeys) {
+        require(initial.value(key) == inherited.value(key), "New book lost inherited typography or margins");
+    }
+    require(!initial.contains("position") && !initial.contains("dark_mode") && !initial.contains("header_footer"),
+            "New book inherited unrelated book state");
+    QJsonObject blank;
+    appearance::applyBookDefaults(blank, initial);
+    require(blank.value("font_face") == inherited.value("font_face"), "Empty saved state ignored inherited font");
+    auto own = qt::object({{"font_pixels", 40}, {"position", "chapter#own"}});
+    appearance::applyBookDefaults(own, initial);
+    require(own.value("font_pixels").toInt() == 40 && !own.contains("margin_pixels") &&
+                own.value("position").toString() == "chapter#own",
+            "Inheritance overwrote a book with partial saved typography");
+    nextBook[appearance::inheritTextLayoutKey] = false;
+    auto fixed = appearance::bookDefaults(nextBook);
+    require(fixed.value("font_pixels").toInt() == defaultFontPixels() &&
+                fixed.value("font_face").toString() == defaultFontFace,
+            "Disabling text inheritance did not restore new-book defaults");
+    nextBook["default_font_face"] = QStringLiteral("NV Ancizar Serif");
+    require(appearance::bookDefaults(nextBook).value("font_face").toString() == "NV Ancizar Serif",
+            "Disabling inheritance ignored the user's default font");
+    nextBook[appearance::inheritTextLayoutKey] = true;
+    readingPpi.store(212);
+    initial = appearance::bookDefaults(nextBook);
+    require(initial.value("font_pixels").toInt() == 42 && initial.value("margin_pixels").toInt() == 42 &&
+                initial.value("top_margin_pixels").toInt() == 21 &&
+                initial.value("bottom_margin_pixels").toInt() == 25 && initial.value("line_spacing").toInt() == 175,
+            "Inherited pixel values did not follow the screen density");
+    readingPpi.store(300);
+    auto disabledChrome = last;
+    disabledChrome[appearance::inheritHeaderFooterKey] = false;
+    require(appearance::readerPreferences(disabledChrome, {}).value("header_footer").toString() == "default" &&
+                appearance::readerPreferences(disabledChrome, qt::object({{"header_footer", "alternative_a"}}))
+                        .value("header_footer")
+                        .toString() == "alternative_a",
+            "Disabling header/footer inheritance changed a saved book or kept new books on the last preset");
+    const auto retired = qt::object({{"smooth_images", false}, {"heavier_interface_text", false}});
+    require(appearance::globalPreferences(retired).isEmpty() && appearance::readerPreferences(retired, {}).isEmpty(),
+            "Retired settings survived global preference loading or saving");
     const auto defaults = appearance::typographyDefaults();
     require(defaults.value("font_face").toString() == defaultFontFace &&
                 defaults.value("font_pixels").toInt() == defaultFontPixels() &&
@@ -164,7 +242,7 @@ int main() {
             "Default text size did not follow the screen density");
     readingPpi.store(300);
     const auto benchmark = appearance::benchmarkTypography("file:///mnt/onboard/kobalt-benchmark.kepub.epub");
-    require(benchmark.size() == 16 && benchmark.value("font_face").toString().isEmpty() &&
+    require(benchmark.size() == 15 && benchmark.value("font_face").toString().isEmpty() &&
                 benchmark.value("font_pixels").toInt() == defaultFontPixels() &&
                 benchmark.value("margin_pixels").toInt() == 60 && benchmark.value("top_margin_pixels").toInt() == 60 &&
                 benchmark.value("line_spacing").toInt() == 144 && !benchmark.value("dark_mode").toBool() &&

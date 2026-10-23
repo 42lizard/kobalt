@@ -48,12 +48,31 @@ void ReadingBook::observeReading() {
         stopReading();
         return;
     }
-    const auto anchor = model->state().value("position").toString();
-    const double percent = 100.0 * model->page() / qMax(1, model->pages());
     if (!activeReading.isValid())
         activeReading.start();
     if (bridge)
-        bridge->observeReading(percent, anchor);
+        bridge->observeReading(readingActivity());
+}
+ReadingActivity ReadingBook::readingActivity() const {
+    return {model->state().value("position").toString(),
+            100.0 * model->page() / qMax(1, model->pages()),
+            model->page(),
+            model->pages(),
+            model->turnDirection(),
+            model->totalWords(),
+            model->chapterGraph(),
+            model->graphSelection()};
+}
+ReadingEstimates ReadingBook::estimates() const {
+    if (bridge && !released && bridge->writable()) {
+        ReadingEstimates result;
+        if (bridge->estimates(readingActivity(), &result))
+            return result;
+    }
+    const auto reading = readingMilliseconds();
+    const int chapterLeft = model->chapterPages() > 0 ? model->chapterPages() - model->chapterPage() + 1 : -1;
+    return {pace_.estimate(chapterLeft, reading), pace_.estimate(model->pages() - model->page(), reading),
+            pace_.estimate(0, reading) < 0};
 }
 void ReadingBook::stopReading() {
     if (activeReading.isValid()) {
@@ -130,7 +149,8 @@ bool ReadingBook::writeNative(const QString &location, const QString &mappingErr
             const bool preserveFinished = !acceptedFinishedAnchor.isEmpty() &&
                                           acceptedFinishedAnchor == model->state().value("position").toString();
             diagnostic("native-save-start");
-            if (bridge->write(current, timeOnly ? QString() : location, percent, preserveFinished, &verified, &error)) {
+            if (bridge->write(current, timeOnly ? QString() : location, percent, preserveFinished, readingActivity(),
+                              &verified, &error)) {
                 baseline = verified;
                 reconciliation = ProgressReconciler(verified);
                 nativeWriteback = timeOnly ? "time-only" : "verified";
@@ -193,10 +213,21 @@ bool ReadingBook::checkpoint(QJsonObject *snapshot) {
     if (persisted == savedCheckpoint)
         return true;
     const bool saved = storage::writeJson(statePath, persisted);
-    if (saved)
+    if (saved) {
         savedCheckpoint = persisted;
-    else
+        if (!model->temporaryTypography()) {
+            const auto settings = storage::readJsonFile(paths_.preferences());
+            if (settings.status == storage::ReadStatus::Ok || settings.status == storage::ReadStatus::Missing) {
+                auto next = settings.object;
+                appearance::rememberTextLayout(next, state);
+                if (next != settings.object && !storage::writeJson(paths_.preferences(), next)) {
+                    diagnostic("last-text-layout-unsaved", {}, false);
+                }
+            }
+        }
+    } else {
         diagnostic("local-save-failed");
+    }
     return saved;
 }
 }

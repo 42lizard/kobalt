@@ -122,7 +122,17 @@ QString family(FamilyIndex index, const QString &missing = {}) {
 }
 QFont sizedFont(const QString &family, int pixels) {
     QFont font(family);
+    // Draw unhinted, as the private FreeType path does, so both paths keep
+    // the letters' shapes and widths. At 212 ppi and above, hinting distorts
+    // more than it sharpens on e-paper.
+    font.setHintingPreference(QFont::PreferNoHinting);
     font.setWeight(QFont::Normal);
+    // Set every face attribute, so a painter or widget never fills one in
+    // from the widget font. Nickel's style sheet makes check boxes italic.
+    font.setStyle(QFont::StyleNormal);
+    font.setUnderline(false);
+    font.setOverline(false);
+    font.setStrikeOut(false);
     if (pixels > 0)
         font.setPixelSize(pixels);
     return font;
@@ -228,12 +238,26 @@ int interfaceWeight() {
     return registration().steps < 0 ? requestedSteps : registration().steps;
 }
 QFont renewedFont(const QFont &font) {
-    // A copy shares the loaded faces. Build a new font from the description.
+    // A copy shares the loaded faces, so build a new font from the attributes.
+    // Qt 5.2 cannot read back its own description once a font has a hinting
+    // preference, so the description is not used.
     QFont renewed(font.family());
-    renewed.fromString(font.toString());
-    // Qt 5.2 does not restore a pixel size from the description.
     if (font.pixelSize() > 0)
         renewed.setPixelSize(font.pixelSize());
+    else if (font.pointSizeF() > 0)
+        renewed.setPointSizeF(font.pointSizeF());
+    renewed.setWeight(font.weight());
+    renewed.setStyle(font.style());
+    renewed.setUnderline(font.underline());
+    renewed.setStrikeOut(font.strikeOut());
+    renewed.setFixedPitch(font.fixedPitch());
+    renewed.setStyleHint(font.styleHint(), font.styleStrategy());
+    renewed.setStretch(font.stretch());
+    renewed.setCapitalization(font.capitalization());
+    renewed.setLetterSpacing(font.letterSpacingType(), font.letterSpacing());
+    renewed.setWordSpacing(font.wordSpacing());
+    renewed.setKerning(font.kerning());
+    renewed.setHintingPreference(font.hintingPreference());
     return renewed;
 }
 void refreshInterfaceText(QWidget *root) {
@@ -254,6 +278,35 @@ void refreshInterfaceText(QWidget *root) {
         widget->update();
     }
 }
+namespace {
+class UnhintedFonts final : public QObject {
+public:
+    explicit UnhintedFonts(QWidget *window) : QObject(window), window(window) {}
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() != QEvent::FontChange && event->type() != QEvent::Polish)
+            return false;
+        auto *widget = qobject_cast<QWidget *>(object);
+        if (!widget || widget->font().hintingPreference() == QFont::PreferNoHinting || widget->window() != window)
+            return false;
+        // Setting the font again sends another font change, which now matches.
+        auto font = widget->font();
+        font.setHintingPreference(QFont::PreferNoHinting);
+        widget->setFont(font);
+        return false;
+    }
+
+private:
+    QWidget *window;
+};
+}
+int opticalCenterShift(const QFont &first, const QFont &last) {
+    const QFontMetricsF top(first), bottom(last);
+    const qreal capitals = top.tightBoundingRect(QStringLiteral("H")).height();
+    return qRound((top.ascent() - capitals - bottom.descent()) / 2);
+}
+void keepInterfaceUnhinted(QWidget *window) {
+    QCoreApplication::instance()->installEventFilter(new UnhintedFonts(window));
+}
 QFont interfaceFont(int pixels) {
     return sizedFont(family(Sans), pixels);
 }
@@ -268,6 +321,7 @@ QFont captionFont(int pixels) {
 }
 QFont brandFont(int pixels, bool italic) {
     QFont font(family(Serif, "serif"));
+    font.setHintingPreference(QFont::PreferNoHinting);
     font.setPixelSize(pixels);
     font.setWeight(QFont::Normal);
     font.setItalic(italic);

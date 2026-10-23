@@ -30,11 +30,15 @@ class NickelPositionCodec;
 inline constexpr auto publisherSansFontFace = "NV Legible Next";
 // Bundled face for the generic monospace family.
 inline constexpr auto monospaceFontFace = "IBM Plex Mono";
+// Bundled face for MathML and the generic math family.
+inline constexpr auto mathFontFace = "Noto Sans Math";
 // Bundled faces, in order, for characters that the reading font lacks.
+// Text faces precede Math so its letter glyphs cannot interrupt script shaping.
+// Math precedes CJK so shared mathematical symbols keep their math metrics.
 // The CJK face has full coverage and localized glyphs selected by HarfBuzz
 // from the book or element language. Untagged text uses its Japanese forms.
 inline constexpr auto fallbackFontFaces =
-    "Noto Serif|Noto Sans Math|Noto Serif CJK JP|Noto Naskh Arabic|Noto Serif Hebrew|Noto Serif Armenian|Noto Serif Georgian|Noto Serif Devanagari|Noto Serif Bengali|Noto Serif Tamil|Noto Serif Thai";
+    "Noto Serif|Noto Naskh Arabic|Noto Serif Hebrew|Noto Serif Armenian|Noto Serif Georgian|Noto Serif Devanagari|Noto Serif Bengali|Noto Serif Tamil|Noto Serif Thai|Noto Sans Math|Noto Serif CJK JP";
 struct ReaderSource;
 enum class OpeningStage { Content, Text, Styles, Pages, Ready };
 using OpeningProgress = std::function<void(OpeningStage, int)>;
@@ -198,7 +202,9 @@ public:
     QString position() const;
     QString title() const;
     QString author() const;
-    QImage coverThumbnail() const;
+    // Decodes the host cover first, then the publication cover, within the
+    // requested size and 4 million pixels. Empty means neither is usable.
+    QImage coverImage(QSize maximumSize, const QString &preferredPath = {}) const;
     QVector<ChapterLink> chapters() const;
     void setChapters(QVector<ChapterLink> contents, QVector<ChapterLink> graph);
     QVector<ChapterLink> chapterGraph() const;
@@ -265,7 +271,7 @@ private:
     int domVersion_ = 0;
     QString hyphenation_ = "off";
     bool darkMode_ = false;
-    bool smoothImages_ = true, hideNonlinearFragments_ = false;
+    bool hideNonlinearFragments_ = false;
     QMap<int, QImage> cache_;
     // One retired page, owned only by this model. Never retain client images.
     QImage spareImage_;

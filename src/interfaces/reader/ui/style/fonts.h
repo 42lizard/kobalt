@@ -1,7 +1,6 @@
 #pragma once
 #include "metrics.h"
 #include <QFont>
-#include <QJsonObject>
 
 class QWidget;
 namespace kobalt {
@@ -21,6 +20,14 @@ bool initializeInterfaceFonts(const AssetBundle &assets, bool *changed = nullptr
 bool initializeOpeningFonts(const AssetBundle &assets);
 // Register bundled faces; never change Nickel's application font.
 QFont interfaceFont(int pixels = -1);
+// How far above its line box centre a block of text must sit to look centred:
+// half of the room above the first line's capitals minus the room below the
+// last line's baseline. Line boxes include descender room, so centring them
+// leaves the letters low.
+int opticalCenterShift(const QFont &first, const QFont &last);
+// Keep every widget in this window unhinted. Qt 5.2 polishes a style sheet
+// font with the default hinting, which drops the interface fonts' preference.
+void keepInterfaceUnhinted(QWidget *window);
 QFont chromeFont(int pixels = -1);
 QFont brandFont(int pixels, bool italic = false);
 // Uppercase, spaced monospace for notes, counts and section captions.
@@ -30,11 +37,8 @@ inline QString interfaceFontFamily() {
 }
 
 // Interface text weight in steps of 1/256 em, the unit of the reading weight
-// setting. Settings > Advanced adds three steps: IBM Plex Medium is too heavy.
+// setting. Kobalt always adds three steps; IBM Plex Medium is too heavy.
 inline constexpr int heavierTextSteps = 3;
-inline int interfaceWeightSteps(const QJsonObject &preferences) {
-    return preferences.value("heavier_interface_text").toBool(true) ? heavierTextSteps : 0;
-}
 // Replaces the registered faces with faces of this weight. Text drawn
 // afterwards uses them; call refreshInterfaceText() for widgets already
 // shown. Returns whether the faces changed. Before the first font is used,

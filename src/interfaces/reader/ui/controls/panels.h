@@ -12,6 +12,22 @@ public:
 protected:
     void paintEvent(QPaintEvent *) override;
 };
+// A percentage bar. Value changes queue only the changed fill for painting.
+class ProgressBar final : public QWidget {
+public:
+    explicit ProgressBar(QWidget *parent);
+    int value() const {
+        return percent;
+    }
+    void setValue(int value);
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+
+private:
+    int percent = 0;
+    QRect fillRect(int value) const;
+};
 class Panel : public QFrame {
 public:
     explicit Panel(QWidget *parent = nullptr, Edges separators = {});
@@ -32,6 +48,12 @@ public:
         dividers = edges;
         update();
     }
+    // The palette role of the panel's paper. The theme sets the palette on
+    // every widget, so a style sheet background would not last.
+    void setFill(QPalette::ColorRole role) {
+        fill = role;
+        update();
+    }
 
 protected:
     void paintEvent(QPaintEvent *) override;
@@ -39,6 +61,7 @@ protected:
 private:
     Edges separators, dividers;
     bool softEdges = false;
+    QPalette::ColorRole fill = QPalette::Window;
     int edgeWidth = 0; // Zero follows the current density; positive values are explicit widths.
 };
 
@@ -58,6 +81,12 @@ private:
     bool warm = false;
 };
 
+// Draws a battery whose body fills `body`; the terminal sits outside it. A
+// negative percent draws an empty battery. Insets scale with the body height.
+void paintBattery(QPainter &painter, const QRectF &body, int percent, bool charging, const QColor &ink,
+                  const QColor &paper);
+// The width of the battery drawn for a body of this height, terminal included.
+qreal batteryWidth(qreal bodyHeight);
 class BatteryIndicator : public QLabel {
 public:
     explicit BatteryIndicator(QWidget *parent);
