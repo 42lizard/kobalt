@@ -26,6 +26,9 @@ public:
     void setDark(bool dark);
     library::LibraryView *library();
     WidgetCanvas *libraryCanvas();
+    WidgetCanvas *openingCanvas() const { return openingSurface; }
+    // Separate the library from Android's system bars; the reader stays fullscreen.
+    void setLibrarySystemBarBorders(bool visible);
     // By default the library fills its canvas at the display's pixel ratio,
     // as on Android. A host that scales the reader itself, like the desktop
     // app, gives the library the same reader size and scale.
@@ -53,7 +56,7 @@ private:
     std::unique_ptr<ReaderOpeningView> opening;
     PresentationFactory presentation;
     library::Store &store;
-    WidgetCanvas *canvas = nullptr;
+    WidgetCanvas *canvas = nullptr, *openingSurface = nullptr;
     library::LibraryView *view = nullptr;
     bool dark = false, hostScaled = false, singleBooksAreCopies = false;
     struct Scale {

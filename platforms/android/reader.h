@@ -40,6 +40,8 @@ signals:
     void opened();
     void openingProgress(int percent);
     void failed(QString error);
+    // Emitted before shutdown can remove the reader from its canvas.
+    void retiring();
     void closed();
     void exitRequested();
 
@@ -57,6 +59,8 @@ private:
     QPointer<ReaderWindow> window_;
     std::shared_ptr<SourceLease> lease;
     void begin(const QString &path, QSize pixels);
+    bool retirementNotified = false;
+    void notifyRetirement();
     void retire();
     void release();
 };

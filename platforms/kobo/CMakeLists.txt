@@ -75,6 +75,7 @@ string(APPEND embedded "{NULL, NULL, 0}};\n")
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.h" CONTENT "${embedded}" @ONLY)
 
 file(GLOB_RECURSE shared CONFIGURE_DEPENDS "${source}/*.cpp" "${source}/*.h")
+list(FILTER shared EXCLUDE REGEX "/(library|interfaces/library)/")
 file(GLOB adapters CONFIGURE_DEPENDS "common/*.cpp" "common/*.h" "qt${KOBALT_QT_MAJOR}/*.cpp" "qt${KOBALT_QT_MAJOR}/*.h" "display/*.cpp")
 add_library(kobalt MODULE ${shared} ${adapters} common/install.c "${hooks}/nh.c" "${hooks}/resources.c"
     "${CMAKE_CURRENT_BINARY_DIR}/nhplugin.h")

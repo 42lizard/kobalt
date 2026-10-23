@@ -89,9 +89,10 @@ void ListRow::setLeading(const QString &text, int indent) {
     arrange();
 }
 void ListRow::setLeadingIcon(ControlIcon icon) {
-    if (leadingIcon == icon)
+    if (hasLeadingIcon && leadingIcon == icon)
         return;
     leadingIcon = icon;
+    hasLeadingIcon = true;
     setIconConfiguration({icon, IconRendition::Action});
     arrange();
     update();
@@ -254,7 +255,7 @@ void ListRow::arrange() {
         return;
     arranging = true;
     const int end = width() - (action ? int(m::chrome::cellWidth) : 0) - m::list::inset;
-    const int lead = leadingIcon ? int(m::control::iconSize + m::chrome::selectorGap)
+    const int lead = hasLeadingIcon ? int(m::control::iconSize + m::chrome::selectorGap)
                      : leadingText.isEmpty() ? 0 : int(m::list::leadingWidth);
     const auto *trailingCaption = accessory.caption();
     const int trail = trailingCaption ? qMax(trailingCaption->reservedWidth, trailing->textWidth(trailingCaption->text))
@@ -278,7 +279,7 @@ void ListRow::arrange() {
         line += count;
         item.first->setText(count > 1 ? item.second : item.first->elidedText(item.second, item.first->width()));
     }
-    leading->setVisible(!leadingIcon && !leadingText.isEmpty());
+    leading->setVisible(!hasLeadingIcon && !leadingText.isEmpty());
     leading->setText(leadingText);
     leading->setGeometry(m::list::inset, 0, lead, height() - m::control::border);
     trailing->setVisible(trailingCaption != nullptr);
@@ -301,7 +302,7 @@ void ListRow::paintEvent(QPaintEvent *) {
     if (!current && isEnabled() && isDown())
         paper = darkTheme(this) ? QColor("#333333") : QColor("#dddddd");
     painter.fillRect(rect(), paper);
-    if (leadingIcon) {
+    if (hasLeadingIcon) {
         const int side = m::control::iconSize;
         painter.save();
         if (!isEnabled())

@@ -9,6 +9,10 @@
 #include "platforms/desktop/services.h"
 #include "platforms/android/start_screen.h"
 #include "platforms/android/canvas.h"
+#include "platforms/android/reader.h"
+#include "platforms/android/window_geometry.h"
+#include <QStackedLayout>
+#include "platforms/android/boox_frame_queue.h"
 #include "interfaces/library/library_view.h"
 #include "library/library_store.h"
 #include "reading/reading_density.h"
@@ -3103,6 +3107,114 @@ private slots:
         QVERIFY(previous);
         QTest::mouseClick(previous, Qt::LeftButton);
         QTRY_VERIFY(!fixture.state().value("busy").toBool() && fixture.state().value("page").toInt() == page);
+    }
+    void booxRetirementFrame() {
+        QTemporaryDir directory;
+        storage::Paths paths{directory.path()};
+        QVERIFY(storage::writeJson(paths.preferences(), {{"default_menu_view", "none"}, {"highlight_help_seen", true}}));
+        android::ReaderController controller(paths, engineFontInputs(*assets, {}, {}, {}),
+                                             placeholderFontFamily(*assets, *copies), desktop::readerServices,
+                                             [](Qt::ScreenOrientation) {});
+        const auto drain = qScopeGuard([&] {
+            controller.close();
+            if (!QTest::qWaitFor([&] { return controller.idle(); }, 10000))
+                QTest::qFail("Reader did not drain after retirement", __FILE__, __LINE__);
+        });
+        QWidget window;
+        auto *layout = new QStackedLayout(&window);
+        layout->setContentsMargins(0, 0, 0, 0);
+        auto *canvas = new android::WidgetCanvas(&window);
+        layout->addWidget(canvas);
+        window.resize(600, 800);
+        window.show();
+        android::SurfaceHandoff handoff(window);
+        connect(&controller, &android::ReaderController::opened, &window, [&] {
+            canvas->setContent(controller.window());
+            canvas->fitContent();
+            controller.window()->show();
+        });
+        QSignalSpy opened(&controller, &android::ReaderController::opened);
+        QSignalSpy retiring(&controller, &android::ReaderController::retiring);
+        bool visibleAtRetirement = false;
+        QImage lastFrame;
+        connect(&controller, &android::ReaderController::retiring, &window, [&] {
+            visibleAtRetirement = controller.window() && controller.window()->isVisible();
+            handoff.hold();
+            lastFrame = window.grab().toImage();
+        });
+        controller.open(book, QSize(600, 800));
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 10000);
+        QTRY_VERIFY(controller.window()->readyForPresentation());
+        QCoreApplication::processEvents();
+        canvas->viewport()->repaint();
+        const auto before = window.grab().toImage();
+        int beforeInk = 0;
+        for (int y = 0; y < before.height(); ++y)
+            for (int x = 0; x < before.width(); ++x)
+                beforeInk += qGray(before.pixel(x, y)) < 100;
+        QVERIFY(beforeInk > 100);
+        handoff.capture();
+        controller.window()->close();
+        QTRY_VERIFY_WITH_TIMEOUT(controller.idle(), 10000);
+        QCOMPARE(retiring.count(), 1);
+        QVERIFY(visibleAtRetirement);
+        QVERIFY(handoff.active());
+        QVERIFY(!lastFrame.isNull());
+        int ink = 0;
+        for (int y = 0; y < lastFrame.height(); ++y)
+            for (int x = 0; x < lastFrame.width(); ++x)
+                ink += qGray(lastFrame.pixel(x, y)) < 100;
+        QVERIFY(ink > 100);
+    }
+    void booxMenuDismissalRefresh_data() {
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("light") << false;
+        QTest::newRow("dark") << true;
+    }
+    void booxMenuDismissalRefresh() {
+        QFETCH(bool, dark);
+        Fixture fixture(dark);
+        QVERIFY(fixture.prepared);
+        auto preferences = storage::readJson(fixture.paths.preferences());
+        preferences["default_menu_view"] = "none";
+        QVERIFY(storage::writeJson(fixture.paths.preferences(), preferences));
+        QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
+        fixture.window.openBook(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 10000);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        auto *reader = fixture.window.readerWindow();
+        auto *canvas = fixture.window.findChild<QGraphicsView *>();
+        QVERIFY(reader && canvas);
+        const QRegion damage(QRect(0, 0, 100, 100));
+        android::takeRefreshFrame(reader, canvas->viewport(), damage);
+        for (int cycle = 0; cycle < 3; ++cycle) {
+            QVERIFY(fixture.press("rrPage"));
+            QTRY_VERIFY(fixture.visible("rrControlsTop"));
+            const auto opening = android::takeRefreshFrame(reader, canvas->viewport(), damage);
+            QCOMPARE(opening.clean, dark);
+            QVERIFY(fixture.press("rrPage"));
+            QTRY_VERIFY(!fixture.visible("rrControlsTop"));
+            QTRY_VERIFY(reader->property("reader_full_flash").toBool());
+            // An unavailable Android surface must retain the cleanup request.
+            bool rejectedClean = false;
+            QVERIFY(!android::prepareRefreshFrame(reader, canvas->viewport(), damage, [&](const auto &frame) {
+                rejectedClean = frame.clean;
+                return false;
+            }));
+            QVERIFY(rejectedClean);
+            QVERIFY(reader->property("reader_full_flash").toBool());
+            android::BooxFrameQueue queue;
+            int cleanFrames = 0;
+            QVERIFY(android::prepareRefreshFrame(reader, canvas->viewport(), damage, [&](const auto &frame) {
+                return queue.prepare(frame, [&](const auto &submitted) {
+                    cleanFrames += submitted.clean;
+                    return true;
+                });
+            }));
+            QCOMPARE(cleanFrames, 1);
+            QVERIFY(!queue.pending());
+            QVERIFY(!android::takeRefreshFrame(reader, canvas->viewport(), damage).clean);
+        }
     }
     void navigation_data() {
         QTest::addColumn<bool>("dark");

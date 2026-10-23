@@ -16,6 +16,10 @@
 #include "interfaces/reader/views/reading_page.h"
 #include "interfaces/reader/panels/bookmark_list.h"
 #include "platforms/android/canvas.h"
+#include "platforms/android/canvas_refresh.h"
+#include "platforms/android/start_screen.h"
+#include "platforms/android/window_geometry.h"
+#include "library/library_store.h"
 #include "platforms/kobo/display/annotation_damage.h"
 #include "platforms/kobo/display/panel_damage.h"
 #include "support/host_presentation.h"
@@ -36,6 +40,8 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QLabel>
+#include <QTemporaryDir>
+#include <QStackedLayout>
 #include <QTest>
 #include <QtMath>
 
@@ -461,7 +467,19 @@ private slots:
         QVERIFY(!view.findChild<QPushButton *>("libraryLeave"));
         QTRY_COMPARE(added, 1);
         QTRY_COMPARE(opened, 1);
+        library::Book book;
+        book.key = "overflow-test";
+        book.title = "The Lantern Keeper";
+        index.books.insert(book.key, book);
+        view.refresh();
+        const auto libraryImage = view.grab().toImage();
         view.findChild<QPushButton *>("libraryMore")->click();
+        auto *menu = dynamic_cast<ui::ModalOverlay *>(view.findChild<QWidget *>("libraryMoreSheet"));
+        QVERIFY(menu && menu->inputBarrier());
+        QCOMPARE(menu->geometry(), view.rect());
+        QVERIFY(view.rect().contains(menu->card()->geometry()));
+        const QRect backdrop(0, 0, ui::px(24), view.height());
+        QVERIFY(view.grab().toImage().copy(backdrop) != libraryImage.copy(backdrop));
         for (const auto &item : {qMakePair("libraryMoreAddFolder", ui::ControlIcon::FolderPlus),
                                   qMakePair("libraryMoreOpenBook", ui::ControlIcon::Dictionary),
                                   qMakePair("libraryMoreFolders", ui::ControlIcon::Folders)}) {
@@ -485,7 +503,18 @@ private slots:
             QCOMPARE(row->titleLabel()->text(), row->text());
         }
         capture("more");
+        QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier, QPoint(ui::px(8), view.height() - ui::px(8)));
+        QVERIFY(!menu->isVisible());
+        QCOMPARE(added, 1);
+        QCOMPARE(opened, 1);
+        view.findChild<QPushButton *>("libraryMore")->click();
+        QVERIFY(menu->isVisible());
+        view.resize(ui::px(1448), ui::px(1072));
+        QCoreApplication::processEvents();
+        QCOMPARE(menu->geometry(), view.rect());
+        QVERIFY(view.rect().contains(menu->card()->geometry()));
         view.findChild<QPushButton *>("libraryMoreFolders")->click();
+        QVERIFY(!menu->isVisible());
         capture("folders");
         checkButton("libraryFoldersAdd", true);
         checkButton("libraryFoldersRescan", false);
@@ -567,6 +596,241 @@ private slots:
         QTRY_VERIFY(pager->isVisible());
         QCOMPARE(counter->text(), QString("1 of 2"));
         QCOMPARE(pages->geometry().bottom() + 1, pager->y());
+    }
+    void libraryCanvasFollowsViewport_data() { variants(); }
+    void libraryCanvasFollowsViewport() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        library::Store store(directory.path(), std::make_shared<library::LocalSource>());
+        QWidget window;
+        window.setWindowFlag(Qt::ExpandedClientAreaHint);
+        auto *layout = new QStackedLayout(&window);
+        layout->setContentsMargins(0, 0, 0, 0);
+        auto *start = new android::StartScreen(test::makeHostPresentation, store);
+        start->setDark(dark);
+        start->setLibrarySystemBarBorders(true);
+        layout->addWidget(start);
+        // Reproduce a landscape Qt window inside a portrait Android surface.
+        window.show();
+        window.resize(1680, 1264);
+        auto *canvas = start->libraryCanvas();
+        auto *view = start->library();
+        for (const auto pixels : {QSize(1264, 1680), QSize(1680, 1264), QSize(1264, 1680), QSize(600, 400)}) {
+            const QMargins safePixels(0, 84, 0, 78);
+            android::fitWindowToSurface(window, pixels, safePixels);
+            const auto ratio = window.devicePixelRatioF();
+            QCOMPARE(window.size(), QSize(qRound(pixels.width() / ratio), qRound(pixels.height() / ratio)));
+            QCOMPARE(window.contentsMargins(), QMargins(0, qCeil(84 / ratio), 0, qCeil(78 / ratio)));
+            QVERIFY(!window.testAttribute(Qt::WA_ContentsMarginsRespectsSafeArea));
+            QVERIFY(android::contentFitsSurface(window, pixels - QSize(0, 84 + 78)));
+            QVERIFY(!android::contentFitsSurface(window, pixels));
+            QCoreApplication::processEvents();
+            QCOMPARE(start->geometry(), window.contentsRect());
+            QTRY_COMPARE(view->size(), canvas->pixelSize());
+            QVERIFY(canvas->viewport()->y() > 0);
+            QVERIFY(canvas->viewport()->geometry().bottom() < canvas->height() - 1);
+            const auto frame = canvas->grab().toImage();
+            const int paper = qGray(view->palette().color(QPalette::Window).rgb());
+            const int rule = qGray(view->palette().color(QPalette::Mid).rgb());
+            const int bottomRows = qCeil((canvas->height() - canvas->viewport()->geometry().bottom() - 1) *
+                                         frame.devicePixelRatio());
+            // Qt antialiases the frame at fractional display scales. Every
+            // pixel must still carry the rule across the whole header width.
+            for (int x = 0; x < frame.width(); ++x) {
+                QVERIFY(qAbs(qGray(frame.pixel(x, 0)) - paper) >= qAbs(rule - paper) / 2);
+                // The final image row can cover only part of a logical pixel.
+                // Measure the rule within the actual bottom frame strip.
+                int contrast = 0;
+                for (int y = frame.height() - bottomRows; y < frame.height(); ++y)
+                    contrast = qMax(contrast, qAbs(qGray(frame.pixel(x, y)) - paper));
+                QVERIFY(contrast >= qAbs(rule - paper) / 2);
+            }
+            QCOMPARE(canvas->sceneRect().size().toSize(), canvas->pixelSize());
+            const auto *more = view->findChild<QWidget *>("libraryMore");
+            QVERIFY(more);
+            QVERIFY(view->rect().contains(more->geometry()));
+            const auto visible = QRectF(QPointF(), canvas->viewport()->size());
+            // Fractional display scales round the scene to a physical pixel.
+            const auto pixel = 1.0 / ratio;
+            QVERIFY(visible.adjusted(-pixel, -pixel, pixel, pixel)
+                        .contains(canvas->viewportTransform().mapRect(QRectF(more->geometry()))));
+            const auto *button = view->findChild<QPushButton *>("libraryChooseFolder");
+            QVERIFY(button);
+            const QRect area(button->mapTo(view, QPoint()), button->size());
+            QVERIFY(area.left() >= 0 && area.right() < view->width());
+            const auto *empty = view->findChild<QScrollArea *>("libraryEmpty");
+            QVERIFY(empty);
+            const auto center = empty->viewport()->mapTo(view, empty->viewport()->rect().center());
+            QVERIFY(qAbs(area.center().x() - center.x()) <= 1);
+        }
+        // Insets change when entering/leaving a book even if surface size stays
+        // the same. Cold launch must reserve them without a fullscreen toggle.
+        const auto pixels = QSize(1264, 1680);
+        android::fitWindowToSurface(window, pixels, {});
+        QCOMPARE(window.contentsMargins(), QMargins());
+        QCoreApplication::processEvents();
+        QCOMPARE(start->geometry(), window.rect());
+        android::fitWindowToSurface(window, pixels, QMargins(0, 84, 0, 78));
+        QCoreApplication::processEvents();
+        QCOMPARE(start->geometry(), window.contentsRect());
+        QVERIFY(start->y() > 0);
+        const auto previous = window.size();
+        android::fitWindowToSurface(window, QSize(0, 1680));
+        android::fitWindowToSurface(window, QSize(-1, -1));
+        QCOMPARE(window.size(), previous);
+        start->showOpening();
+        QVERIFY(!canvas->isVisible());
+        start->showLibrary();
+        QVERIFY(canvas->isVisible());
+        start->setLibrarySystemBarBorders(false);
+        QTRY_COMPARE(canvas->viewport()->y(), 0);
+        QCOMPARE(canvas->viewport()->height(), canvas->height());
+    }
+    void booxAppCanvases_data() { variants(); }
+    void booxAppCanvases() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        QTemporaryDir directory;
+        library::Store store(directory.path(), std::make_shared<library::LocalSource>());
+        bool available = false;
+        QVector<android::RefreshFrame> frames;
+        android::StartScreen start(test::makeHostPresentation, store);
+        start.setDark(dark);
+        start.resize(600, 800);
+        auto attach = [&](android::WidgetCanvas *canvas) {
+            new android::CanvasRefresh(canvas, [&] { return available; }, [&](const auto &frame) {
+                frames.append(frame);
+                return available;
+            });
+        };
+        attach(start.libraryCanvas());
+        start.show();
+        QTest::qWait(30);
+        QVERIFY(frames.isEmpty());
+        available = true;
+        start.libraryCanvas()->viewport()->repaint();
+        QTRY_VERIFY(!frames.isEmpty());
+        QVERIFY(frames.last().clean);
+        QVERIFY(frames.last().textPixels.isEmpty());
+        frames.clear();
+        start.libraryCanvas()->viewport()->repaint(QRect(20, 20, 30, 30));
+        QCOMPARE(frames.size(), 1);
+        QVERIFY(!frames.first().clean);
+        QVERIFY(!frames.first().text);
+        // Loading progress uses the same Surface transport, including a second open.
+        for (int cycle = 0; cycle < 2; ++cycle) {
+            start.showOpening();
+            auto *opening = start.openingCanvas();
+            QVERIFY(opening);
+            attach(opening);
+            QCoreApplication::processEvents();
+            frames.clear();
+            opening->viewport()->repaint();
+            QVERIFY(!frames.isEmpty());
+            QVERIFY(!frames.last().text);
+            QVERIFY(frames.last().textPixels.isEmpty());
+            QCOMPARE(opening->content->size(), opening->pixelSize());
+            auto *dialog = opening->content->findChild<QDialog *>("rrOpening");
+            QVERIFY(dialog);
+            QVERIFY(!dialog->isWindow());
+            QVERIFY(!dialog->windowHandle());
+            QCOMPARE(dialog->geometry(), opening->content->rect());
+            for (const auto *name : {"rrOpeningBrand", "rrOpeningLabel", "rrOpeningProgress"}) {
+                const auto *item = dialog->findChild<QWidget *>(name);
+                QVERIFY(item);
+                QVERIFY(dialog->rect().contains(item->geometry()));
+            }
+            frames.clear();
+            start.setProgress(70);
+            QTRY_VERIFY(!frames.isEmpty());
+            for (const auto &frame : frames) {
+                QVERIFY(!frame.text);
+                QVERIFY(frame.textPixels.isEmpty());
+            }
+            frames.clear();
+            start.showLibrary();
+            QTRY_VERIFY(!frames.isEmpty());
+            QVERIFY(frames.first().clean);
+            QTest::qWait(80);
+            QCOMPARE(std::count_if(frames.begin(), frames.end(), [](const auto &frame) { return frame.clean; }), 1);
+        }
+    }
+    void booxLibraryHandoff_data() { variants(); }
+    void booxLibraryHandoff() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        QTemporaryDir directory;
+        library::Store store(directory.path(), std::make_shared<library::LocalSource>());
+        QVector<android::RefreshFrame> frames;
+        QWidget window;
+        auto *layout = new QStackedLayout(&window);
+        layout->setContentsMargins(0, 0, 0, 0);
+        auto *reader = new QWidget;
+        reader->setAutoFillBackground(true);
+        auto palette = reader->palette();
+        palette.setColor(QPalette::Window, QColor(80, 90, 100));
+        reader->setPalette(palette);
+        auto *start = new android::StartScreen(test::makeHostPresentation, store);
+        start->setDark(dark);
+        layout->addWidget(reader);
+        layout->addWidget(start);
+        window.resize(600, 800);
+        window.show();
+        QCoreApplication::processEvents();
+        new android::CanvasRefresh(start->libraryCanvas(), [] { return true; }, [&](const auto &frame) {
+            frames.append(frame);
+            return true;
+        });
+        android::SurfaceHandoff handoff(window);
+        const auto previous = window.grab().toImage();
+        QVector<android::RefreshFrame> heldFrames;
+        handoff.hold([&](android::WidgetCanvas *surface) {
+            new android::CanvasRefresh(surface, [] { return true; }, [&](const auto &frame) {
+                heldFrames.append(frame);
+                return true;
+            }, false);
+        });
+        QVERIFY(!heldFrames.isEmpty());
+        for (const auto &frame : heldFrames)
+            QVERIFY(!frame.clean);
+        // Reader deletion can precede asynchronous resource cleanup.
+        delete reader;
+        start->showLibrary();
+        QCoreApplication::processEvents();
+        QVERIFY(handoff.active());
+        QVERIFY(window.updatesEnabled());
+        QVERIFY(frames.isEmpty());
+        QCOMPARE(window.grab().toImage(), previous);
+        QVERIFY(!handoff.present(false));
+        // Android reports final content bounds before Qt applies its insets.
+        const auto ratio = window.devicePixelRatioF();
+        const QSize expected(qRound(window.width() * ratio), qRound((window.height() - 85) * ratio));
+        QVERIFY(!android::contentFitsSurface(window, expected));
+        QVERIFY(!android::contentFitsSurface(window, {}));
+        // Restore the bars and lay out the final safe area behind the snapshot.
+        window.setContentsMargins(0, 44, 0, 41);
+        QVERIFY(android::contentFitsSurface(window, expected));
+        layout->activate();
+        QCoreApplication::processEvents();
+        QVERIFY(frames.isEmpty());
+        QCOMPARE(window.grab().toImage().pixelColor(window.width() / 2, window.height() / 2),
+                 previous.pixelColor(window.width() / 2, window.height() / 2));
+        layout->setCurrentWidget(start);
+        QVERIFY(handoff.present(true));
+        QTRY_VERIFY_WITH_TIMEOUT(!frames.isEmpty(), 1000);
+        QVERIFY(frames.first().clean);
+        QCOMPARE(start->geometry(), window.contentsRect());
+        QCOMPARE(start->library()->size(), start->libraryCanvas()->pixelSize());
+        QTest::qWait(80);
+        const int count = frames.size();
+        QVERIFY(!handoff.present(true));
+        QTest::qWait(80);
+        QCOMPARE(frames.size(), count);
     }
     void libraryOnboardingLayout_data() { variants(); }
     void libraryOnboardingLayout() {

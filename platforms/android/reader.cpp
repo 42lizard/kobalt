@@ -73,6 +73,7 @@ void ReaderController::open(const QString &path, QSize pixels) {
 }
 void ReaderController::begin(const QString &path, QSize pixels) {
     phase = Phase::Opening;
+    retirementNotified = false;
     current = path;
     lease = std::make_shared<SourceLease>();
     source = native::openLocalPublication(path);
@@ -134,6 +135,10 @@ void ReaderController::begin(const QString &path, QSize pixels) {
             window->resize(pixels);
             guard->window_ = window;
             window->finished = [guard](std::unique_ptr<ReaderSession> retained) {
+                // Show the host's captured frame before this close event hides
+                // the reader and queued resource cleanup begins.
+                if (guard)
+                    guard->notifyRetirement();
                 retained.reset();
                 if (guard)
                     QTimer::singleShot(0, guard, [guard] {
@@ -177,11 +182,17 @@ void ReaderController::close() {
     else
         retire();
 }
+void ReaderController::notifyRetirement() {
+    if (std::exchange(retirementNotified, true))
+        return;
+    emit retiring();
+}
 void ReaderController::retire() {
     if (phase == Phase::Closing)
         return;
     const bool reading = phase == Phase::Reading;
     phase = Phase::Closing;
+    notifyRetirement();
     QPointer<ReaderController> guard(this);
     if (reading && window_)
         window_->prepareShutdown([guard] {

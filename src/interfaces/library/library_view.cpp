@@ -542,18 +542,17 @@ protected:
     }
 };
 
-// The More choices, dropped below the header as the sort choices drop below
-// the toolbar.
-class MoreSheet final : public ui::Panel {
+// The More choices use the same input barrier and backdrop as book actions.
+class MoreSheet final : public ui::ModalOverlay {
 public:
-    explicit MoreSheet(QWidget *parent) : ui::Panel(parent) {
+    explicit MoreSheet(QWidget *parent) : ui::ModalOverlay(parent) {
         setObjectName("libraryMoreSheet");
-        auto *rows = new QVBoxLayout(this);
-        rows->setContentsMargins(0, 0, 0, c::heavyRule);
+        auto *rows = card()->rows();
+        rows->setContentsMargins(c::heavyRule, c::heavyRule, c::heavyRule, c::heavyRule);
         rows->setSpacing(0);
         const auto row = [this, rows](const char *name, const QString &title, ui::ControlIcon icon,
                                       ui::ListRow::Accessory accessory) {
-            auto *created = new ui::ListRow(this);
+            auto *created = new ui::ListRow(card());
             created->setObjectName(name);
             created->setTitle(title);
             created->setAccessory(accessory);
@@ -566,16 +565,10 @@ public:
         openBook = row("libraryMoreOpenBook", strings::get("library.open_book"), ui::ControlIcon::Dictionary, {});
         folders = row("libraryMoreFolders", strings::get("library.folders"), ui::ControlIcon::Folders,
                       ui::ListRow::Chevron{});
-        hide();
+        setDimmed(true);
+        setProperty("reader_standard_modal", true);
     }
     ui::ListRow *addFolder, *openBook, *folders;
-
-protected:
-    void paintEvent(QPaintEvent *event) override {
-        ui::Panel::paintEvent(event);
-        QPainter painter(this);
-        painter.fillRect(0, height() - c::heavyRule, width(), c::heavyRule, palette().color(QPalette::WindowText));
-    }
 };
 
 // The folders the library scans, with the controls to add, remove and rescan.
@@ -1220,6 +1213,7 @@ void LibraryView::showMoreSheet() {
     closeOverlay();
     if (!moreSheet) {
         moreSheet = new MoreSheet(this);
+        moreSheet->dismissed = [this] { closeOverlay(); };
         connect(moreSheet->addFolder, &QPushButton::clicked, this, [this] {
             closeOverlay();
             if (addFolder)
@@ -1236,9 +1230,11 @@ void LibraryView::showMoreSheet() {
         });
         setDark(dark);
     }
-    moreSheet->setGeometry(0, c::actionHeight, width(), moreSheet->sizeHint().height());
+    moreSheet->setGeometry(rect());
+    moreSheet->fitCard();
     moreSheet->show();
     moreSheet->raise();
+    moreSheet->setFocus();
 }
 void LibraryView::showFolders() {
     if (!folderPage) {

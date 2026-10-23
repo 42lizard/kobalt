@@ -3,9 +3,12 @@
 #include "library/library_store.h"
 #include "canvas.h"
 #include "interfaces/reader/views/opening.h"
+#include "interfaces/reader/ui/style/metrics.h"
+#include "interfaces/reader/ui/style/theme.h"
 #include "support/strings.h"
 #include <QDialog>
 #include <QResizeEvent>
+#include <QVBoxLayout>
 
 namespace kobalt::android {
 StartScreen::StartScreen(PresentationFactory presentation, library::Store &store, QWidget *parent)
@@ -78,6 +81,11 @@ WidgetCanvas *StartScreen::libraryCanvas() {
     buildLibrary();
     return canvas;
 }
+void StartScreen::setLibrarySystemBarBorders(bool visible) {
+    const int width = visible ? qMax(1, qRound(int(ui::metrics::control::border) / canvas->devicePixelRatioF())) : 0;
+    ui::readerStyle(canvas, QString("QGraphicsView{border:0;border-top:%1px solid palette(mid);border-bottom:%1px solid palette(mid);}").arg(width));
+    ui::applyReaderPalette(canvas, view->palette());
+}
 void StartScreen::showLibrary() {
     buildLibrary();
     setCurrentWidget(canvas);
@@ -101,6 +109,10 @@ void StartScreen::setDark(bool value) {
     dark = value;
     if (view)
         view->setDark(dark);
+    if (canvas) {
+        canvas->setProperty("reader_dark", dark);
+        ui::applyReaderPalette(canvas, view->palette());
+    }
 }
 void StartScreen::fitLibrary() {
     if (canvas && !hostScaled)
@@ -120,21 +132,38 @@ void StartScreen::setLibraryScale(QSize pixels, qreal factor, bool nativePixels,
 void StartScreen::resizeEvent(QResizeEvent *event) {
     QStackedWidget::resizeEvent(event);
     fitLibrary();
+    if (openingSurface)
+        openingSurface->fitContent();
 }
 StartScreen::~StartScreen() {
     store.changed = {};
 }
 void StartScreen::showOpening() {
     // Recreate the view to reset progress and the delayed hint for each book.
-    if (opening)
-        removeWidget(opening->window());
-    opening = createEmbeddedOpening(this, presentation);
+    if (openingSurface) {
+        removeWidget(openingSurface);
+        opening.reset();
+        delete openingSurface;
+    }
+    openingSurface = new WidgetCanvas(this);
+    openingSurface->setObjectName("androidOpeningCanvas");
+    // A parentless QDialog can become a native Android window before proxy
+    // embedding, applying Android's pixel ratio to the scene dimensions again.
+    auto *content = new QWidget;
+    content->setProperty("reader_dark", dark);
+    auto *body = new QVBoxLayout(content);
+    body->setContentsMargins(0, 0, 0, 0);
+    opening = createEmbeddedOpening(content, presentation);
     connect(opening->window(), &QDialog::rejected, this, &StartScreen::exitRequested);
-    addWidget(opening->window());
-    setCurrentWidget(opening->window());
+    body->addWidget(opening->window());
+    openingSurface->setContent(content);
+    openingSurface->viewportResized = [this] { openingSurface->fitContent(); };
+    addWidget(openingSurface);
+    setCurrentWidget(openingSurface);
+    openingSurface->fitContent();
 }
 void StartScreen::setProgress(int percent) {
-    if (opening && currentWidget() == opening->window())
+    if (opening && currentWidget() == openingSurface)
         opening->setProgress(percent);
 }
 }

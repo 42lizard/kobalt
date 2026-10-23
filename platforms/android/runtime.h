@@ -2,15 +2,20 @@
 #include <QObject>
 #include <QString>
 #include <QRegion>
+#include <QSize>
+#include <QMargins>
 #include <functional>
 
 namespace kobalt::android {
 // Install on Qt's GUI thread. Delivery stops when owner is destroyed.
 void setCallbacks(QObject *owner, std::function<void(QString)> openBook, std::function<void(int)> turnPage,
-                  std::function<void(QString, QString)> folderChosen = {});
+                  std::function<void(QString, QString)> folderChosen = {},
+                  std::function<void(QSize, QMargins)> surfaceResized = {});
 void setPageButtonsAvailable(bool available);
 void activity(const char *method);
 bool readingGeometryReady();
+bool libraryGeometryReady();
+QSize libraryContentSize();
 int screenDensity();
 bool refreshAvailable();
 bool prepareRefreshRegions(const QRegion &uiPixels, const QRegion &textPixels, bool clean);

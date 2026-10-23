@@ -42,10 +42,15 @@ public class KobaltActivity extends QtActivity {
     private boolean ready = false;
     private boolean reading = false;
     private volatile boolean readingGeometryReady = false;
+    private volatile boolean libraryGeometryReady = false;
+    private volatile long libraryContentSize;
+    private int surfaceWidth, surfaceHeight;
+    private int surfaceLeft, surfaceTop, surfaceRight, surfaceBottom;
     private String pendingPath;
     private native void openBook(String path);
     private native boolean turnPage(int direction);
     private native void folderChosen(String uri, String label);
+    private native void surfaceResized(int width, int height, int left, int top, int right, int bottom);
     private final HashSet<Integer> pageKeys = new HashSet<>();
 
     @Override public void setRequestedOrientation(int orientation) {
@@ -86,6 +91,7 @@ public class KobaltActivity extends QtActivity {
                     if ((animation.getTypeMask() & WindowInsets.Type.systemBars()) != 0) {
                         barAnimations.add(animation);
                         readingGeometryReady = false;
+                        libraryGeometryReady = false;
                     }
                 }
                 @Override public WindowInsets onProgress(WindowInsets insets, List<WindowInsetsAnimation> running) {
@@ -99,18 +105,49 @@ public class KobaltActivity extends QtActivity {
         // Publish readiness only after Android has laid out the final insets.
         // Qt reads this snapshot from its own GUI thread.
         decor.getViewTreeObserver().addOnPreDrawListener(() -> {
-            if (booxRefresh != null) booxRefresh.publish(decor, reading && resumed && hasWindowFocus());
+            // Qt may still have the launch orientation's fullscreen dimensions.
+            // Publish actual activity bounds once ready and whenever they change.
+            final int width = decor.getWidth(), height = decor.getHeight();
+            if (booxRefresh != null) booxRefresh.publish(decor, resumed && hasWindowFocus());
             WindowInsets insets = decor.getRootWindowInsets();
             boolean hidden = false;
+            int left = 0, top = 0, right = 0, bottom = 0;
             if (insets != null) {
-                if (Build.VERSION.SDK_INT >= 30) hidden = !insets.isVisible(WindowInsets.Type.systemBars());
+                // systemBars also includes a caption bar, absent on handhelds.
+                // Its invisibility must not keep the Library handoff waiting.
+                if (Build.VERSION.SDK_INT >= 30) hidden = !insets.isVisible(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
                 else {
                     android.view.DisplayCutout cutout = insets.getDisplayCutout();
                     hidden = insets.getSystemWindowInsetTop() <= (cutout == null ? 0 : cutout.getSafeInsetTop())
                         && insets.getSystemWindowInsetBottom() <= (cutout == null ? 0 : cutout.getSafeInsetBottom());
                 }
+                if (Build.VERSION.SDK_INT >= 30) {
+                    android.graphics.Insets safe = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                    left = safe.left; top = safe.top; right = safe.right; bottom = safe.bottom;
+                } else {
+                    left = insets.getSystemWindowInsetLeft(); top = insets.getSystemWindowInsetTop();
+                    right = insets.getSystemWindowInsetRight(); bottom = insets.getSystemWindowInsetBottom();
+                    android.view.DisplayCutout cutout = insets.getDisplayCutout();
+                    if (cutout != null) {
+                        left = Math.max(left, cutout.getSafeInsetLeft());
+                        top = Math.max(top, cutout.getSafeInsetTop());
+                        right = Math.max(right, cutout.getSafeInsetRight());
+                        bottom = Math.max(bottom, cutout.getSafeInsetBottom());
+                    }
+                }
+            }
+            if (ready && width > 0 && height > 0 && (width != surfaceWidth || height != surfaceHeight
+                    || left != surfaceLeft || top != surfaceTop || right != surfaceRight || bottom != surfaceBottom)) {
+                surfaceWidth = width; surfaceHeight = height;
+                surfaceLeft = left; surfaceTop = top; surfaceRight = right; surfaceBottom = bottom;
+                surfaceResized(width, height, left, top, right, bottom);
             }
             readingGeometryReady = reading && hidden && barAnimations.isEmpty();
+            libraryGeometryReady = !reading && insets != null && !hidden && barAnimations.isEmpty();
+            if (libraryGeometryReady) {
+                libraryContentSize = ((long)Math.max(0, width - left - right) << 32)
+                    | (Math.max(0, height - top - bottom) & 0xffffffffL);
+            } else libraryContentSize = 0;
             return true;
         });
         immersive();
@@ -157,9 +194,11 @@ public class KobaltActivity extends QtActivity {
                 | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         }
     }
-    public void showStartup() { runOnUiThread(() -> { readingGeometryReady = false; reading = false; if (booxRefresh != null) booxRefresh.cancel(); immersive(); }); }
-    public void showReading() { runOnUiThread(() -> { readingGeometryReady = false; reading = true; immersive(); }); }
+    public void showStartup() { runOnUiThread(() -> { readingGeometryReady = false; libraryGeometryReady = false; reading = false; immersive(); }); }
+    public void showReading() { runOnUiThread(() -> { readingGeometryReady = false; libraryGeometryReady = false; reading = true; immersive(); }); }
     public boolean readerGeometryReady() { return readingGeometryReady; }
+    public boolean libraryGeometryReady() { return libraryGeometryReady; }
+    public long libraryContentSize() { return libraryContentSize; }
     // Called only after Qt has loaded the native library and connected its UI.
     public int readerBattery() {
         Intent battery = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));

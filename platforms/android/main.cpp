@@ -3,9 +3,9 @@
 #include "services.h"
 #include "runtime.h"
 #include "canvas.h"
+#include "window_geometry.h"
 #include "refresh.h"
-#include "boox_frame_queue.h"
-#include "boox_refresh.h"
+#include "canvas_refresh.h"
 #include "assets.h"
 #include "library_source.h"
 #include "interfaces/library/library_view.h"
@@ -27,6 +27,7 @@
 #include <QFontDatabase>
 #include <QPushButton>
 #include <QSettings>
+#include <QJniObject>
 #include <QScopedValueRollback>
 #include <QStackedLayout>
 #include <QStandardPaths>
@@ -44,7 +45,9 @@ public:
           store(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/config",
                 std::make_shared<android::LibrarySource>()) {
         setWindowTitle("Kobalt");
-        setAttribute(Qt::WA_ContentsMarginsRespectsSafeArea);
+        // Match the activity's edge-to-edge layout. A normal Qt window can
+        // restore decor fitting when the embedded reader closes.
+        setWindowFlag(Qt::ExpandedClientAreaHint);
         QPalette colors;
         colors.setColor(QPalette::Window, Qt::white);
         colors.setColor(QPalette::WindowText, Qt::black);
@@ -55,6 +58,7 @@ public:
         layout = new QStackedLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
         start = new android::StartScreen(android::readerServices().presentation, store);
+        start->setLibrarySystemBarBorders(true);
         // A book picked while the library is shown joins it; see openBook.
         connect(start, &android::StartScreen::libraryOpenRequested, this, [] {
             android::activity("chooseBook");
@@ -89,46 +93,34 @@ public:
         layout->addWidget(start);
         canvas = new android::WidgetCanvas(this);
         layout->addWidget(canvas);
-        canvas->viewportResized = [this] {
-            resetRefresh();
-            sizeCanvas();
-        };
-        canvas->framePreparing = [this](const QRegion &region) {
-            regionAccepted = false;
-            auto *reader = controller.window();
-            if (!reader || layout->currentWidget() != canvas || !android::refreshAvailable() || region.isEmpty()) {
+        new android::CanvasRefresh(canvas, android::refreshAvailable, submitRefresh);
+        libraryRefresh = new android::CanvasRefresh(start->libraryCanvas(), android::refreshAvailable, submitRefresh);
+        canvas->viewportResized = [this] { sizeCanvas(); };
+        libraryHandoff.setInterval(16);
+        connect(&libraryHandoff, &QTimer::timeout, this, [this] {
+            if (!android::libraryGeometryReady() || !android::contentFitsSurface(*this, android::libraryContentSize()))
+                return;
+            // Lay out the hidden Library at its final size. Leave its queued
+            // layout and proxy updates one event-loop pass before revealing it.
+            if (libraryPreparedSize != contentsRect().size()) {
+                start->setGeometry(contentsRect());
+                start->libraryCanvas()->fitContent();
+                libraryPreparedSize = contentsRect().size();
                 return;
             }
-            if (presentingRegion) {
-                regionAccepted = refreshQueue.present(submitRefresh);
-                return;
-            }
-            auto *page = static_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
-            regionAccepted = booxRefresh.prepare(reader, canvas->viewport(), page, region,
-                                                 [this](const android::RefreshFrame &frame) {
-                                                     return refreshQueue.prepare(frame, submitRefresh);
-                                                 });
-        };
-        regionFrame.setSingleShot(true);
-        // Keep the next region out of this compositor frame. Two 60 Hz frames
-        // also leave room for Qt's queued backing-store flush.
-        regionFrame.setInterval(34);
-        connect(&regionFrame, &QTimer::timeout, this, [this] {
-            if (!refreshQueue.pending() || !canvas->isVisible()) {
-                return;
-            }
-            const auto ratio = canvas->viewport()->devicePixelRatioF();
-            const auto origin = QPointF(canvas->viewport()->mapToGlobal(QPoint())) * ratio;
-            const QRectF pixels = QRectF(refreshQueue.nextArea()).translated(-origin);
-            const QRect logical = QRectF(pixels.topLeft() / ratio, pixels.size() / ratio).toAlignedRect();
-            QScopedValueRollback<bool> presenting(presentingRegion, true);
-            canvas->viewport()->repaint(logical);
+            layout->setCurrentWidget(start);
+            layout->activate();
+            libraryRefresh->requestClean();
+            surfaceHandoff.present(true);
+            libraryHandoff.stop();
         });
-        canvas->framePainted = [this](const QRegion &) {
-            if (regionAccepted && refreshQueue.pending() && !regionFrame.isActive()) {
-                regionFrame.start();
+        connect(&controller, &android::ReaderController::retiring, this, [this] {
+            if (layout->currentWidget() == canvas) {
+                surfaceHandoff.hold([](android::WidgetCanvas *surface) {
+                    new android::CanvasRefresh(surface, android::refreshAvailable, submitRefresh, false);
+                });
             }
-        };
+        });
         openingHandoff.setInterval(16);
         connect(&openingHandoff, &QTimer::timeout, this, [this] {
             auto *reader = controller.window();
@@ -164,6 +156,9 @@ public:
             },
             [this](const QString &uri, const QString &label) {
                 store.addFolder({uri, label});
+            },
+            [this](QSize pixels, QMargins safe) {
+                android::fitWindowToSurface(*this, pixels, safe);
             });
         canvas->cancelGesture = [this] {
             if (auto *reader = controller.window())
@@ -192,6 +187,7 @@ public:
                 exit->setAccessibleName(strings::get("android.return"));
             }
             reader->show();
+            surfaceHandoff.present(true);
             setUpdatesEnabled(true);
             openingHandoff.start();
             QSettings settings;
@@ -210,7 +206,6 @@ public:
             qWarning() << "Kobalt reader error:" << error;
         });
         connect(&controller, &android::ReaderController::closed, this, [this] {
-            resetRefresh();
             android::setPageButtonsAvailable(false);
             if (closing) {
                 android::activity("exitReader");
@@ -225,7 +220,8 @@ public:
             start->setDark(controller.preferences().value("dark_mode").toBool(false));
             if (!failedOpening)
                 start->showLibrary();
-            layout->setCurrentWidget(start);
+            libraryPreparedSize = {};
+            libraryHandoff.start();
         });
         QTimer::singleShot(0, this, [this] {
             android::activity("readerReady");
@@ -245,18 +241,12 @@ private:
     // The library entry of the book being read, and the local file it opened.
     QString openedKey, openedPath;
     android::WidgetCanvas *canvas;
-    android::BooxRefreshPolicy booxRefresh;
-    android::BooxFrameQueue refreshQueue;
-    QTimer regionFrame;
-    bool presentingRegion = false, regionAccepted = false;
+    android::SurfaceHandoff surfaceHandoff{*this};
+    android::CanvasRefresh *libraryRefresh = nullptr;
+    QTimer libraryHandoff;
+    QSize libraryPreparedSize;
     static bool submitRefresh(const android::RefreshFrame &frame) {
         return android::prepareRefreshRegions(frame.screenPixels - frame.textPixels, frame.textPixels, frame.clean);
-    }
-    void resetRefresh() {
-        regionFrame.stop();
-        refreshQueue.reset();
-        booxRefresh.reset();
-        regionAccepted = false;
     }
     QTimer openingHandoff;
     bool closing = false, layoutRepairPending = false, failedOpening = false;
@@ -305,7 +295,7 @@ private:
         // Library books are read in place; the reader opens a cached copy.
         pendingKey = key;
         pendingPath = cachePath(key);
-        start->showOpening();
+        showOpening();
         android::openLibraryBook(key, pendingPath, book.size, book.modified);
     }
     void recordProgress() {
@@ -315,6 +305,10 @@ private:
         store.setProgress(std::exchange(openedKey, {}), progress.percent, progress.finished);
     }
     QString pendingKey, pendingPath;
+    void showOpening() {
+        start->showOpening();
+        new android::CanvasRefresh(start->openingCanvas(), android::refreshAvailable, submitRefresh);
+    }
     void openBook(const QString &path) {
         if (closing)
             return;
@@ -344,7 +338,7 @@ private:
         failedOpening = false;
         android::setPageButtonsAvailable(false);
         openingHandoff.stop();
-        start->showOpening();
+        showOpening();
         layout->setCurrentWidget(start);
         // Keep the canvas laid out behind the opaque loader as insets change.
         layout->setStackingMode(QStackedLayout::StackAll);
@@ -354,6 +348,8 @@ private:
     }
     bool eventFilter(QObject *object, QEvent *event) override {
         auto *reader = controller.window();
+        if (reader && object == reader && event->type() == QEvent::Close && reader->updatesEnabled())
+            surfaceHandoff.capture();
         if (reader && (event->type() == QEvent::Show || event->type() == QEvent::Hide ||
                        event->type() == QEvent::EnabledChange)) {
             auto *widget = qobject_cast<QWidget *>(object);
@@ -410,6 +406,14 @@ private:
 }
 int main(int argc, char **argv) {
     FontCopies copies;
+    // BOOX attaches refresh metadata to Surface buffers. Qt otherwise uses
+    // a TextureView when the embedded library creates another Qt window first.
+    const auto onyx = [](const char *field) {
+        return QJniObject::getStaticObjectField("android/os/Build", field, "Ljava/lang/String;")
+                   .toString().compare(QStringLiteral("ONYX"), Qt::CaseInsensitive) == 0;
+    };
+    if (onyx("MANUFACTURER") || onyx("BRAND"))
+        qputenv("QT_ANDROID_SURFACE_CONTAINER_TYPE", "0");
     QApplication app(argc, argv);
     app.setApplicationName("Kobalt");
     app.setOrganizationName("Kobalt");
@@ -430,7 +434,8 @@ int main(int argc, char **argv) {
     QApplication::setFont(ui::interfaceFont());
     initializeDiagnostics(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/diagnostics");
     Window window(engineFontInputs(*assets, "/system/fonts", {}, {}), placeholderFontFamily(*assets, copies));
-    window.showFullScreen();
+    // Keep edge-to-edge geometry while the activity controls bar visibility.
+    window.show();
     qInfo() << "Kobalt Android ready; density" << physicalPpi;
     return app.exec();
 }

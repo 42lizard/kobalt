@@ -13,16 +13,18 @@ QPointer<QObject> owner;
 std::function<void(QString)> openExternal;
 std::function<void(int)> volumeButton;
 std::function<void(QString, QString)> chosenFolder;
+std::function<void(QSize, QMargins)> resizedSurface;
 std::atomic<bool> pageButtonsAvailable{false};
 }
 namespace kobalt::android {
 void setCallbacks(QObject *receiver, std::function<void(QString)> openBook, std::function<void(int)> turnPage,
-                  std::function<void(QString, QString)> folderChosen) {
+                  std::function<void(QString, QString)> folderChosen, std::function<void(QSize, QMargins)> surfaceResized) {
     pageButtonsAvailable.store(false);
     owner = receiver;
     openExternal = std::move(openBook);
     volumeButton = std::move(turnPage);
     chosenFolder = std::move(folderChosen);
+    resizedSurface = std::move(surfaceResized);
 }
 void releaseFolder(const QString &uri) {
     QNativeInterface::QAndroidApplication::context().callMethod<void>("releaseFolder",
@@ -44,6 +46,13 @@ void activity(const char *method) {
 }
 bool readingGeometryReady() {
     return QNativeInterface::QAndroidApplication::context().callMethod<jboolean>("readerGeometryReady");
+}
+bool libraryGeometryReady() {
+    return QNativeInterface::QAndroidApplication::context().callMethod<jboolean>("libraryGeometryReady");
+}
+QSize libraryContentSize() {
+    const auto size = quint64(QNativeInterface::QAndroidApplication::context().callMethod<jlong>("libraryContentSize"));
+    return {int(size >> 32), int(size & 0xffffffff)};
 }
 int screenDensity() {
     return qBound(100, int(QNativeInterface::QAndroidApplication::context().callMethod<jint>("readerDensity")), 600);
@@ -97,6 +106,19 @@ extern "C" JNIEXPORT void JNICALL Java_org_kobalt_android_KobaltActivity_openBoo
     QMetaObject::invokeMethod(qApp, [path] {
         if (owner && openExternal)
             openExternal(path);
+    });
+}
+extern "C" JNIEXPORT void JNICALL Java_org_kobalt_android_KobaltActivity_surfaceResized(JNIEnv *, jobject,
+                                                                                      jint width, jint height,
+                                                                                      jint left, jint top,
+                                                                                      jint right, jint bottom) {
+    const QSize pixels(width, height);
+    if (pixels.isEmpty())
+        return;
+    const QMargins safe(left, top, right, bottom);
+    QMetaObject::invokeMethod(qApp, [pixels, safe] {
+        if (owner && resizedSurface)
+            resizedSurface(pixels, safe);
     });
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_org_kobalt_android_KobaltActivity_turnPage(JNIEnv *, jobject,
