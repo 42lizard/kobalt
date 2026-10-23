@@ -5,6 +5,7 @@
 #include "interfaces/reader/ui/controls/loading.h"
 #include "interfaces/reader/ui/controls/sliders.h"
 #include "interfaces/reader/ui/controls/rows.h"
+#include "interfaces/reader/ui/controls/panels.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/metrics.h"
@@ -36,6 +37,7 @@
 #include <QScrollBar>
 #include <QLabel>
 #include <QTest>
+#include <QtMath>
 
 using namespace kobalt;
 namespace {
@@ -898,6 +900,50 @@ private slots:
                 list.findChild<QPushButton *>("rrBookmarkListNext")->click();
         }
         QCOMPARE(visited.size(), many.size());
+        // Sorting moves this short middle row without changing its contents
+        // or height, because the preceding long row becomes a short row.
+        a.page = 0;
+        b.page = 1;
+        c.page = 2;
+        auto d = a;
+        d.position = "fourth";
+        d.page = 3;
+        a.created = early.addSecs(20);
+        b.created = early.addSecs(30);
+        c.created = early.addSecs(40);
+        d.created = early.addSecs(10);
+        QString removed;
+        list.removeRequested = [&](const QString &id) { removed = id; };
+        for (bool annotations : {true, false}) {
+            list.setSortOrder("position");
+            if (annotations)
+                list.showAnnotations({a, b, c, d});
+            else
+                list.showBookmarks({a, b, c, d});
+            QCoreApplication::processEvents();
+            const QString prefix = annotations ? "rrAnnotation" : "rrBookmark";
+            auto *middle = list.findChild<QWidget *>(prefix + "1");
+            auto *removeMiddle = list.findChild<QPushButton *>(prefix + "Remove1");
+            QVERIFY(middle && removeMiddle);
+            const int middleY = middle->y(), middleHeight = middle->height();
+            for (const auto &order : {QStringLiteral("newest"), QStringLiteral("oldest"), QStringLiteral("position")}) {
+                list.setSortOrder(order);
+                QCoreApplication::processEvents();
+                for (int index = 0; index < 4; ++index) {
+                    auto *item = list.findChild<QWidget *>(prefix + QString::number(index));
+                    auto *remove = list.findChild<QWidget *>(prefix + "Remove" + QString::number(index));
+                    QVERIFY(item && remove && item->isVisible() && remove->isVisible());
+                    QCOMPARE(remove->geometry(), QRect(item->geometry().right() + 1 - ui::metrics::chrome::cellWidth,
+                                                      item->y(), ui::metrics::chrome::cellWidth, item->height()));
+                }
+                if (order == "newest") {
+                    QVERIFY(middle->y() < middleY);
+                    QCOMPARE(middle->height(), middleHeight);
+                    removeMiddle->click();
+                    QCOMPARE(removed, QString("second"));
+                }
+            }
+        }
     }
     void hidingSelectionMenuKeepsDamageCompact_data() {
         QTest::addColumn<bool>("barrier");
@@ -1176,6 +1222,85 @@ private slots:
         page.refreshContent();
         QCoreApplication::processEvents();
         QVERIFY(paints.painted.isEmpty());
+    }
+    void batteryTextAlignment_data() { variants(); }
+    void batteryTextAlignment() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        const int previousDensity = ui::density();
+        struct Restore {
+            int density;
+            ~Restore() { ui::setDensity(density); }
+        } restore{previousDensity};
+        ui::setDensity(ppi);
+        ReadingPage page(nullptr, [] {});
+        page.resize(ui::px(800), ui::px(1000));
+        page.image = QImage(page.size(), QImage::Format_RGB32);
+        const auto paper = dark ? Qt::black : Qt::white;
+        page.image.fill(paper);
+        auto palette = page.palette();
+        palette.setColor(QPalette::Window, paper);
+        palette.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        page.setPalette(palette);
+        page.chrome.slotFields.fill(headerfooter::Field::Nothing);
+        page.chrome.slotFields[2] = page.chrome.slotFields[5] = headerfooter::Field::BatteryPercent;
+        page.chrome.progressBar = false;
+        const auto inkBounds = [dark](const QImage &image, QRect area) {
+            QRect ink;
+            for (int y = area.top(); y <= area.bottom(); ++y)
+                for (int x = area.left(); x <= area.right(); ++x)
+                    if (dark ? qGray(image.pixel(x, y)) > 128 : qGray(image.pixel(x, y)) < 128)
+                        ink = ink.united(QRect(x, y, 1, 1));
+            return ink;
+        };
+        for (const auto &family : {QStringLiteral("Libron"), QStringLiteral("Ancizar Serif"), ui::chromeFont(24).family()}) {
+            auto font = ui::headerFooterFont(24);
+            font.setFamily(family);
+            page.setFont(font);
+            int previousIconHeight = 0, smallIconHeight = 0;
+            for (const auto &size : {QStringLiteral("small"), QStringLiteral("medium"), QStringLiteral("large")}) {
+                page.chrome.headerSize = page.chrome.footerSize = size;
+                int iconHeight = 0;
+                int textHeights[2] = {};
+                for (int percent : {9, 50, 100}) {
+                    headerfooter::Values values;
+                    values.deviceStatus = true;
+                    values.battery = percent;
+                    page.slotContents[2] = page.slotContents[5] =
+                        headerfooter::content(headerfooter::Field::BatteryPercent, values, false);
+                    page.refreshContent();
+                    const auto image = page.snapshot();
+                    for (bool footer : {false, true}) {
+                        const auto band = footer ? page.footerTextRect() : page.headerTextRect();
+                        const int pixels = footer ? page.footerTextPixels() : page.headerTextPixels();
+                        const int iconLeft = page.width() - ui::metrics::reading::headerSide -
+                                             qCeil(ui::batteryWidth(qRound(pixels * .75)));
+                        const auto text = inkBounds(image, QRect(0, band.top(), iconLeft - ui::metrics::reading::batteryGap,
+                                                                 band.height()));
+                        const auto icon = inkBounds(image, QRect(iconLeft, band.top(), page.width() - iconLeft, band.height()));
+                        QVERIFY(!text.isEmpty() && !icon.isEmpty());
+                        const auto context = QString("%1 %2 %3 footer=%4 text=%5,%6 icon=%7,%8")
+                            .arg(family, size).arg(percent).arg(footer).arg(text.top()).arg(text.height()).arg(icon.top()).arg(icon.height()).toUtf8();
+                        QVERIFY2(qAbs(text.top() + text.bottom() - icon.top() - icon.bottom()) <= 2, context.constData());
+                        QVERIFY2(qAbs(text.height() - icon.height()) <= 3, context.constData());
+                        if (textHeights[footer])
+                            QVERIFY2(qAbs(text.height() - textHeights[footer]) <= 1, context.constData());
+                        textHeights[footer] = text.height();
+                        if (!footer) {
+                            if (iconHeight)
+                                QCOMPARE(icon.height(), iconHeight);
+                            iconHeight = icon.height();
+                        }
+                    }
+                }
+                QVERIFY(iconHeight >= previousIconHeight);
+                if (size == "small")
+                    smallIconHeight = iconHeight;
+                if (size == "large")
+                    QVERIFY(iconHeight > smallIconHeight);
+                previousIconHeight = iconHeight;
+            }
+        }
     }
     void annotationPaintPreservesText_data() {
         variants();

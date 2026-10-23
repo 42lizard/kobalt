@@ -291,6 +291,12 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     start->setDark(controller.preferences().value("dark_mode").toBool(false));
     connect(start, &android::StartScreen::bookRequested, this, &Window::openBook);
     connect(start, &android::StartScreen::libraryOpenRequested, this, &Window::chooseBook);
+    connect(start, &android::StartScreen::markUnreadRequested, this, [this](const QString &key) {
+        if (controller.resetBook(key))
+            store.setMark(key, library::Book::Mark::Unread);
+        else
+            start->showLibraryError(tr("The book's reading settings and position could not be reset."));
+    });
     connect(start, &android::StartScreen::addFolderRequested, this, &Window::chooseFolder);
     connect(start, &android::StartScreen::removeFolderRequested, this, [this](const QString &key) {
         store.removeFolder(key);

@@ -1153,7 +1153,7 @@ void LibraryView::showBookMenu(const QString &key) {
                                         if (markBook)
                                             markBook(key, Book::Mark::Finished);
                                     }));
-    // Unread returns the book to Not started; its reading position is kept.
+    // The host resets the book's settings and position before marking it unread.
     if (status != Status::New)
         items.append(ui::actionItem(strings::get("library.mark_unread"), "libraryBookMenuUnread", ui::ControlIcon::Undo,
                                     [this, key] {

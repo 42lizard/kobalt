@@ -188,15 +188,20 @@ void DescribedOption::paintEvent(QPaintEvent *) {
         if (valueStyle.sampleWeight < 0)
             valueFont.setLetterSpacing(QFont::AbsoluteSpacing, m::chrome::captionSpacing);
         painter.save();
-        painter.setFont(valueFont);
         // The battery keeps the right edge and the text ends before it.
         const qreal body = qRound(valueFont.pixelSize() * .75);
+        if (valueStyle.battery)
+            valueFont = batteryTextFont(valueFont, body, valueStyle.sampleWeight);
+        painter.setFont(valueFont);
         const int icon = valueStyle.battery ? qCeil(batteryWidth(body)) : 0;
         const int gap = valueStyle.battery && !value.isEmpty() ? int(m::reading::batteryGap) : 0;
         const int room = qMax(0, labelLine.width() - labelWidth - m::settings::toggleGap - icon - gap);
         const int textRight = labelLine.right() + 1 - icon - gap;
         const qreal halfSpaced = valueStyle.halfSpaces ? halfSpacedWidth(painter.font(), value) : 0;
-        if (valueStyle.halfSpaces && halfSpaced <= room)
+        if (valueStyle.battery)
+            drawOpticalPrivateText(painter, QRect(textRight - room, labelLine.y(), room, labelLine.height()),
+                                   elideInterfaceText(value, valueFont, room), Qt::AlignRight, valueStyle.sampleWeight);
+        else if (valueStyle.halfSpaces && halfSpaced <= room)
             drawHalfSpaced(painter, textRight - halfSpaced, labelLine, value, valueStyle.sampleWeight);
         else {
             const auto shown = qt::textWidth(painter.fontMetrics(), value) > room

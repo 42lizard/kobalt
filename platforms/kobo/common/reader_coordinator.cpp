@@ -676,7 +676,8 @@ void ReaderCoordinator::load() {
     run.nativeProgress = std::make_unique<kobalt::NativeProgress>(run.identity);
     run.diskBaseline = run.nativeProgress->read();
     const auto savedBaseline = kobalt::ReadingProgress::fromJson(saved.value("nickel_progress").toObject());
-    const bool useNative = kobalt::preferNativeProgress(run.diskBaseline, savedBaseline);
+    const bool unread = kobalt::resetNativeUnread(saved, run.diskBaseline);
+    const bool useNative = unread || kobalt::preferNativeProgress(run.diskBaseline, savedBaseline);
     run.baseline = run.diskBaseline.valid ? run.diskBaseline : savedBaseline;
     if (useNative)
         saved.remove("position");
@@ -692,9 +693,10 @@ void ReaderCoordinator::load() {
     saved["bold_reading"] = preferences.value("bold_reading").toString("off");
     saved["avoid_wasteful_styling"] = preferences.value("avoid_wasteful_styling").toBool(true);
     const auto size = run.interface->readingViewport(QGuiApplication::primaryScreen()->size(), preferences);
+    const auto nativeLocation =
+        unread ? QString() : (useNative ? run.diskBaseline.location : run.nativePublication->location());
     run.model->open(
-        {run.identity, run.filePath, size, saved,
-         useNative ? run.diskBaseline.location : run.nativePublication->location(), environment_.paths.layoutCache(),
+        {run.identity, run.filePath, size, saved, nativeLocation, environment_.paths.layoutCache(),
          run.sourceLease, run.nativePublication->resources(run.sourceLease), positionCodec(),
          environment_.paths.documentCache(), temporaryAppearance, originalAppearance,
          environment_.paths.directory + "/userstyle.css", kobalt::appearance::bookDefaults(preferences)},

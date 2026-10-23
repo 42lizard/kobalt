@@ -37,23 +37,30 @@ void paintValue(QPainter &painter, const QRect &bounds, const Content &content, 
                 Qt::Alignment align, bool halfSpaces) {
     const QFont font = painter.font();
     const qreal body = qRound(font.pixelSize() * .75);
+    const auto textFont = content.batteryIcon && !content.text.isEmpty()
+        ? ui::batteryTextFont(font, body, ui::headerFooterTextWeight()) : font;
+    painter.save();
+    painter.setFont(textFont);
     const int icon = content.batteryIcon ? qCeil(ui::batteryWidth(body)) : 0;
     const int gap = content.batteryIcon && !content.text.isEmpty() ? int(m::reading::batteryGap) : 0;
     const int room = qMax(0, bounds.width() - icon - gap);
     QString text = content.text;
     int textWidth = text.isEmpty() ? 0
                     : halfSpaces   ? qCeil(ui::halfSpacedWidth(painter.font(), text))
-                                   : qt::textWidth(painter.fontMetrics(), text);
+                                   : ui::interfaceTextWidth(text, textFont);
     if (textWidth > room) {
         halfSpaces = false;
-        text = painter.fontMetrics().elidedText(text, Qt::ElideRight, room);
-        textWidth = text.isEmpty() ? 0 : qt::textWidth(painter.fontMetrics(), text);
+        text = ui::elideInterfaceText(text, textFont, room);
+        textWidth = text.isEmpty() ? 0 : ui::interfaceTextWidth(text, textFont);
     }
     const int total = textWidth + gap + icon;
     const int x = align & Qt::AlignLeft    ? bounds.x()
                   : align & Qt::AlignRight ? bounds.right() + 1 - total
                                            : bounds.x() + (bounds.width() - total) / 2;
-    if (!text.isEmpty() && halfSpaces)
+    if (!text.isEmpty() && content.batteryIcon)
+        ui::drawOpticalPrivateText(painter, QRect(x, bounds.y(), textWidth, bounds.height()), text,
+                                   Qt::AlignLeft, ui::headerFooterTextWeight());
+    else if (!text.isEmpty() && halfSpaces)
         ui::drawHalfSpaced(painter, x, bounds, text, ui::headerFooterTextWeight());
     else if (!text.isEmpty())
         ui::drawInterfaceText(painter, QRect(x, bounds.y(), textWidth, bounds.height()), text,
@@ -63,6 +70,7 @@ void paintValue(QPainter &painter, const QRect &bounds, const Content &content, 
         ui::paintBattery(painter, QRectF(x + textWidth + gap, bounds.y() + (bounds.height() - body) / 2.0, width, body),
                          content.battery, content.charging, ink, paper);
     }
+    painter.restore();
 }
 // How much of a miniature's width a field takes, as a short or long dash.
 int dashWidth(Field field) {

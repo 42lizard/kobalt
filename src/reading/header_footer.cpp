@@ -59,8 +59,10 @@ Layout presetLayout(Preset preset) {
     switch (preset) {
     case Preset::Default:
     case Preset::Custom:
-        layout.slotFields = {Field::Time,    Field::Chapter,  Field::ChapterPage,
-                             Field::Nothing, Field::BookPage, Field::Nothing};
+        layout.slotFields = {Field::Time,             Field::Chapter, Field::Nothing,
+                             Field::ChapterPagesLeft, Field::Nothing, Field::BookPercent};
+        layout.uppercase.fill(false);
+        layout.progressBar = false;
         break;
     case Preset::AlternativeA:
         layout.slotFields = {Field::Time,    Field::ChapterAndPage, Field::Nothing,
@@ -182,7 +184,9 @@ Layout fromJson(const QJsonObject &object, const Layout &fallback) {
 }
 
 Layout legacyLayout(const QJsonObject &preferences) {
-    auto layout = presetLayout(Preset::Default);
+    Layout layout;
+    layout.slotFields = {Field::Time, Field::Chapter, Field::ChapterPage,
+                         Field::Nothing, Field::BookPage, Field::Nothing};
     const bool header = preferences.value("show_header").toBool(true);
     const bool clock = preferences.value("show_clock").toBool(true);
     layout.slotFields[0] = clock ? Field::Time : Field::Nothing;
@@ -216,8 +220,8 @@ Selection select(const QJsonObject &preferences) {
         return selection;
     }
     const auto legacy = legacyLayout(preferences);
-    if (legacy == presetLayout(Preset::Default)) {
-        selection.layout = legacy;
+    if (legacy == legacyLayout({})) {
+        selection.layout = presetLayout(Preset::Default);
         return selection;
     }
     selection.preset = Preset::Custom;

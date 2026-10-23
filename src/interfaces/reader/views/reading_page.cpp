@@ -47,7 +47,9 @@ int iconWidth(const QFont &font, const Content &content) {
 int contentWidth(const QFont &font, Field field, const Content &content, bool sleeping = false) {
     if (sleeping && field == Field::Time)
         return font.pixelSize();
-    return textWidth(font, field, content.text) + iconWidth(font, content);
+    const auto textFont = content.batteryIcon && !content.text.isEmpty()
+        ? ui::batteryTextFont(font, batteryBody(font), ui::headerFooterTextWeight()) : font;
+    return textWidth(textFont, field, content.text) + iconWidth(font, content);
 }
 // Draws one slot within `bounds`, eliding its text when it does not fit.
 void paintContent(QPainter &painter, const QRect &bounds, Field field, const Content &content, Qt::Alignment align,
@@ -66,21 +68,28 @@ void paintContent(QPainter &painter, const QRect &bounds, Field field, const Con
     if (content.empty() || bounds.width() <= 0)
         return;
     const QFont font = painter.font();
+    const auto textFont = content.batteryIcon && !content.text.isEmpty()
+        ? ui::batteryTextFont(font, batteryBody(font), ui::headerFooterTextWeight()) : font;
     const int icon = iconWidth(font, content);
     const int room = qMax(0, bounds.width() - icon);
     QString text = content.text;
-    int width = textWidth(font, field, text);
+    int width = textWidth(textFont, field, text);
     if (width > room) {
-        text = ui::elideInterfaceText(text, font, room);
-        width = ui::interfaceTextWidth(text, font);
+        text = ui::elideInterfaceText(text, textFont, room);
+        width = ui::interfaceTextWidth(text, textFont);
         field = Field::Nothing;
     }
     const int total = width + icon;
     const int x = align & Qt::AlignRight     ? bounds.right() + 1 - total
                   : align & Qt::AlignHCenter ? bounds.x() + (bounds.width() - total) / 2
                                              : bounds.x();
+    painter.save();
+    painter.setFont(textFont);
     if (!text.isEmpty()) {
-        if (headerfooter::pageCount(field))
+        if (content.batteryIcon)
+            ui::drawOpticalPrivateText(painter, QRect(x, bounds.y(), width, bounds.height()), text,
+                                       Qt::AlignLeft, ui::headerFooterTextWeight());
+        else if (headerfooter::pageCount(field))
             ui::drawHalfSpaced(painter, x, bounds, text, ui::headerFooterTextWeight());
         else
             ui::drawInterfaceText(painter, QRect(x, bounds.y(), width, bounds.height()), text,
@@ -94,6 +103,7 @@ void paintContent(QPainter &painter, const QRect &bounds, Field field, const Con
                                 height * int(m::panel::batteryBodyWidth) / int(m::panel::batteryBodyHeight), height),
                          content.battery, content.charging, ink, paper);
     }
+    painter.restore();
 }
 }
 QString ReadingPage::headerText() const {

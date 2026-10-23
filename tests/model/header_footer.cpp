@@ -10,15 +10,15 @@ using namespace kobalt;
 using namespace kobalt::headerfooter;
 
 int main() {
-    // Default draws what the reader drew before presets existed.
+    // Default keeps the chapter prominent and the footer free of a bar.
     const auto standard = presetLayout(Preset::Default);
     require(standard.slotFields[0] == Field::Time && standard.slotFields[1] == Field::Chapter &&
-                standard.slotFields[2] == Field::ChapterPage && standard.slotFields[4] == Field::BookPage &&
-                standard.slotFields[3] == Field::Nothing && standard.slotFields[5] == Field::Nothing,
-            "Default does not keep the clock, chapter and positions");
-    require(standard.uppercase[1] && standard.progressBar && standard.headerSize == "small" &&
+                standard.slotFields[2] == Field::Nothing && standard.slotFields[4] == Field::Nothing &&
+                standard.slotFields[3] == Field::ChapterPagesLeft && standard.slotFields[5] == Field::BookPercent,
+            "Default does not show the clock, chapter, chapter pages left and book percentage");
+    require(!standard.uppercase[1] && !standard.progressBar && standard.headerSize == "small" &&
                 standard.footerSize == "small",
-            "Default changed its case, bar or sizes");
+            "Default lost its original case, hidden bar or small sizes");
     const auto a = presetLayout(Preset::AlternativeA);
     require(a.slotFields[0] == Field::Time && a.slotFields[1] == Field::ChapterAndPage &&
                 a.slotFields[4] == Field::TitleAndPage && a.uppercase[1] && a.uppercase[4] && a.progressBar,
@@ -68,6 +68,11 @@ int main() {
     selection = select({});
     require(selection.preset == Preset::Default && selection.layout == standard,
             "Old default settings did not select Default");
+    selection = select(qt::object({{presetKey, "default"}}));
+    require(selection.layout == standard, "An explicit Default did not use the new layout");
+    selection = select(qt::object({{"show_header", true}, {"show_footer", true}, {"show_progress_bar", true}}));
+    require(selection.preset == Preset::Default && selection.layout == standard,
+            "Old default flags prevented the new Default from applying");
     selection = select(qt::object({{"show_clock", false}, {"footer_text_size", "large"}}));
     require(selection.preset == Preset::Custom && selection.layout.slotFields[0] == Field::Nothing &&
                 selection.layout.slotFields[1] == Field::Chapter && selection.layout.footerSize == "large",
@@ -92,6 +97,11 @@ int main() {
     values.chapterPages = 20;
     values.page = 6;
     values.pages = 193;
+    require(content(standard.slotFields[1], values, standard.uppercase[1]).text == values.chapter,
+            "Default did not preserve the chapter's original case");
+    require(content(standard.slotFields[3], values, false).text.startsWith(QStringLiteral("14 ")) &&
+                content(standard.slotFields[5], values, false).text == strings::get("common.percent").arg(3),
+            "Default footer did not combine chapter pages left with whole-book percentage");
     values.battery = 80;
     const auto emberProgress = content(b.slotFields[5], values, false).text;
     require(emberProgress == strings::get("common.percent").arg(3), "Ember does not show whole-book progress");

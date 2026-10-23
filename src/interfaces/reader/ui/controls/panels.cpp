@@ -4,6 +4,7 @@
 #include "../style/metrics.h"
 #include "../style/styles.h"
 #include "../style/fonts.h"
+#include "../style/private_text.h"
 #include "support/strings.h"
 #include <QPainter>
 #include <QResizeEvent>
@@ -275,6 +276,22 @@ void paintBattery(QPainter &painter, const QRectF &body, int percent, bool charg
 qreal batteryWidth(qreal bodyHeight) {
     const qreal scale = bodyHeight / int(m::panel::batteryBodyHeight);
     return (int(m::panel::batteryBodyWidth) + px(5)) * scale;
+}
+QFont batteryTextFont(QFont font, qreal bodyHeight, int weight) {
+    const auto sample = renderPrivateText(QStringLiteral("100%"), font, weight).image;
+    int first = sample.height(), last = -1;
+    for (int y = 0; y < sample.height(); ++y) {
+        const auto *pixels = reinterpret_cast<const QRgb *>(sample.constScanLine(y));
+        for (int x = 0; x < sample.width(); ++x)
+            if (qAlpha(pixels[x]) > 128) {
+                first = qMin(first, y);
+                last = y;
+                break;
+            }
+    }
+    if (last >= first)
+        font.setPixelSize(qMax(1, qRound(font.pixelSize() * bodyHeight / (last - first + 1))));
+    return font;
 }
 void BatteryIndicator::paintEvent(QPaintEvent *event) {
     QLabel::paintEvent(event);

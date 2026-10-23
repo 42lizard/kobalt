@@ -64,6 +64,14 @@ public:
         });
         connect(start, &android::StartScreen::exitRequested, this, &QWidget::close);
         connect(start, &android::StartScreen::bookRequested, this, &Window::openLibraryBook);
+        connect(start, &android::StartScreen::markUnreadRequested, this, [this](const QString &key) {
+            const auto book = store.index().books.value(key);
+            const auto path = book.folder.isEmpty() ? key : cachePath(key);
+            if (controller.resetBook(path))
+                store.setMark(key, library::Book::Mark::Unread);
+            else
+                start->showLibraryError(tr("The book's reading settings and position could not be reset."));
+        });
         connect(start, &android::StartScreen::removeFolderRequested, this, [this](const QString &key) {
             store.removeFolder(key);
             android::releaseFolder(key);

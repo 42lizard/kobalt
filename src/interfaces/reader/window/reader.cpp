@@ -435,6 +435,23 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
                               type == QEvent::MouseButtonDblClick || type == QEvent::MouseMove ||
                               type == QEvent::TouchBegin || type == QEvent::TouchUpdate || type == QEvent::TouchEnd ||
                               type == QEvent::KeyPress || type == QEvent::KeyRelease || type == QEvent::Shortcut;
+    if (controlInput && isVisible() && chromeView()) {
+        auto *target = qobject_cast<QWidget *>(watched);
+        if (target && (target == this || isAncestorOf(target))) {
+            bool inPopup = false;
+            for (auto *view : popups())
+                if (view && view->isVisible() && (view == target || view->isAncestorOf(target))) {
+                    inPopup = true;
+                    break;
+                }
+            // Only the sheet and any confirmation above it accept reader
+            // input. Host controls such as Screenshot remain independent.
+            if (!inPopup) {
+                event->accept();
+                return true;
+            }
+        }
+    }
     if (appearanceEdit.applying() && controlInput) {
         auto *target = qobject_cast<QWidget *>(watched);
         if (target &&
@@ -559,25 +576,6 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
                 dismissing = true;
                 choices->hide();
                 refresh();
-            }
-        }
-        // A tap on the page above the Header and footer sheet closes it, as
-        // with Font; the toolbar and the tabs keep working.
-        if (isVisible() && headerFooterView->isVisible() && !fieldChooser->isVisible()) {
-            QPointF point;
-            if (touch) {
-                const auto points = kobalt::ui::touchPositions(static_cast<QTouchEvent *>(event), true);
-                if (points.isEmpty())
-                    return QWidget::eventFilter(watched, event);
-                point = points.first();
-            } else
-                point = kobalt::ui::mousePosition(static_cast<QMouseEvent *>(event), true);
-            const QRect sheetRect(headerFooterView->mapToGlobal(QPoint()), headerFooterView->size());
-            const QRect toolbarRect(topControls->mapToGlobal(QPoint()), topControls->size());
-            if (!sheetRect.contains(point.toPoint()) && !toolbarRect.contains(point.toPoint()) &&
-                !(navigation && navigation->contains(point.toPoint()))) {
-                dismissing = true;
-                closeChromeViews();
             }
         }
     }

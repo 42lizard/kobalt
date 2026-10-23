@@ -41,4 +41,7 @@ private:
 // A local checkpoint is authoritative until Nickel has a different, newer
 // position than the native baseline stored alongside that checkpoint.
 bool preferNativeProgress(const ReadingProgress &current, const ReadingProgress &saved);
+// Nickel can clear DateLastRead and the location when a book is marked unread.
+// Reset settings and progress only for a changed unread status, not a failed read.
+bool resetNativeUnread(QJsonObject &checkpoint, const ReadingProgress &current);
 }

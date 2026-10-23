@@ -43,6 +43,7 @@ signals:
     void addFolderRequested();
     void libraryOpenRequested();
     void removeBookRequested(QString key);
+    void markUnreadRequested(QString key);
     void removeFolderRequested(QString key);
 
 protected:

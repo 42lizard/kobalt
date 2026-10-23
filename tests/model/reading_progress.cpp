@@ -83,6 +83,34 @@ int main(int argc, char **argv) {
     require(!preferNativeProgress(second, first), "Ambiguous equal-date position replaced local checkpoint");
     require(ReadingProgress::fromJson(first.json()) == first, "Baseline did not survive local persistence");
     require(!ReadingProgress{}.samePosition({}), "Failed native reads compared equal");
+    const QJsonObject checkpoint{{"book", first.book}, {"position", "/body/p[9]"}, {"font_pixels", 42},
+                                 {"nickel_progress", first.json()}};
+    auto unread = first;
+    unread.status = 0;
+    unread.location.clear();
+    // Mark unread can clear the date instead of supplying a newer timestamp.
+    unread.modified = 0;
+    auto reset = checkpoint;
+    require(resetNativeUnread(reset, unread) && reset == QJsonObject({{"book", first.book}}),
+            "Nickel's unread status did not reset book settings and position");
+    reset = {};
+    auto unreadWithBookmark = unread;
+    unreadWithBookmark.location = first.location;
+    require(resetNativeUnread(reset, unreadWithBookmark) && reset == QJsonObject({{"book", first.book}}),
+            "An unread book without a Kobalt checkpoint reused Nickel's old location");
+    reset = checkpoint;
+    require(!resetNativeUnread(reset, {}) && reset == checkpoint,
+            "Failed native read reset the local checkpoint");
+    require(!resetNativeUnread(reset, second) && reset == checkpoint,
+            "A normal reading update reset the book settings");
+    auto otherUnread = unread;
+    otherUnread.book = "another book";
+    require(!resetNativeUnread(reset, otherUnread) && reset == checkpoint,
+            "Another book's unread status reset this book");
+    reset["nickel_progress"] = unread.json();
+    const auto acknowledgedUnread = reset;
+    require(!resetNativeUnread(reset, unread) && reset == acknowledgedUnread,
+            "Unchanged unread baseline repeatedly reset local progress");
     ProgressReconciler choices(first);
     second.modified = 2000;
     choices.observe(second);

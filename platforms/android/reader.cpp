@@ -52,6 +52,14 @@ QJsonObject ReaderController::savedState(const QString &path) const {
 QJsonObject ReaderController::preferences() const {
     return appearance::readerPreferences(storage::readJson(paths.preferences()), {});
 }
+bool ReaderController::resetBook(const QString &path) {
+    if (!idle() || path.isEmpty())
+        return false;
+    const auto identity = QUrl::fromLocalFile(QFileInfo(path).absoluteFilePath()).toString();
+    // Keep an identity-only checkpoint so the prototype fallback cannot restore
+    // old settings or progress on the next opening.
+    return storage::writeJson(paths.bookState(identity), {{"book", identity}});
+}
 void ReaderController::open(const QString &path, QSize pixels) {
     if (phase == Phase::Reading && path == current)
         return;

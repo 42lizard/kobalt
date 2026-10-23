@@ -1,6 +1,7 @@
 #pragma once
 #include "../style/theme.h"
 #include <QFrame>
+#include <QFont>
 #include <QLabel>
 
 namespace kobalt::ui {
@@ -102,6 +103,8 @@ void paintBattery(QPainter &painter, const QRectF &body, int percent, bool charg
                   const QColor &paper);
 // The width of the battery drawn for a body of this height, terminal included.
 qreal batteryWidth(qreal bodyHeight);
+// Fit a fixed percentage sample to the icon's body, independent of its value.
+QFont batteryTextFont(QFont font, qreal bodyHeight, int weight = -1);
 class BatteryIndicator : public QLabel {
 public:
     explicit BatteryIndicator(QWidget *parent);

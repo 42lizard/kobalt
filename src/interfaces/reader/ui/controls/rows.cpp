@@ -170,6 +170,11 @@ QSize ListRow::sizeHint() const {
 void ListRow::resizeEvent(QResizeEvent *) {
     arrange();
 }
+void ListRow::moveEvent(QMoveEvent *) {
+    // Sibling actions stay enabled when their row cannot be opened.
+    if (action && action->parentWidget() != this)
+        action->move(x() + width() - m::chrome::cellWidth, y());
+}
 void ListRow::changeEvent(QEvent *event) {
     Button::changeEvent(event);
     if (!title)

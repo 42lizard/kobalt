@@ -52,7 +52,10 @@ void StartScreen::buildLibrary() {
         emit removeBookRequested(key);
     };
     view->markBook = [this](const QString &key, library::Book::Mark mark) {
-        store.setMark(key, mark);
+        if (mark == library::Book::Mark::Unread)
+            emit markUnreadRequested(key);
+        else
+            store.setMark(key, mark);
     };
     view->settingsChanged = [this](const library::Settings &settings) {
         store.setSettings(settings);

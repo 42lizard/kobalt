@@ -90,7 +90,7 @@ struct Selection {
 };
 // The preset a book uses and the layout it draws. A book saved before presets
 // existed has no preset. Its old header, footer, clock and progress bar
-// settings select Default when they match it, and Custom otherwise. Custom is
+// settings select Default when they match the old defaults, and Custom otherwise. Custom is
 // then the saved custom layout, or those old settings when none is saved yet.
 Selection select(const QJsonObject &preferences);
 // The layout that the old header, footer, clock and progress bar settings describe.

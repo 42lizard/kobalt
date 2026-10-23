@@ -369,6 +369,9 @@ int main(int argc, char **argv) {
                     "Progress was not bounded, or a finished book was not finished");
             store.setMark(key, Book::Mark::Unread);
             require(store.index().books.value(key).status() == Status::New, "Mark as unread did not apply");
+            const auto unread = store.index().books.value(key);
+            require(unread.percent == 0 && !unread.finished && unread.opened == 0,
+                    "Mark as unread retained progress or its last-opened date");
             store.setOpened(key);
             require(store.index().books.value(key).mark == Book::Mark::None,
                     "Opening an unread book did not clear the mark");

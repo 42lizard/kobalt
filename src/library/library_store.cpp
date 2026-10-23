@@ -143,7 +143,13 @@ void Store::removeBook(const QString &key) {
 void Store::setMark(const QString &key, Book::Mark mark) {
     if (!data.books.contains(key))
         return;
-    data.books[key].mark = mark;
+    auto &book = data.books[key];
+    book.mark = mark;
+    if (mark == Book::Mark::Unread) {
+        book.percent = 0;
+        book.finished = false;
+        book.opened = 0;
+    }
     touch();
 }
 void Store::setOpened(const QString &key) {

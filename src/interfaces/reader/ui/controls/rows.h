@@ -84,6 +84,7 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent *) override;
+    void moveEvent(QMoveEvent *) override;
     void paintEvent(QPaintEvent *) override;
     void changeEvent(QEvent *event) override;
     bool event(QEvent *event) override;

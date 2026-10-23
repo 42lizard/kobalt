@@ -42,4 +42,14 @@ bool preferNativeProgress(const ReadingProgress &current, const ReadingProgress 
     return current.valid && !current.location.isEmpty() && !current.samePosition(saved) &&
            (!saved.valid || current.book != saved.book || current.modified > saved.modified);
 }
+bool resetNativeUnread(QJsonObject &checkpoint, const ReadingProgress &current) {
+    const auto saved = ReadingProgress::fromJson(checkpoint.value("nickel_progress").toObject());
+    if (!current.valid || current.book.isEmpty() || current.status != 0 ||
+        (!checkpoint.isEmpty() && checkpoint.value("book").toString() != current.book) ||
+        (saved.valid && (saved.book != current.book ||
+                         (saved.status == 0 && !preferNativeProgress(current, saved)))))
+        return false;
+    checkpoint = qt::object({{"book", current.book}});
+    return true;
+}
 }
