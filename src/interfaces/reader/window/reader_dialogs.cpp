@@ -268,7 +268,6 @@ void Reader::buildProgressChoice(const kobalt::ReadingProgress &shown, int direc
     go->setVisible(!shown.location.isEmpty());
     if (shown.location.isEmpty()) {
         keep->setProperty("reader_primary_action", true);
-        readerStyle(keep, styles::primary());
     }
     connect(keep, &QPushButton::clicked, this, [this, shown] {
         if (progressBlocked())

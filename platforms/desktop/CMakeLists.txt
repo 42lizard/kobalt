@@ -144,14 +144,14 @@ if(BUILD_TESTING)
         KOBALT_TEST_VARIABLE_FONT="${test_variable_font}")
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-tmp")
     set(headless_environment "QT_QPA_PLATFORM=minimal:enable_fonts:freetype" "QT_STYLE_OVERRIDE=Fusion" "TMPDIR=${CMAKE_CURRENT_BINARY_DIR}/test-tmp")
-    foreach(check startup covers reading errors diagnostics storageDiagnostics features stylesheet bookmarks bookmarkMerge annotations annotationSelection coordinateProbeSerialization annotationGripMenus annotationCrossPageDrag selectionCrossPageDrag annotationCrossPageOverlap annotationOverlap wordSelection touchCursor links
+    foreach(check startup covers reading errors diagnostics storageDiagnostics features stylesheet bookmarks bookmarkMerge annotations annotationModeFeedback annotationSelection coordinateProbeSerialization annotationGripMenus annotationCrossPageDrag selectionCrossPageDrag annotationCrossPageOverlap annotationOverlap wordSelection touchCursor links
             annotationSectionBoundary settings advancedText globalLayout columns fullWidthPanels dictionaryRedraw opticalSize desktopControls navigation annotationTwoFingerTapConsumesWholeSequence annotationRightClickRejectsChords)
         add_test(NAME desktop.${check} COMMAND "${CMAKE_COMMAND}"
             "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-desktop-tests>" "-DTEST_ARGUMENTS=${check}"
             "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake")
         set(lane fast)
-        if(check MATCHES "^(features|diagnostics|stylesheet|bookmarks|bookmarkMerge|annotations|annotationSelection|coordinateProbeSerialization|annotationGripMenus|annotationCrossPageDrag|annotationSectionBoundary|selectionCrossPageDrag|annotationCrossPageOverlap|annotationOverlap|wordSelection|touchCursor|links|settings|advancedText|globalLayout|columns|fullWidthPanels|dictionaryRedraw|opticalSize|desktopControls|navigation)$")
+        if(check MATCHES "^(features|diagnostics|stylesheet|bookmarks|bookmarkMerge|annotations|annotationModeFeedback|annotationSelection|coordinateProbeSerialization|annotationGripMenus|annotationCrossPageDrag|annotationSectionBoundary|selectionCrossPageDrag|annotationCrossPageOverlap|annotationOverlap|wordSelection|touchCursor|links|settings|advancedText|globalLayout|columns|fullWidthPanels|dictionaryRedraw|opticalSize|desktopControls|navigation)$")
             set(lane integration)
         endif()
         set_tests_properties(desktop.${check} PROPERTIES ENVIRONMENT "${headless_environment}"
@@ -207,6 +207,8 @@ if(BUILD_TESTING)
             canvasCancellationKeepsReentrantGesture
             canvasReleaseCanDeleteWidgets
             canvasInputRespectsModalBarrier
+            connectedModalFooter
+            annotationModeNotice
             marksSortingAndAnnotationRows
             hidingSelectionMenuKeepsDamageCompact
             delayedProgressPaintsAfterTheEventLoop

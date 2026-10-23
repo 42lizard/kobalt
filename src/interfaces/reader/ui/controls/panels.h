@@ -81,6 +81,21 @@ private:
     bool warm = false;
 };
 
+class AnnotationModeNotice final : public Panel {
+public:
+    explicit AnnotationModeNotice(QWidget *parent);
+    void setModeEnabled(bool enabled);
+    void centerIn(const QSize &viewport);
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+
+private:
+    QLabel *state, *caption;
+    bool modeEnabled = false;
+};
+
 // Draws a battery whose body fills `body`; the terminal sits outside it. A
 // negative percent draws an empty battery. Insets scale with the body height.
 void paintBattery(QPainter &painter, const QRectF &body, int percent, bool charging, const QColor &ink,

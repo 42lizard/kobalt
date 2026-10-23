@@ -45,6 +45,7 @@
     {"annotations.help_title", "Highlight mode is enabled"},
     {"annotations.highlight_word", "Highlight word"},
     {"annotations.mark_text", "Mark text"},
+    {"annotations.mode", "Annotation mode"},
     {"annotations.mode_active", "HIGHLIGHT MODE NOW ACTIVE"},
     {"annotations.next_matches", "Next highlights"},
     {"annotations.overlap", "Highlights cannot overlap. Adjust the selection and try again."},

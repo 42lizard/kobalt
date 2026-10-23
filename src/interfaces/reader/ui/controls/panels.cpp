@@ -197,6 +197,54 @@ void BatteryIndicator::setStatus(int value, bool pluggedIn) {
                                         .arg(charging ? strings::get("components.charging") : ""));
     update();
 }
+AnnotationModeNotice::AnnotationModeNotice(QWidget *parent)
+    : Panel(parent, Edges(Qt::LeftEdge) | Qt::TopEdge | Qt::RightEdge | Qt::BottomEdge) {
+    setEdgeWidth(m::chrome::heavyRule);
+    setAttribute(Qt::WA_TransparentForMouseEvents);
+    setFocusPolicy(Qt::NoFocus);
+    state = new InterfaceLabel(this);
+    state->setObjectName("rrAnnotationModeState");
+    caption = new InterfaceLabel(strings::get("annotations.mode").toUpper(), this);
+    readerStyle(state, styles::font(m::lightSwipe::percentText));
+    readerStyle(caption, styles::font(m::chrome::descriptionText) + "color:palette(placeholder-text);");
+    setModeEnabled(false);
+}
+void AnnotationModeNotice::setModeEnabled(bool enabled) {
+    modeEnabled = enabled;
+    state->setText(strings::get(enabled ? "common.on" : "common.off"));
+    setAccessibleName(strings::get("annotations.mode") + ": " + state->text());
+    update();
+}
+void AnnotationModeNotice::centerIn(const QSize &viewport) {
+    const int w = qMin(int(m::lightSwipe::width), qMax(1, viewport.width() - 2 * int(m::spacing::section)));
+    const int h = qMin(int(m::lightSwipe::height), viewport.height());
+    setGeometry((viewport.width() - w) / 2, (viewport.height() - h) / 2, w, h);
+}
+void AnnotationModeNotice::resizeEvent(QResizeEvent *event) {
+    Panel::resizeEvent(event);
+    const int x = m::lightSwipe::inset + m::lightSwipe::iconWidth + m::lightSwipe::gap;
+    const int top = (height() - int(m::lightSwipe::percentText + m::lightSwipe::captionGap + m::lightSwipe::captionText)) / 2;
+    const int w = qMax(0, width() - x - int(m::lightSwipe::inset));
+    state->setGeometry(x, top, w, m::lightSwipe::percentText);
+    caption->setGeometry(x, top + m::lightSwipe::percentText + m::lightSwipe::captionGap, w, m::lightSwipe::captionText);
+}
+void AnnotationModeNotice::paintEvent(QPaintEvent *event) {
+    Panel::paintEvent(event);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const int side = m::lightSwipe::iconWidth;
+    const QRect icon(m::lightSwipe::inset, (height() - side) / 2, side, side);
+    const auto ink = palette().color(QPalette::WindowText);
+    paintOpeningIcon(painter, ControlIcon::Annotate, icon, ink);
+    if (!modeEnabled) {
+        const auto slash = QLineF(icon.topLeft() + QPoint(px(8), px(8)), icon.bottomRight() - QPoint(px(8), px(8)));
+        painter.setPen(QPen(palette().color(QPalette::Window), px(14), Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(slash);
+        painter.setPen(QPen(ink, px(6), Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(slash);
+    }
+}
+
 void paintBattery(QPainter &painter, const QRectF &body, int percent, bool charging, const QColor &ink,
                   const QColor &paper) {
     // The menu's battery is the reference size; smaller ones scale its parts.

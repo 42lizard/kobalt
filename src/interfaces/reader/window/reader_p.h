@@ -100,6 +100,7 @@ private:
     void buildAnnotations();
     void enterAnnotations();
     void leaveAnnotations();
+    void showAnnotationModeNotice();
     void finishAnnotations();
     void annotationTap(QPoint point);
     void loadAnnotationDragEdges();
@@ -240,6 +241,8 @@ private:
     kobalt::ui::ModalOverlay *busyNotice = nullptr;
     QTimer renderNoticeTimer;
     kobalt::ui::LightSwipeNotice *brightnessNotice = nullptr;
+    kobalt::ui::AnnotationModeNotice *annotationModeNotice = nullptr;
+    QTimer annotationModeHide;
     bool raisingPopups = false;
     QPointer<kobalt::ui::ModalOverlay> debugDialog;
     QTimer brightnessHide;

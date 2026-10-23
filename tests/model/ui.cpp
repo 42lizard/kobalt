@@ -3284,7 +3284,7 @@ int main(int argc, char **argv) {
                     !styles::textAction().contains("#bb3333"),
                 "Dialog styles contain a destructive colour");
         for (auto *button : {choice.primaryButton(), choice.secondaryButton()}) {
-            const auto fill = button == choice.primaryButton() ? ink : paper;
+            const auto fill = paper;
             const auto hasLabel = [](const QImage &image, const QColor &background) {
                 int inkPixels = 0;
                 for (int y = 10; y < image.height() - 10; ++y)
@@ -3312,8 +3312,8 @@ int main(int argc, char **argv) {
         choice.card()->fitToWidth(400);
         app.processEvents();
         require(choice.primaryButton()->y() < choice.secondaryButton()->y(), "Long modal actions were not stacked");
-        require(choice.primaryButton()->height() > choice.secondaryButton()->height(),
-                "Long modal action did not wrap with padding");
+        require(choice.primaryButton()->height() >= choice.secondaryButton()->height(),
+                "Long modal action lost its wrapping space");
         require(choice.card()->rect().contains(choice.primaryButton()->geometry()), "Modal action escaped its card");
         choice.primaryButton()->setText("Yes");
         choice.card()->fitToWidth(760);

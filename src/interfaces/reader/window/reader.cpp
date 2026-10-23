@@ -56,6 +56,7 @@ Reader::~Reader() {
     model->turnBoundary = {};
     page->cancelHold();
     brightnessHide.stop();
+    annotationModeHide.stop();
     lightPopup->changed = {};
     delete lightPopup;
     light.reset();
@@ -339,6 +340,7 @@ QVector<QWidget *> Reader::popups() const {
             fieldChooser,
             busyNotice,
             brightnessNotice,
+            annotationModeNotice,
             fontDefaultDialog.data(),
             settingsFontPopup.data(),
             linkDialog.data(),
@@ -413,9 +415,9 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
         fieldChooser->hide();
         headerFooterView->hide();
     }
-    if (watched == brightnessNotice && type == QEvent::Hide && isVisible() && !lifecycleHidden && !closing &&
+    if ((watched == brightnessNotice || watched == annotationModeNotice) && type == QEvent::Hide && isVisible() && !lifecycleHidden && !closing &&
         !exportRunning && !exitPending && !services.suspended()) {
-        requestFlash("light-swipe");
+        requestFlash(watched == brightnessNotice ? "light-swipe" : "annotation-mode");
         page->update();
     }
     // Kobo screens have no hover. Qt still sends hover events when a touch
@@ -679,6 +681,7 @@ void Reader::resizeEvent(QResizeEvent *) {
     busyNotice->card()->fitToWidth(qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance));
     busyNotice->centerCard();
     brightnessNotice->centerIn(size());
+    annotationModeNotice->centerIn(size());
     if (syncDialog)
         syncDialog->setGeometry(rect());
     if (finishDialog)
@@ -921,6 +924,9 @@ void Reader::goToPassage(const QString &target) {
 }
 
 void Reader::dismissLookup(bool keepGesture) {
+    annotationModeHide.stop();
+    if (annotationModeNotice)
+        annotationModeNotice->hide();
     dismissLinks();
     ++lookupEpoch;
     lookupPending = false;
@@ -1511,6 +1517,10 @@ void Reader::pageButton(int direction) {
     }
     if (pageList(direction))
         return;
+    if (seekOpen && pageScrubber && pageScrubber->isVisible()) {
+        pageScrubber->turnPreview(direction);
+        return;
+    }
     if (!model->canTurn() || appearanceEdit.panelOpen() || general->isVisible() || choices->isVisible() ||
         chapterGraph->isVisible() || revealingLinks || dictionaryPanel->isVisible() || searchPanel->isVisible() ||
         linksActive() || lookupPending || acknowledgments->isVisible() || bookmarkList->isVisible() ||

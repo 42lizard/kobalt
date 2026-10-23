@@ -467,15 +467,11 @@ void PageScrubber::updateButtons() {
     zoomIn->setEnabled(zoomSpan(zoomLevel + 1) < zoomSpan(zoomLevel));
 }
 void PageScrubber::step(int direction) {
-    const int page = selecting() ? candidate : current;
     if (!chapterJumps) {
-        const int target = qBound(0, page + direction, totalPages - 1);
-        if (target != page) {
-            choose(target);
-            requestPreview();
-        }
+        turnPreview(direction);
         return;
     }
+    const int page = selecting() ? candidate : current;
     if (direction > 0) {
         for (const auto &chapter : chapters) {
             if (chapter.first > page) {
@@ -492,6 +488,16 @@ void PageScrubber::step(int direction) {
                 return;
             }
         }
+    }
+}
+void PageScrubber::turnPreview(int direction) {
+    if (direction != -1 && direction != 1)
+        return;
+    const int page = selecting() ? candidate : current;
+    const int target = qBound(0, page + direction, totalPages - 1);
+    if (target != page) {
+        choose(target);
+        requestPreview();
     }
 }
 void PageScrubber::requestPreview() {

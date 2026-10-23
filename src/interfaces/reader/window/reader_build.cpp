@@ -250,7 +250,10 @@ void Reader::buildReadingPage() {
     dictionaryPanel = new kobalt::DictionaryPanel(this);
     dictionaryPanel->setLanguage(model->state().value("language").toString());
     dictionaryPanel->dismissed = [this] {
-        dismissLookup();
+        if (annotationMode)
+            dismissLookup();
+        else
+            clearAnnotationDraft();
         updateLinkReturn();
     };
     dictionaryPanel->chosen = [this](const QString &id) {
@@ -1193,6 +1196,12 @@ void Reader::buildNotices() {
     brightnessHide.setSingleShot(true);
     brightnessHide.setInterval(m::lightSwipe::hideMilliseconds);
     connect(&brightnessHide, &QTimer::timeout, brightnessNotice, &QWidget::hide);
+    annotationModeNotice = new ui::AnnotationModeNotice(this);
+    annotationModeNotice->setObjectName("rrAnnotationModeNotice");
+    annotationModeNotice->hide();
+    annotationModeHide.setSingleShot(true);
+    annotationModeHide.setInterval(m::lightSwipe::hideMilliseconds);
+    connect(&annotationModeHide, &QTimer::timeout, annotationModeNotice, &QWidget::hide);
 }
 
 void Reader::connectLightGestures() {

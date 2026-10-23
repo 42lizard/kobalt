@@ -50,15 +50,19 @@ void Reader::enterAnnotations() {
     if (model->busy() || !highlights->writable() || appearanceEdit.panelOpen() || general->isVisible()) {
         return;
     }
+    const bool changed = !annotationMode;
     dismissLookup();
     dismissControls();
     annotationMode = true;
     page->setAnnotationInputEnabled(true);
     syncMarkupRequest();
     syncAnnotations();
+    if (changed)
+        showAnnotationModeNotice();
 }
 
 void Reader::leaveAnnotations() {
+    const bool changed = annotationMode;
     const bool discardSelection = !annotationStart.isEmpty() || !annotationEditing.isEmpty();
     annotationMode = false;
     annotationDragAwaitingRelease = false;
@@ -86,7 +90,23 @@ void Reader::leaveAnnotations() {
     toolbarComposition.annotate->setChecked(false);
     annotationPopover->hide();
     page->annotate({}, savedHighlightRects);
+    if (changed)
+        dismissControls();
     refresh();
+    if (changed)
+        showAnnotationModeNotice();
+}
+
+void Reader::showAnnotationModeNotice() {
+    if (!isVisible() || lifecycleHidden || closing || services.suspended() || !annotationModeNotice)
+        return;
+    brightnessHide.stop();
+    brightnessNotice->hide();
+    annotationModeNotice->setModeEnabled(annotationMode);
+    annotationModeNotice->centerIn(size());
+    annotationModeNotice->show();
+    annotationModeNotice->raise();
+    annotationModeHide.start();
 }
 
 void Reader::finishAnnotations() {
@@ -517,10 +537,11 @@ void Reader::requestAnnotationDrag() {
         if (guard->annotationDragBoundary < 0) {
             QVector<QPair<QString, QString>> ranges;
             QStringList ids;
-            for (const auto &item : guard->highlights->highlights()) {
-                ranges.append({item.start, item.end});
-                ids.append(item.id);
-            }
+            if (guard->annotationMode)
+                for (const auto &item : guard->highlights->highlights()) {
+                    ranges.append({item.start, item.end});
+                    ids.append(item.id);
+                }
             guard->model->intersectingRanges(token.start, token.end, ranges,
                 [guard, epoch, token, ids, finish, reject](QVector<int> hits) {
                     if (!guard || guard->annotationEpoch != epoch || !guard->annotationDragging)
@@ -582,10 +603,11 @@ void Reader::resolveAnnotationTokens(AnnotationToken start, AnnotationToken end,
                 return;
             }
             QVector<QPair<QString, QString>> others;
-            for (const auto &item : guard->highlights->highlights()) {
-                if (item.id != guard->annotationEditing)
-                    others.append({item.start, item.end});
-            }
+            if (guard->annotationMode)
+                for (const auto &item : guard->highlights->highlights()) {
+                    if (item.id != guard->annotationEditing)
+                        others.append({item.start, item.end});
+                }
             // Validate before publishing the draft or moving either handle.
             // Reject jumps across saved passages as well as moves into them.
             guard->model->intersectingRanges(range.start, range.end, others,
@@ -694,16 +716,6 @@ void Reader::showAnnotationActions() {
             {"rrSelectionLookup", ui::ControlIcon::Dictionary, strings::get("reader.link_dictionary"), [this] {
                 annotationPopover->hide();
                 lookupSelection();
-            }},
-            {"rrSelectionAnnotate", ui::ControlIcon::Annotate, strings::get("annotations.title"), [this] {
-                // The graphics proxy finishes dispatching release to this button
-                // before the replacement menu deletes it.
-                annotationPopover->hide();
-                qt::later(0, this, [this] {
-                    enterAnnotations();
-                    if (!topControls->isVisible())
-                        showAnnotationActions();
-                });
             }}
         };
         const auto target = selectionLinkPoint();
@@ -1226,12 +1238,31 @@ void Reader::removeAnnotation(const QString &id) {
     if (removeDialog) {
         return;
     }
+    QString excerpt;
+    int number = -1;
+    for (const auto &row : annotationRows()) {
+        if (row.position == id) {
+            excerpt = row.excerpt;
+            number = row.page;
+            break;
+        }
+    }
+    if (excerpt.isEmpty())
+        return;
+    if (excerpt.size() > 80) {
+        excerpt = excerpt.left(80);
+        excerpt = excerpt.left(qMax(40, excerpt.lastIndexOf(' '))) + QString::fromUtf8("…");
+    }
+    const auto detail = number >= 0 ? strings::get("bookmarks.remove_detail").arg(number + 1).arg(excerpt) : excerpt;
     auto *choice = new ui::ChoiceModal(
-        this, {strings::get("annotations.remove_detail"), strings::get("annotations.remove_prompt"), {}},
+        this, {detail, strings::get("annotations.remove_prompt"), {}},
         {strings::get("common.cancel"), "rrKeepAnnotation"},
         {strings::get("annotations.remove"), "rrConfirmRemoveAnnotation"});
     removeDialog = choice;
     choice->setObjectName("rrRemoveAnnotation");
+    auto *text = choice->descriptionLabel();
+    text->setObjectName("rrRemoveAnnotationDetail");
+    ui::readerStyle(text, ui::styles::font(m::chrome::descriptionText) + "color:palette(placeholder-text);");
     const auto finish = [this, id, choice](bool remove) {
         choice->hide();
         choice->deleteLater();

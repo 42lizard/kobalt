@@ -188,7 +188,7 @@ void BottomNavigation::paintEvent(QPaintEvent *event) {
     // An open panel draws the rule above the bar and leaves this band empty.
     // Extend the active tab's fill through it, so the fill meets that rule.
     for (auto *tab : tabs)
-        if (tab->isChecked() || tab->isDown())
+        if (!tab->isHidden() && (tab->isChecked() || tab->isDown()))
             painter.fillRect(tab->mapTo(this, QPoint()).x(), 0, tab->width(), toolbarBorder,
                              tab->palette().color(QPalette::Text));
 }

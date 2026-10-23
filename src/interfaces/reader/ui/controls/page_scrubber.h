@@ -24,6 +24,7 @@ public:
     void setPreview(int page, QImage image);
     void cancel();
     void showCurrentPage();
+    void turnPreview(int direction);
     void setPreviewDismissible(bool dismissible) {
         previewDismissible = dismissible;
     }

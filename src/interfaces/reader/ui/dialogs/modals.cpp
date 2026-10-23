@@ -9,8 +9,6 @@
 #include "../controls/buttons.h"
 #include "../controls/rows.h"
 #include "../controls/text.h"
-#include <QStylePainter>
-#include <QStyleOptionButton>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QVariant>
@@ -58,7 +56,7 @@ void PopupCard::adaptiveActions(const QVector<QPushButton *> &buttons) {
     Q_ASSERT(!actionRows && !buttons.isEmpty() && buttons.size() <= 2);
     actionButtons = buttons;
     actionRows = new QBoxLayout(QBoxLayout::LeftToRight);
-    actionRows->setSpacing(m::notice::cardGap);
+    actionRows->setSpacing(0);
     for (auto *button : buttons)
         actionRows->addWidget(button, 1);
     contentRows->addLayout(actionRows);
@@ -70,24 +68,24 @@ public:
         setObjectName(action.name);
         setFocusPolicy(Qt::StrongFocus);
         setProperty("reader_primary_action", primary);
-        readerStyle(this, (primary ? styles::primary() : styles::outlined()) +
-                              QString("QPushButton{%1}").arg(styles::font(m::chrome::labelText)));
+        readerStyle(this, "QPushButton{border:none;padding:0;min-height:0;" +
+                              styles::font(m::chrome::labelText, primary) + "}");
         setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     }
 
 protected:
     void paintEvent(QPaintEvent *) override {
-        QStylePainter painter(this);
-        QStyleOptionButton option;
-        initStyleOption(&option);
-        option.text.clear();
-        painter.drawControl(QStyle::CE_PushButton, option);
+        QPainter painter(this);
+        const auto paper = palette().color(QPalette::Window);
+        const auto ink = palette().color(isEnabled() ? QPalette::WindowText : QPalette::Mid);
+        painter.fillRect(rect(), isEnabled() && isDown() ? sectionColor(this) : paper);
+        auto edges = Edges(Qt::TopEdge);
+        if (property("reader_modal_left_rule").toBool())
+            edges |= Qt::LeftEdge;
+        paintEdges(painter, rect(), edges, dividerColor(this), m::control::border);
         painter.setFont(font());
         const int inset = m::control::outlinedHorizontalPadding + m::control::border;
-        const auto colors = parentWidget()->palette();
-        const auto role =
-            property("reader_primary_action").toBool() && !isDown() ? QPalette::Window : QPalette::WindowText;
-        painter.setPen(isEnabled() ? colors.color(role) : QColor("#999999"));
+        painter.setPen(ink);
         painter.drawText(
             rect().adjusted(inset, m::control::outlinedVerticalPadding, -inset, -m::control::outlinedVerticalPadding),
             Qt::AlignCenter | Qt::TextWordWrap, text());
@@ -95,13 +93,28 @@ protected:
 };
 QLabel *modalContent(PopupCard *card, const ModalContent &content) {
     Q_ASSERT(!content.title.trimmed().isEmpty());
+    const int border = 2;
+    card->rows()->setContentsMargins(border, border, border, border);
+    card->rows()->setSpacing(0);
+    const auto padding = m::notice::cardMargins;
+    readerStyle(card, styles::popup() +
+        QString("QLabel[reader_modal_content=\"true\"]{padding:%1px %2px %3px %4px;} "
+                "QLabel[reader_modal_heading=\"true\"]{border-bottom:%5px solid palette(light);}")
+            .arg(int(padding.top())).arg(int(padding.right())).arg(int(padding.bottom())).arg(int(padding.left()))
+            .arg(int(m::control::border)));
     if (!content.image.isNull())
         card->image(content.image);
-    card->title(content.title, "rrModalTitle")->setTextFormat(Qt::PlainText);
+    auto *title = card->title(content.title, "rrModalTitle");
+    title->setTextFormat(Qt::PlainText);
+    title->setProperty("reader_modal_content", true);
+    title->setProperty("reader_modal_heading", !content.description.isEmpty());
     if (content.description.isEmpty())
         return nullptr;
     auto *description = card->message(content.description, "rrModalDescription");
     description->setTextFormat(Qt::PlainText);
+    description->setProperty("reader_modal_content", true);
+    description->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    readerStyle(description, styles::font(m::chrome::descriptionText));
     return description;
 }
 }
@@ -141,8 +154,11 @@ void PopupCard::fitToWidth(int width) {
         actionRows->setDirection(stacked ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
         if (stacked)
             std::reverse(visible.begin(), visible.end());
-        for (auto *button : visible)
+        for (int index = 0; index < visible.size(); ++index) {
+            auto *button = visible[index];
+            button->setProperty("reader_modal_left_rule", !stacked && index > 0);
             actionRows->addWidget(button, 1);
+        }
         const int buttonWidth = visible.isEmpty() ? textWidth
                                 : stacked         ? textWidth
                                           : (textWidth - (visible.size() - 1) * actionRows->spacing()) / visible.size();
@@ -152,7 +168,7 @@ void PopupCard::fitToWidth(int width) {
             const auto bounds = button->fontMetrics().boundingRect(
                 QRect(0, 0, qMax(1, buttonWidth - 2 * horizontal), 10000), Qt::TextWordWrap, button->text());
             button->setFixedHeight(
-                qMax<int>(m::control::outlinedHeight + 2 * vertical, bounds.height() + 2 * vertical));
+                qMax<int>(m::chrome::actionHeight, bounds.height() + 2 * vertical));
         }
     }
     for (auto *label : findChildren<QLabel *>(QString(), Qt::FindDirectChildrenOnly)) {
@@ -389,6 +405,7 @@ QPushButton *makeModalButton(QWidget *parent, const ModalAction &action, bool pr
 
 NoticeModal::NoticeModal(QWidget *parent, const ModalContent &content, const ModalAction &action)
     : ModalOverlay(parent) {
+    setDimmed(true);
     description = modalContent(card(), content);
     primary = makeModalButton(card(), action, true);
     card()->adaptiveActions({primary});
@@ -398,6 +415,7 @@ NoticeModal::NoticeModal(QWidget *parent, const ModalContent &content, const Mod
 ChoiceModal::ChoiceModal(QWidget *parent, const ModalContent &content, const ModalAction &secondaryAction,
                          const ModalAction &primaryAction)
     : ModalOverlay(parent) {
+    setDimmed(true);
     description = modalContent(card(), content);
     secondary = makeModalButton(card(), secondaryAction, false);
     primary = makeModalButton(card(), primaryAction, true);

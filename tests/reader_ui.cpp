@@ -278,6 +278,122 @@ private slots:
         QVERIFY(click(canvas, button));
         QCOMPARE(activated.count(), 2);
     }
+    void annotationModeNotice_data() { variants(); }
+    void annotationModeNotice() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        QWidget host;
+        host.setProperty("reader_dark", dark);
+        ui::readerStyle(&host, ui::styles::reader());
+        host.resize(ui::px(1072), ui::px(1448));
+        ui::AnnotationModeNotice notice(&host);
+        notice.centerIn(host.size());
+        host.show();
+        notice.show();
+        notice.setModeEnabled(true);
+        QCoreApplication::processEvents();
+        const auto enabled = notice.grab().toImage();
+        notice.setModeEnabled(false);
+        const auto disabled = notice.grab().toImage();
+        const QRect icon(ui::metrics::lightSwipe::inset,
+                         (notice.height() - ui::metrics::lightSwipe::iconWidth) / 2,
+                         ui::metrics::lightSwipe::iconWidth, ui::metrics::lightSwipe::iconWidth);
+        QVERIFY(enabled.copy(icon) != disabled.copy(icon));
+        QCOMPARE(notice.size(), QSize(ui::metrics::lightSwipe::width, ui::metrics::lightSwipe::height));
+        QVERIFY(notice.testAttribute(Qt::WA_TransparentForMouseEvents));
+        const auto captures = qEnvironmentVariable("KOBALT_CAPTURE_MODALS");
+        if (!captures.isEmpty()) {
+            QVERIFY(QDir().mkpath(captures));
+            const auto suffix = QString("-%1-%2.png").arg(dark ? "dark" : "light").arg(ppi);
+            QVERIFY(enabled.save(captures + "/mode-on" + suffix));
+            QVERIFY(disabled.save(captures + "/mode-off" + suffix));
+        }
+    }
+    void connectedModalFooter_data() { variants(); }
+    void connectedModalFooter() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        QWidget host;
+        host.setProperty("reader_dark", dark);
+        auto colors = host.palette();
+        const QColor paper = dark ? Qt::black : Qt::white;
+        const QColor ink = dark ? Qt::white : Qt::black;
+        colors.setColor(QPalette::Window, paper);
+        colors.setColor(QPalette::WindowText, ink);
+        host.setPalette(colors);
+        ui::readerStyle(&host, ui::styles::reader());
+        host.resize(ui::px(1072), ui::px(1448));
+        host.show();
+        ui::ModalOverlay reference(&host);
+        reference.setDimmed(true);
+        reference.show();
+        QCoreApplication::processEvents();
+        const auto backdrop = reference.grab().toImage();
+        reference.hide();
+        ui::ChoiceModal choice(&host, {"The saved passage will be removed from this book.", "Delete this highlight?", {}},
+                                {"Cancel", "modalCancel"}, {"Delete", "modalDelete"});
+        choice.show();
+        QCoreApplication::processEvents();
+        auto *card = choice.card();
+        auto *cancel = choice.secondaryButton();
+        auto *remove = choice.primaryButton();
+        auto *heading = card->findChild<QLabel *>("rrModalTitle");
+        QVERIFY(heading->height() >= QFontMetrics(heading->font()).height() + 2 * ui::metrics::notice::cardMargins.top());
+        QVERIFY(choice.descriptionLabel()->contentsMargins().left() >= ui::metrics::notice::cardMargins.left());
+        QCOMPARE(cancel->y(), remove->y());
+        QCOMPARE(cancel->geometry().right() + 1, remove->x());
+        QCOMPARE(cancel->x(), 2);
+        QCOMPARE(remove->geometry().right(), card->width() - 3);
+        QCOMPARE(remove->geometry().bottom(), card->height() - 3);
+        const auto frame = card->grab().toImage();
+        QCOMPARE(frame.pixelColor(remove->geometry().center().x(), remove->y()), ui::dividerColor(card));
+        QCOMPARE(frame.pixelColor(remove->x(), remove->y() + ui::px(10)), ui::dividerColor(card));
+        QCOMPARE(frame.pixelColor(remove->x() + ui::px(10), remove->y() + ui::px(10)), paper);
+        const auto actual = choice.grab().toImage();
+        int stripes = 0;
+        for (int y = 0; y < ui::px(100); ++y) {
+            QCOMPARE(actual.pixelColor(0, y), backdrop.pixelColor(0, y));
+            stripes += actual.pixelColor(0, y) != paper;
+        }
+        QVERIFY(stripes > 0);
+        const auto captures = qEnvironmentVariable("KOBALT_CAPTURE_MODALS");
+        if (!captures.isEmpty()) {
+            QVERIFY(QDir().mkpath(captures));
+            QVERIFY(choice.grab().save(captures + QString("/connected-%1-%2.png").arg(dark ? "dark" : "light").arg(ppi)));
+        }
+        remove->setText("Use this reading font as the default for every new book");
+        card->fitToWidth(ui::px(400));
+        choice.centerCard();
+        QCoreApplication::processEvents();
+        QVERIFY(remove->y() < cancel->y());
+        QCOMPARE(remove->geometry().bottom() + 1, cancel->y());
+        QCOMPARE(remove->x(), cancel->x());
+        QCOMPARE(remove->width(), cancel->width());
+        const auto labelBounds = QFontMetrics(remove->font()).boundingRect(
+            QRect(0, 0, remove->width() - 2 * int(ui::metrics::control::outlinedHorizontalPadding + ui::metrics::control::border), 10000),
+            Qt::TextWordWrap, remove->text());
+        QVERIFY(remove->height() >= labelBounds.height() + 2 * int(ui::metrics::control::outlinedVerticalPadding + ui::metrics::control::border));
+        if (!captures.isEmpty())
+            QVERIFY(choice.grab().save(captures + QString("/stacked-%1-%2.png").arg(dark ? "dark" : "light").arg(ppi)));
+        remove->hide();
+        card->fitToWidth(ui::px(760));
+        QCoreApplication::processEvents();
+        QCOMPARE(cancel->width(), card->width() - 4);
+        remove->show();
+        remove->setText("Delete");
+        card->fitToWidth(ui::px(760));
+        QCoreApplication::processEvents();
+        QCOMPARE(cancel->y(), remove->y());
+        choice.hide();
+        ui::NoticeModal notice(&host, {{}, "Formatting warning", {}}, {"OK", "modalOk"});
+        notice.show();
+        QCoreApplication::processEvents();
+        QCOMPARE(notice.primaryButton()->width(), notice.card()->width() - 4);
+        QCOMPARE(notice.primaryButton()->geometry().bottom(), notice.card()->height() - 3);
+        QCOMPARE(notice.grab().toImage().pixelColor(0, 0), backdrop.pixelColor(0, 0));
+    }
     void marksSortingAndAnnotationRows_data() { variants(); }
     void marksSortingAndAnnotationRows() {
         QFETCH(bool, dark);
