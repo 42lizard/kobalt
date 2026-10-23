@@ -17,14 +17,15 @@ bool anything(const Layout &layout, int first) {
 QString pageFraction(int page, int pages) {
     return pages > 0 ? strings::get("common.page_fraction").arg(page).arg(pages) : QString();
 }
-// Without a pace yet, say so instead of leaving the slot empty, as Kindle does.
+// A standalone estimate remains approximate while reading history accumulates.
 QString timeLeft(qint64 milliseconds, bool learningPace) {
     if (milliseconds < 0)
         return learningPace ? strings::get("header_footer.learning_pace") : QString();
     const qint64 minutes = qMax<qint64>(1, (milliseconds + 30000) / 60000);
     const auto time = minutes < 60 ? strings::get("stats.duration_minutes").arg(minutes)
                                    : strings::get("stats.duration_hours").arg(minutes / 60).arg(minutes % 60);
-    return strings::get("header_footer.time_left").arg(time);
+    const auto result = strings::get("header_footer.time_left").arg(time);
+    return learningPace ? strings::get("stats.approximate_time").arg(result) : result;
 }
 // How far along: the last page reads 100%.
 QString percentDone(int page, int pages) {

@@ -115,6 +115,10 @@ public:
     // layout changed before they finished; the caller asks again.
     void bookmarkPages(QStringList positions, std::function<void(QVector<int>)> finished);
     void pageSummary(int page, std::function<void(QString position, QString excerpt)> finished);
+    // Renders a bounded thumbnail without moving the reading position. Only
+    // the latest request can finish; navigation, reflow and cancellation drop it.
+    void previewPage(int page, QSize bounds, std::function<void(QImage)> finished);
+    void cancelPagePreview();
     void wordAt(QPoint point, std::function<void(WordSelection)> finished);
     void linkDetails(const QString &source, std::function<void(LinkDetails)> finished);
     const QVector<PageLink> &pageLinks() const {
@@ -305,6 +309,7 @@ private:
     // The newest request number, readable on the engine worker. Work that only
     // prepares later page turns stops when it no longer matches its own job.
     std::shared_ptr<std::atomic<quint64>> newest = std::make_shared<std::atomic<quint64>>(0);
+    std::shared_ptr<std::atomic<quint64>> newestPreview = std::make_shared<std::atomic<quint64>>(0);
     std::shared_ptr<std::atomic_bool> searchCancelled;
     void searchNext(QString query, int page, int count, quint64 job, std::shared_ptr<std::atomic_bool> cancelled,
                     std::function<void(SearchBatch)> finished);

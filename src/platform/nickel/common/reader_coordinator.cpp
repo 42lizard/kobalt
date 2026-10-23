@@ -678,6 +678,7 @@ void ReaderCoordinator::load() {
     run.orientation->configure(preferences);
     saved["dark_mode"] = preferences.value("dark_mode").toBool(false);
     saved["bold_reading"] = preferences.value("bold_reading").toString("off");
+    saved["avoid_wasteful_styling"] = preferences.value("avoid_wasteful_styling").toBool(true);
     const auto size = run.interface->readingViewport(QGuiApplication::primaryScreen()->size(), preferences);
     run.model->open(
         {run.identity, run.filePath, size, saved,

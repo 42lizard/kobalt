@@ -342,6 +342,18 @@
 "reader.automatic_rotation" = "Automatic rotation";
 "reader.book_marked_finished" = "Book marked finished";
 "reader.book_position" = "Book position";
+"reader.zoom_in" = "Zoom scrubber in";
+"reader.zoom_out" = "Zoom scrubber out";
+"reader.zoom_overview" = "Move zoomed range through the whole book";
+"reader.whole_book" = "Whole book";
+"reader.expand_book_map" = "Expand whole-book map";
+"reader.collapse_book_map" = "Collapse whole-book map";
+/* Arguments: %1 */
+"reader.zoom_scale" = "%1× zoom";
+/* Arguments: %1, %2, %3 */
+"reader.zoom_range" = "Pages %1 to %2 of %3";
+"reader.previous_chapter" = "Previous chapter";
+"reader.next_chapter" = "Next chapter";
 /* Arguments: %1 */
 "reader.brightness" = "Brightness %1%";
 "reader.brightness_and_warmth" = "Brightness and warmth";
@@ -476,6 +488,15 @@
 "settings.automatic_book_opening_description" = "Use Kobalt when opening supported books from your library. This is the same setting as in Kobo's Reading settings.";
 "settings.sleep_screen" = "Sleep screen";
 "settings.page_navigation" = "Page navigation";
+"settings.section_navigation_bar" = "Navigation Bar";
+"settings.show_navigation_bar" = "Show navigation bar";
+"settings.show_navigation_bar_description" = "Show the book-position slider above the tabs, with preview arrows and an expandable whole-book map.";
+"settings.navigation_bar_buttons" = "Button action";
+"settings.navigation_bar_hint" = "Choose how the arrows beside the scrubber move the page preview.";
+"settings.navigation_bar_pages" = "Page jumps";
+"settings.navigation_bar_pages_description" = "Preview the previous or next page.";
+"settings.navigation_bar_chapters" = "Chapter jumps";
+"settings.navigation_bar_chapters_description" = "Preview the previous or next chapter. Default.";
 "settings.tap_zones" = "Tap zones";
 "settings.tap_left_right" = "Left / right";
 "settings.tap_top_bottom" = "Top / bottom";
@@ -629,6 +650,8 @@
 "stats.time_left" = "≈ %1 left";
 /* Arguments: %1 */
 "stats.duration_minutes" = "%1 min";
+/* Arguments: %1 */
+"stats.approximate_time" = "≈ %1";
 /* Arguments: %1, %2 */
 "stats.duration_hours" = "%1 h %2 min";
 /* Arguments: %1, %2 */
@@ -708,3 +731,6 @@
 "settings.inherit_text_layout_description" = "New books start with the last book's text style and page margins. Custom presets are planned for a future beta.";
 "settings.inherit_header_footer" = "Inherit header and footer from the last book";
 "settings.inherit_header_footer_description" = "New books start with the last book's header and footer. Books with saved settings keep them.";
+
+"settings.avoid_wasteful_styling" = "Selectively avoid wasteful styling";
+"settings.avoid_wasteful_styling_description" = "Kobalt will automatically remove margins at page breaks and ignore page margins to avoid wasting space. If you prefer the original book CSS, you may disable this.";

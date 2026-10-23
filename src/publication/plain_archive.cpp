@@ -64,6 +64,8 @@ private:
 struct PlainArchive::Data {
     QString path;
     QMap<QString, qint64> sizes;
+    // Requests are restricted to the GUI thread.
+    ZipResourceIndex index;
 };
 PlainArchive::PlainArchive() = default;
 PlainArchive::~PlainArchive() = default;
@@ -96,7 +98,7 @@ QNetworkReply *PlainArchive::request(const QString &name) {
     // Never ask Nickel to decode a resource. CREngine reads the original
     // bytes even when the advisory formatting inspection is incomplete.
     ZipResource stream;
-    if (data_->sizes.value(name) > ResourceCache::budgetBytes || !stream.open(data_->path, name))
+    if (data_->sizes.value(name) > ResourceCache::budgetBytes || !stream.open(data_->path, name, data_->index))
         return new Reply({}, false);
     QByteArray bytes;
     while (stream.valid() && !stream.finished())

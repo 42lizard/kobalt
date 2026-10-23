@@ -156,6 +156,16 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
     tapZonesButton =
         ui::makeCaptionButton(controlsPage, nullptr, "rrTapZones", strings::get("settings.tap_zones"), [] {});
     controlsRows->addWidget(tapZonesButton);
+    section(controlsPage, controlsRows, "rrControlsNavigationBarSection",
+            strings::get("settings.section_navigation_bar"));
+    navigationBarOption = check(controlsPage, "rrShowNavigationBar", strings::get("settings.show_navigation_bar"),
+                                strings::get("settings.show_navigation_bar_description"));
+    navigationBarOption->setChecked(true);
+    controlsRows->addWidget(navigationBarOption);
+    navigationBarButton = ui::makeCaptionButton(controlsPage, nullptr, "rrNavigationBarButtons",
+                                                strings::get("settings.navigation_bar_buttons"), [] {});
+    controlsRows->addWidget(navigationBarButton);
+    connect(navigationBarOption, &QCheckBox::toggled, navigationBarButton, &QWidget::setEnabled);
     auto *lightSection =
         section(controlsPage, controlsRows, "rrControlsLightSection", strings::get("settings.section_frontlight"));
     const bool lightSupported = inputs.lightSupported;
@@ -191,6 +201,11 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
         check(advancedPage, "rrHideNonlinearFragments", strings::get("reader.hide_nonlinear_fragments"),
               strings::get("settings.hide_nonlinear_fragments_description"));
     advancedRows->addWidget(hideNonlinearOption);
+    avoidWastefulStylingOption =
+        check(advancedPage, "rrAvoidWastefulStyling", strings::get("settings.avoid_wasteful_styling"),
+              strings::get("settings.avoid_wasteful_styling_description"));
+    avoidWastefulStylingOption->setChecked(true);
+    advancedRows->addWidget(avoidWastefulStylingOption);
     auto *resetRow = kobalt::ui::horizontalRow();
     advancedRows->insertLayout(3, resetRow);
     resetRow->addStretch(1);
@@ -392,10 +407,19 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
         optionsScroll->verticalScrollBar()->setValue(0);
     });
     settingsTabButtons.first()->setChecked(true);
-    QVector<ui::DescribedOption *> options = {hideNonlinearOption, linkIndicatorOption,       darkOption,
-                                              bionicOption,        animationOption,           inheritTextLayoutOption,
-                                              edgeLightOption,     inheritHeaderFooterOption, denseGraphOption,
-                                              pinStatsOption,      automaticOpeningOption};
+    QVector<ui::DescribedOption *> options = {avoidWastefulStylingOption,
+                                              hideNonlinearOption,
+                                              linkIndicatorOption,
+                                              darkOption,
+                                              bionicOption,
+                                              animationOption,
+                                              inheritTextLayoutOption,
+                                              edgeLightOption,
+                                              inheritHeaderFooterOption,
+                                              denseGraphOption,
+                                              pinStatsOption,
+                                              automaticOpeningOption,
+                                              navigationBarOption};
     if (inputs.desktopUi)
         options << hideStatusOption << hideDeviceOptionsOption;
     for (auto *option : options) {
@@ -415,7 +439,8 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
     resetRow->setStretch(0, 0);
     resetRow->setStretch(1, 1);
     resetRow->setStretch(2, 0);
-    for (auto *button : {resetDefaults, refreshButton, sleepScreenButton, pageNavigationButton, tapZonesButton}) {
+    for (auto *button :
+         {resetDefaults, refreshButton, sleepScreenButton, pageNavigationButton, tapZonesButton, navigationBarButton}) {
         button->setRule(Qt::BottomEdge);
         // The refresh row's caption shows its current choice, set when Settings opens.
         if (button == resetDefaults)
@@ -523,6 +548,16 @@ void SettingsPanel::showDictionaries(bool visible) {
     if (!visible && settingsPages->currentIndex() == DictionariesSettings)
         settingsPages->setCurrentIndex(DisplaySettings);
     fitRail();
+}
+void SettingsPanel::showNativeUi(bool visible) {
+    if (auto *button = settingsTabButtons.value(NativeUiSettings, nullptr)) {
+        button->setVisible(visible);
+        button->setEnabled(visible);
+        if (!visible && settingsPages->currentIndex() == NativeUiSettings) {
+            settingsPages->setCurrentIndex(DisplaySettings);
+        }
+        fitRail();
+    }
 }
 
 void SettingsPanel::fitRail() {

@@ -17,6 +17,8 @@ public:
     QMap<QString, qint64> sizes;
     std::shared_ptr<SourceLease> lease;
     std::shared_ptr<std::atomic_bool> contentRejected;
+    // ResourceCache access runs serially on the engine worker.
+    ZipResourceIndex index;
     qint64 requests = 0, failures = 0, readNs = 0, sinkNs = 0, xmlNs = 0;
 
     bool cancelled() const {
@@ -61,7 +63,7 @@ private:
             return !cancelled() && sink(placeholder.constData(), placeholder.size());
         }
         ZipResource stream;
-        if (!stream.open(path, name, ResourceCache::budgetBytes)) {
+        if (!stream.open(path, name, index, ResourceCache::budgetBytes)) {
             return fail("error.could_not_load_a_book_resource");
         }
         if (stream.size() != sizes.value(name)) {

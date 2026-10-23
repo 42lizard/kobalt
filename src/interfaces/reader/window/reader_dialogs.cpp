@@ -809,6 +809,10 @@ void Reader::openSleepScreen() {
 }
 
 namespace {
+QString barButtonsLabel(pageNavigation::BarButtons mode) {
+    return strings::get(mode == pageNavigation::BarButtons::Chapters ? "settings.navigation_bar_chapters"
+                                                                     : "settings.navigation_bar_pages");
+}
 QString navigationLabel(pageNavigation::Mode mode) {
     switch (mode) {
     case pageNavigation::Mode::TapsAndSwipes:
@@ -997,6 +1001,83 @@ void Reader::openPageNavigation() {
     pageNavigationPopup->show();
     pageNavigationPopup->raise();
     pageNavigationPopup->setFocus();
+}
+
+void Reader::showNavigationBarButtons() {
+    const auto mode = pageNavigation::barButtons(preferences);
+    navigationBarButton->setCaption(barButtonsLabel(mode).toUpper());
+    pageScrubber->setChapterJumps(mode == pageNavigation::BarButtons::Chapters);
+}
+
+void Reader::closeNavigationBarButtons() {
+    if (!navigationBarPopup) {
+        return;
+    }
+    navigationBarPopup->hide();
+    navigationBarPopup->deleteLater();
+    navigationBarPopup.clear();
+}
+
+void Reader::openNavigationBarButtons() {
+    if (navigationBarPopup) {
+        return;
+    }
+    namespace c = m::chrome;
+    navigationBarPopup = new ui::ModalOverlay(this);
+    navigationBarPopup->setObjectName("rrNavigationBarPopup");
+    navigationBarPopup->setGeometry(rect());
+    navigationBarPopup->installEventFilter(this);
+    navigationBarPopup->dismissed = [this] {
+        closeNavigationBarButtons();
+    };
+    auto *card = navigationBarPopup->card();
+    card->rows()->setContentsMargins(2, 2, 2, 2);
+    card->rows()->setSpacing(0);
+    card->rows()->addSpacing(m::notice::cardMargins.top());
+    auto *title = card->title(strings::get("settings.navigation_bar_buttons"), "rrNavigationBarTitle");
+    title->setContentsMargins(c::inset, 0, c::inset, 0);
+    auto *hint = card->message(strings::get("settings.navigation_bar_hint"), "rrNavigationBarHint");
+    hint->setContentsMargins(c::inset, 0, c::inset, 0);
+    card->rows()->addSpacing(m::notice::cardMargins.bottom());
+    const int cardWidth = qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance);
+    auto *choices = new ui::RadioList(card);
+    choices->setObjectName("rrNavigationBarChoices");
+    choices->setMinimumRowHeight(c::listActionHeight);
+    choices->setTopDivider(true);
+    for (const auto mode : pageNavigation::barButtonsModes) {
+        choices->add("rrNavigationBar_" + pageNavigation::value(mode), barButtonsLabel(mode),
+                     strings::get(mode == pageNavigation::BarButtons::Chapters
+                                      ? "settings.navigation_bar_chapters_description"
+                                      : "settings.navigation_bar_pages_description"));
+        if (mode == pageNavigation::barButtons(preferences)) {
+            choices->setCurrent(choices->options().size() - 1);
+        }
+    }
+    choices->chosen = [this](int index) {
+        auto next = preferences;
+        next[pageNavigation::barButtonsKey] = pageNavigation::value(pageNavigation::barButtonsModes[index]);
+        if (writePreferences(next)) {
+            preferences = next;
+            showNavigationBarButtons();
+            settingsError->clear();
+            settingsError->hide();
+        } else {
+            settingsError->setText(strings::get("reader.could_not_save_reader_settings"));
+            settingsError->show();
+        }
+        closeNavigationBarButtons();
+    };
+    card->rows()->addWidget(choices);
+    choices->setFixedHeight(choices->heightForWidth(cardWidth - 4));
+    card->fitToWidth(cardWidth);
+    navigationBarPopup->centerCard();
+    for (auto *widget : navigationBarPopup->findChildren<QWidget *>()) {
+        textRefresh(widget);
+    }
+    textRefresh(navigationBarPopup);
+    navigationBarPopup->show();
+    navigationBarPopup->raise();
+    navigationBarPopup->setFocus();
 }
 
 }

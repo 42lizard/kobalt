@@ -339,8 +339,8 @@ void ReaderModel::setDocumentCache(QString directory, QByteArray fingerprint, QB
     // Parsed pages from older density, image and double-scaled line-height
     // policies must not survive these renderer changes. The density is fixed by the host
     // before any model opens and is shared by the main reader and previews.
-    cachePolicy_ =
-        std::move(policy) + ":css-density-leading-v1:line-height-v2:" + QByteArray::number(readingPpi.load());
+    cachePolicy_ = std::move(policy) +
+                   ":css-density-leading-v1:page-layout-v2:line-height-v2:" + QByteArray::number(readingPpi.load());
     cacheBytes_ = bytes;
 }
 QByteArray ReaderModel::documentCachePolicy() const {
@@ -401,6 +401,7 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     size_ = size;
     darkMode_ = saved.value("dark_mode").toBool(false);
     hideNonlinearFragments_ = saved.value("hide_nonlinear_fragments").toBool(false);
+    avoidWastefulStyling_ = saved.value("avoid_wasteful_styling").toBool(true);
     pixels_ = qBound(minimumFontPixels(), saved.value("font_pixels").toInt(defaultFontPixels()), maximumFontPixels());
     spacing_ = qBound(100, saved.value("line_spacing").toInt(defaultLineSpacing), maximumLineSpacing);
     margin_ = qBound(0, saved.value("margin_pixels").toInt(defaultMarginPixels()), maximumMarginPixels());
@@ -448,6 +449,10 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     auto properties = LVCreatePropsContainer();
     properties->setInt(PROP_FORMAT_MIN_SPACE_CONDENSING_PERCENT, 100);
     properties->setInt(PROP_FLOATING_PUNCTUATION, 0);
+    properties->setInt(PROP_RENDER_BLOCK_RENDERING_FLAGS,
+                       avoidWastefulStyling_
+                           ? DEF_RENDER_BLOCK_RENDERING_FLAGS
+                           : DEF_RENDER_BLOCK_RENDERING_FLAGS & ~BLOCK_RENDERING_DISCARD_FORCED_BREAK_MARGINS);
     // CSS already sizes images against the reading font. The engine's legacy
     // zoom would enlarge them a second time, including inline equations.
     properties->setInt(PROP_IMG_SCALING_ZOOMIN_INLINE_MODE, 0);
@@ -648,6 +653,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     const auto hyphenation = settings.value("hyphenation").toString(hyphenation_);
     const bool dark = settings.value("dark_mode").toBool(darkMode_);
     const bool hideNonlinear = settings.value("hide_nonlinear_fragments").toBool(hideNonlinearFragments_);
+    const bool avoidWastefulStyling = settings.value("avoid_wasteful_styling").toBool(avoidWastefulStyling_);
     if (!engine_ || pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 ||
         spacing > maximumLineSpacing || margin < 0 || margin > maximumMarginPixels() || topMargin < 0 ||
         topMargin > maximumMarginPixels() || bottomMargin < 0 || bottomMargin > maximumMarginPixels() || weight < 0 ||
@@ -661,8 +667,9 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     const bool bionicChanged = bionic != bionic_;
     // Outline thickness changes pixels only. Keep the formatted page and its anchors.
     const bool thicknessChanged = weight != weight_;
-    const bool styled = bionicChanged || axisChanged || opticalChanged || pixels != pixels_ || spacing != spacing_ ||
-                        face != face_ || defaultFace != defaultFace_ || margin != margin_ || topMargin != topMargin_ ||
+    const bool styled = avoidWastefulStyling != avoidWastefulStyling_ || bionicChanged || axisChanged ||
+                        opticalChanged || pixels != pixels_ || spacing != spacing_ || face != face_ ||
+                        defaultFace != defaultFace_ || margin != margin_ || topMargin != topMargin_ ||
                         bottomMargin != bottomMargin_ || alignment != alignment_ || hyphenation != hyphenation_;
     const bool resized = size != size_;
     if (!styled && !resized && weight == weight_ && dark == darkMode_ && hideNonlinear == hideNonlinearFragments_)
@@ -685,10 +692,15 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     darkMode_ = dark;
     activateFontParameters();
     hideNonlinearFragments_ = hideNonlinear;
+    avoidWastefulStyling_ = avoidWastefulStyling;
     if (styled) {
         setExtraFontWeight(0);
         auto properties = LVCreatePropsContainer();
         properties->setInt(PROP_FONT_BASE_WEIGHT, LVRendGetBaseFontWeight());
+        properties->setInt(PROP_RENDER_BLOCK_RENDERING_FLAGS,
+                           avoidWastefulStyling_
+                               ? DEF_RENDER_BLOCK_RENDERING_FLAGS
+                               : DEF_RENDER_BLOCK_RENDERING_FLAGS & ~BLOCK_RENDERING_DISCARD_FORCED_BREAK_MARGINS);
         engine_->propsApply(properties);
         engine_->requestRender();
         applyPublisherFontFallbacks();
@@ -758,13 +770,19 @@ void ReaderModel::applyPublisherFontFallbacks() {
     engine_->setDefaultFontFace(lString8((face_.isEmpty() ? fallback : face_).toUtf8().constData()));
 }
 void ReaderModel::applyStyleSheet() {
-    QString overrides = "html,body,DocFragment { margin:0 !important; padding:0 !important; }\n";
+    QString overrides;
+    if (avoidWastefulStyling_) {
+        overrides = "html,body,DocFragment { margin:0 !important; padding:0 !important; }\n";
+    }
+    overrides += "svg[data-kobalt-fullpage=\"1\"] { width:100% !important; height:100vh !important; }\n";
     // A one-screen-pixel boundary stops a leading illustration's margin from
     // collapsing through the body and disappearing at the page boundary.
     // Round upward in the engine's 1/256 CSS-pixel units so every density keeps it.
     const double boundaryCssPixels = qCeil(256.0 * 96 / readingPpi.load()) / 256.0;
-    overrides += QString("body[data-kobalt-leading-image=\"1\"] { padding-top:%1px !important; }\n")
-                     .arg(boundaryCssPixels, 0, 'f', 6);
+    if (avoidWastefulStyling_) {
+        overrides += QString("body[data-kobalt-leading-image=\"1\"] { padding-top:%1px !important; }\n")
+                         .arg(boundaryCssPixels, 0, 'f', 6);
+    }
     if (hyphenation_ != "auto")
         overrides += QString("* { hyphens:%1 !important; }\n").arg(hyphenation_ == "on" ? "auto" : "none");
     if (!face_.isEmpty()) {
@@ -1166,6 +1184,7 @@ QJsonObject ReaderModel::state() const {
                                {"hyphenation", hyphenation_},
                                {"dark_mode", darkMode_},
                                {"hide_nonlinear_fragments", hideNonlinearFragments_},
+                               {"avoid_wasteful_styling", avoidWastefulStyling_},
                                {"dom_version", domVersion_},
                                {"page_progression_rtl", engine_ && engine_->getDocument()->getProps()->getStringDef(
                                                                        "doc.page-progression-direction") == U"rtl"},

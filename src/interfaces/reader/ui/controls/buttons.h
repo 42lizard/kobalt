@@ -18,6 +18,12 @@ class Button : public QPushButton {
 public:
     using QPushButton::QPushButton;
     void setPaintMode(ButtonPaintMode mode);
+    void setFill(QPalette::ColorRole role) {
+        if (fill == role)
+            return;
+        fill = role;
+        update();
+    }
     ButtonPaintMode paintMode() const {
         return mode;
     }
@@ -55,6 +61,7 @@ protected:
 
 private:
     ButtonPaintMode mode = ButtonPaintMode::Native;
+    QPalette::ColorRole fill = QPalette::Window;
     ButtonIcon configuredIcon;
     int iconLabelGap = 0;
     bool iconAboveLabel = false;
@@ -167,9 +174,10 @@ private:
 // Caption rows and list actions retain their different text and icon placement.
 class CaptionButton : public Button {
 public:
-    enum class Presentation { Caption, ListAction };
+    enum class Presentation { Caption, ListAction, ToolbarAction, CompactAction };
     CaptionButton(ControlIcon icon, QWidget *parent);
     CaptionButton(Presentation presentation, QWidget *parent);
+    QSize sizeHint() const override;
     Presentation presentation() const {
         return mode;
     }
@@ -214,6 +222,14 @@ private:
 };
 CaptionButton *makeCaptionButton(QWidget *parent, QBoxLayout *layout, const char *name, const QString &text,
                                  std::function<void()> action);
+// The hit area follows the widget's bounds. Contents margins position the smaller visible mark.
+class DismissButton : public Button {
+public:
+    explicit DismissButton(QWidget *parent) : Button(parent) {}
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+};
 // A header or pager cell: an icon, or an uppercase label with a chevron. It has
 // a rule on its inner side and fills with ink while pressed, like a tab.
 class CellButton : public Button {

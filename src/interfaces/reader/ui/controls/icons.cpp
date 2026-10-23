@@ -43,7 +43,15 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
     };
     // Phosphor has no vertical swipe gesture, and the device drawings show
     // the side buttons, so these stay Kobalt's own artwork.
-    if (icon == ControlIcon::Swipe) {
+    if (icon == ControlIcon::PreviousChapter || icon == ControlIcon::NextChapter) {
+        result.canvas = 256;
+        result.filled = true;
+        QPainterPath caret;
+        phosphorGeometry(
+            icon == ControlIcon::PreviousChapter ? QStringLiteral("caret-left") : QStringLiteral("caret-right"), caret);
+        path = QTransform::fromTranslate(-36, 0).map(caret);
+        path.addPath(QTransform::fromTranslate(36, 0).map(caret));
+    } else if (icon == ControlIcon::Swipe) {
         result.canvas = 24;
         result.stroke = 1.5;
         line(4, 2, 4, 12);
@@ -261,7 +269,8 @@ void paintOpeningIcon(QPainter &painter, ControlIcon icon, const QRectF &bounds,
     paintGeometry(painter, geometry(icon, false), icon, bounds, color, IconRendition::OriginalAsset);
 }
 QIcon controlIcon(ControlIcon icon, QColor color, bool sideButtons) {
-    if (int(icon) < 0 || int(icon) > int(ControlIcon::System))
+    if (int(icon) < 0 || (int(icon) > int(ControlIcon::System) && icon != ControlIcon::PreviousChapter &&
+                          icon != ControlIcon::NextChapter))
         return {};
     return QIcon(new VectorIconEngine(icon, color, sideButtons));
 }

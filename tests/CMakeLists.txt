@@ -104,12 +104,24 @@ endfunction()
 # Models, storage and publication code. No engine and no widgets.
 kobalt_check(touch-rotation SOURCES tests/model/touch_rotation.cpp src/platform/nickel/qt5/touch_rotation.cpp LIBRARIES Qt6::Gui)
 kobalt_check(usb-removal SOURCES tests/model/usb_removal.cpp LIBRARIES Qt6::Core)
+kobalt_check(nickel-reading-pace-cache SOURCES tests/model/nickel_reading_pace_cache.cpp LIBRARIES Qt6::Core)
+set_tests_properties(nickel-reading-pace-cache PROPERTIES TIMEOUT 30)
 kobalt_check(nickel-session-calls SOURCES tests/model/nickel_session_calls.cpp LIBRARIES Qt6::Core)
 kobalt_check(nickel-dictionary-selection SOURCES tests/model/nickel_dictionary_selection.cpp LIBRARIES Qt6::Core)
 
 kobalt_check(progress SOURCES tests/model/reading_progress.cpp src/reading/reading_progress.cpp LIBRARIES Qt6::Core)
 kobalt_check(storage-assets SOURCES tests/model/storage_assets.cpp src/assets/assets.cpp src/storage/reader_storage.cpp
     LIBRARIES Qt6::Core)
+kobalt_check(android-assets SOURCES tests/model/android_assets.cpp src/platform/android/assets.cpp src/assets/assets.cpp
+    LIBRARIES Qt6::Core)
+set(android_asset_fixture "${CMAKE_CURRENT_BINARY_DIR}/android-assets-fixture")
+file(MAKE_DIRECTORY "${android_asset_fixture}/fonts")
+file(WRITE "${android_asset_fixture}/fonts/test.ttf" "synthetic font")
+string(SHA256 android_font_hash "synthetic font")
+file(WRITE "${android_asset_fixture}/manifest.json"
+    "{\"schema\":1,\"version\":\"${KOBALT_VERSION}\",\"files\":[{\"path\":\"fonts/test.ttf\",\"size\":14,\"sha256\":\"${android_font_hash}\"}]}")
+qt_add_resources(android-assets-check android_asset_fixture PREFIX "/android-assets" BASE "${android_asset_fixture}"
+    FILES "${android_asset_fixture}/manifest.json" "${android_asset_fixture}/fonts/test.ttf")
 kobalt_check(layout-compatibility SOURCES tests/model/layout_compatibility.cpp src/publication/layout_compatibility.cpp
     src/publication/resource_cache.cpp LIBRARIES Qt6::Core)
 kobalt_check(layout-cache SOURCES tests/model/layout_cache.cpp src/storage/layout_cache.cpp
@@ -123,6 +135,7 @@ kobalt_check(diagnostics SOURCES tests/model/diagnostics.cpp src/support/diagnos
 kobalt_check(engine-activity SOURCES tests/model/engine_activity.cpp LIBRARIES Threads::Threads)
 kobalt_check(brightness-gesture SOURCES tests/model/brightness_gesture.cpp LIBRARIES Qt6::Core)
 kobalt_check(logical-word-counter SOURCES tests/model/logical_word_counter.cpp LIBRARIES Qt6::Core)
+kobalt_check(reading-speed SOURCES tests/model/reading_speed.cpp LIBRARIES Qt6::Core)
 kobalt_check(reading-pace SOURCES tests/model/reading_pace.cpp LIBRARIES Qt6::Core)
 kobalt_check(screen-refresh SOURCES tests/model/screen_refresh.cpp LIBRARIES Qt6::Core)
 kobalt_check(font-registration SOURCES tests/model/font_registration.cpp LIBRARIES Qt6::Gui
@@ -323,6 +336,8 @@ add_executable(word-count-benchmark "${KOBALT_ROOT}/tests/model/word_count_bench
 target_link_libraries(word-count-benchmark PRIVATE test-reader-model)
 kobalt_test_options(word-count-benchmark)
 kobalt_engine_check(alignment)
+kobalt_engine_check(indentation)
+kobalt_engine_check(page-layout)
 kobalt_engine_check(vertical-writing)
 kobalt_engine_check(mathml)
 kobalt_engine_check(line-breaking)

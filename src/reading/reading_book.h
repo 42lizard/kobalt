@@ -1,11 +1,13 @@
 #pragma once
 #include "reading_pace.h"
+#include "reading_speed.h"
 #include "reading_progress.h"
 #include "storage/reader_storage.h"
 #include "reading_bridge.h"
 #include <QElapsedTimer>
 #include <QJsonObject>
 #include <memory>
+#include <utility>
 
 namespace kobalt {
 class ReaderSession;
@@ -40,12 +42,25 @@ public:
                !identity_.endsWith(".kepub.epub", Qt::CaseInsensitive);
     }
     void releaseNative();
-    void observeReading();
+    void observeReading(bool learnPace = true);
     void stopReading();
+    bool usesLocalPace() const {
+        return bool(speed);
+    }
+    void pauseLocalPace() {
+        if (speed) {
+            speed->pause();
+        }
+    }
     // Active time for this opening, excluding sleep and hidden reader time.
     qint64 readingMilliseconds() const;
     ReadingEstimates estimates() const;
-    // Forward turns in this opening, for the Stats time estimates.
+    void onEstimatesChanged(std::function<void()> changed) {
+        if (bridge) {
+            bridge->estimatesChanged = std::move(changed);
+        }
+    }
+    // Session fallback for native bridges without a reading estimate.
     ReadingPace &pace() {
         return pace_;
     }
@@ -78,6 +93,7 @@ public:
 
 private:
     ReadingActivity readingActivity() const;
+    void saveSpeed(bool force = false);
     std::unique_ptr<ReaderSession> model;
     QString statePath, identity_;
     storage::Paths paths_;
@@ -90,6 +106,8 @@ private:
     QElapsedTimer activeReading;
     qint64 completedReadingMilliseconds = 0;
     ReadingPace pace_;
+    std::unique_ptr<ReadingSpeed> speed;
+    QElapsedTimer speedSaved;
     QString nativeWriteback = "not-attempted", nativeWritebackError, acceptedFinishedAnchor;
     // The last checkpoint that reached storage. An identical one is not written again.
     QJsonObject savedCheckpoint, layoutPreferences_;

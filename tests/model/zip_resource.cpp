@@ -90,6 +90,87 @@ QByteArray zip(const QByteArray &source, bool deflated, bool badCrc = false, boo
     u16(bytes, 0);
     return bytes;
 }
+QByteArray manyEntries(int count) {
+    QByteArray bytes, directory;
+    for (int i = 0; i < count; ++i) {
+        auto entry = zip(QByteArray::number(i), false);
+        const int end = entry.size() - 22 - 46 - 9;
+        auto central = entry.mid(end, 46 + 9);
+        const auto name = QString("%1.bin").arg(i, 5, 10, QChar('0')).toUtf8();
+        entry.replace(30, 9, name);
+        central.replace(46, 9, name);
+        replace32(central, 42, bytes.size());
+        bytes += entry.left(end);
+        directory += central;
+    }
+    const int offset = bytes.size();
+    bytes += directory;
+    u32(bytes, 0x06054b50);
+    u16(bytes, 0);
+    u16(bytes, 0);
+    u16(bytes, count);
+    u16(bytes, count);
+    u32(bytes, directory.size());
+    u32(bytes, offset);
+    u16(bytes, 0);
+    return bytes;
+}
+class CountingBuffer : public QBuffer {
+public:
+    CountingBuffer(QByteArray bytes, int entries) : directoryStart(bytes.size() - 22 - entries * (46 + 9)) {
+        setData(std::move(bytes));
+        if (!open(QIODevice::ReadOnly | QIODevice::Unbuffered)) {
+            qFatal("open counted ZIP");
+        }
+    }
+    qint64 directoryBytes = 0;
+
+protected:
+    qint64 readData(char *data, qint64 size) override {
+        const auto start = pos();
+        const auto count = QBuffer::readData(data, size);
+        if (count > 0) {
+            directoryBytes += qMax(qint64(0), qMin(start + count, this->size() - 22) - qMax(start, directoryStart));
+        }
+        return count;
+    }
+
+private:
+    qint64 directoryStart;
+};
+void checkDirectoryReuse() {
+    constexpr int count = 1024;
+    CountingBuffer source(manyEntries(count), count);
+    ZipResourceIndex index;
+    for (int i = count - 1; i >= 0; --i) {
+        ZipResource stream;
+        const auto name = QString("%1.bin").arg(i, 5, 10, QChar('0'));
+        if (!stream.open(source, name, index) || stream.next() != QByteArray::number(i) || !stream.valid() ||
+            !stream.finished()) {
+            qFatal("indexed member lookup or CRC");
+        }
+    }
+    // The first trailer probe overlaps the directory; its full read is the
+    // only other directory access. Looking up more entries must read none.
+    if (source.directoryBytes > 2 * count * (46 + 9)) {
+        qFatal("Directory reads grew with the number of opened resources");
+    }
+    const auto readBytes = source.directoryBytes;
+    ZipResource missing;
+    if (missing.open(source, "missing.bin", index) || source.directoryBytes != readBytes) {
+        qFatal("Missing indexed entry reread the directory");
+    }
+    CountingBuffer other(manyEntries(count), count);
+    if (!missing.open(other, "00000.bin", index) || other.directoryBytes == 0) {
+        qFatal("Index reused a different borrowed source");
+    }
+    auto excessive = manyEntries(4097);
+    QBuffer tooMany(&excessive);
+    tooMany.open(QIODevice::ReadOnly);
+    if (missing.open(tooMany, "00000.bin", index)) {
+        qFatal("ZIP index exceeded its entry budget");
+    }
+}
 void save(const QString &path, const QByteArray &bytes) {
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly) || f.write(bytes) != bytes.size())
@@ -102,6 +183,8 @@ int main(int argc, char **argv) {
     if (!dir.isValid())
         qFatal("temporary directory");
     const auto path = dir.path() + "/book.zip";
+    ZipResourceIndex index;
+    checkDirectoryReuse();
     for (bool deflated : {false, true})
         for (int length : {0, 1, 65535, 65536, 65537, 196608, 2097171}) {
             QByteArray original(length, 'a');
@@ -115,7 +198,8 @@ int main(int argc, char **argv) {
                 const auto input = compressible ? QByteArray(length, 'a') : original;
                 save(path, zip(input, deflated));
                 ZipResource first, second;
-                if (!first.open(path, "image.png") || !second.open(path, "image.png") || first.size() != length)
+                if (!first.open(path, "image.png", index) || !second.open(path, "image.png", index) ||
+                    first.size() != length)
                     qFatal("open");
                 QByteArray a, b;
                 while (!first.finished() || !second.finished()) {
@@ -134,7 +218,7 @@ int main(int argc, char **argv) {
                     continue;
                 save(path, zip(original, deflated, !truncated, truncated));
                 ZipResource stream;
-                if (stream.open(path, "image.png")) {
+                if (stream.open(path, "image.png", index)) {
                     qint64 received = 0;
                     while (stream.valid() && !stream.finished())
                         received += stream.next().size();
@@ -174,17 +258,17 @@ int main(int argc, char **argv) {
     }
     save(path, zip("payload", false));
     ZipResource stream;
-    if (stream.open(path, "absent.png"))
+    if (stream.open(path, "absent.png", index))
         qFatal("missing entry accepted");
     {
         const auto original = zip("payload", false);
         const int directory = original.size() - 22 - 46 - QByteArray("image.png").size();
         auto reject = [&](QByteArray bytes, const char *reason) {
             save(path, original);
-            if (!stream.open(path, "image.png"))
+            if (!stream.open(path, "image.png", index))
                 qFatal("valid stream did not open before rejection");
             save(path, bytes);
-            if (stream.open(path, "image.png"))
+            if (stream.open(path, "image.png", index))
                 qFatal("%s", reason);
             if (stream.valid() || stream.finished() || stream.size() != -1 || !stream.next().isEmpty())
                 qFatal("Failed reopen retained the previous resource");
@@ -221,14 +305,29 @@ int main(int argc, char **argv) {
         reject(changed, "Central directory does not end at the trailer");
         save(path, original);
         for (qint64 limit : {qint64(-1), qint64(6)}) {
-            if (stream.open(path, "image.png", limit))
+            if (stream.open(path, "image.png", index, limit))
                 qFatal("Invalid or undersized resource limit accepted");
         }
-        if (!stream.open(path, "image.png", 7) || stream.next() != "payload" || !stream.finished() || !stream.valid())
+        if (!stream.open(path, "image.png", index, 7) || stream.next() != "payload" || !stream.finished() ||
+            !stream.valid())
             qFatal("Resource at its exact limit rejected");
         save(path, zip({}, false));
-        if (!stream.open(path, "image.png", 0) || !stream.next().isEmpty() || !stream.finished() || !stream.valid())
+        if (!stream.open(path, "image.png", index, 0) || !stream.next().isEmpty() || !stream.finished() ||
+            !stream.valid())
             qFatal("Empty resource at a zero limit rejected");
     }
-    qInfo("PASS: stored, deflated, boundaries, independent readers, CRC, truncation, header agreement and limits");
+    // A stream can finish its original file after its path is replaced. The
+    // next stream must use the replacement's directory, even at the same size.
+    save(path, zip("before", false));
+    ZipResource previous, replacement;
+    if (!previous.open(path, "image.png", index) || !QFile::rename(path, path + ".old")) {
+        qFatal("open original before replacement");
+    }
+    save(path, zip("after!", false));
+    if (!replacement.open(path, "image.png", index) || replacement.next() != "after!" || !replacement.valid() ||
+        previous.next() != "before" || !previous.valid()) {
+        qFatal("File replacement reused stale directory metadata or changed an existing stream");
+    }
+    qInfo(
+        "PASS: stored, deflated, boundaries, independent readers, CRC, truncation, header agreement, limits and bounded directory reuse");
 }

@@ -282,13 +282,12 @@ int main(int argc, char **argv) {
     app.setApplicationName("Kobalt");
     app.setOrganizationName("Kobalt");
     app.setQuitOnLastWindowClosed(false);
-    const auto root = android::installAssets();
-    AssetBundle assets(root, QStringLiteral(KOBALT_VERSION));
-    if (root.isEmpty() || !assets.available() || !ui::initializeInterfaceFonts(assets)) {
+    const auto assets = android::installAssets(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    if (!assets || !ui::initializeInterfaceFonts(*assets)) {
         qCritical() << "Kobalt bundled assets are unavailable";
         return 2;
     }
-    for (const auto &file : bundledFontFiles(assets))
+    for (const auto &file : bundledFontFiles(*assets))
         if (QFontDatabase::addApplicationFont(file) < 0) {
             qCritical() << "Cannot register font" << file;
             return 2;
@@ -298,7 +297,7 @@ int main(int argc, char **argv) {
     ui::setDensity(physicalPpi);
     QApplication::setFont(ui::interfaceFont());
     initializeDiagnostics(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/diagnostics");
-    Window window(engineFontInputs(assets, "/system/fonts", {}, {}), placeholderFontFamily(assets, copies));
+    Window window(engineFontInputs(*assets, "/system/fonts", {}, {}), placeholderFontFamily(*assets, copies));
     window.showFullScreen();
     qInfo() << "Kobalt Android ready; density" << physicalPpi;
     return app.exec();

@@ -99,8 +99,8 @@ Layout legacyLayout(const QJsonObject &preferences);
 Layout customLayout(const QJsonObject &preferences, const Layout &fallback);
 
 // What the reader knows about the book and the device. Pages count from 1.
-// A negative estimate has no time to show. `learningPace` says why: the
-// session has not read long enough for a pace, rather than an unknown length.
+// A negative estimate has no time to show. `learningPace` marks an estimate
+// that still needs reading history, or the native fallback's learning delay.
 struct Values {
     QString title, author, chapter, time;
     int chapterPage = 0, chapterPages = 0, page = 0, pages = 0;

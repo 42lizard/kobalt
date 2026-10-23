@@ -1,6 +1,18 @@
+## Unreleased
+
+### What's fixed
+
+- Reading books with many chapters avoids repeated ZIP directory scans.
+- Reopening sideloaded books without bookmarks reuses a bookmark lookup index instead of reading every book's metadata.
+- Android verifies its bundled assets once during startup.
+
 ## v1.0-beta.4
 
 ### What's new
+
+- Selectively avoid wasteful styling in Settings > Advanced is on by default. Turn it off to preserve publisher spacing at page breaks and HTML/body margins and padding.
+
+- Android remembers your reading speed across books and app sessions. Time estimates start with a rough pace, marked with `≈`, and adapt as you read.
 
 - Choose how to turn pages in Settings > Controls > Page navigation: swipes and taps, taps only, swipes only or hardware page turn buttons only on devices with page buttons. The middle tap zone always opens the menu. Controls sits below Display with a hand icon and also contains the frontlight gesture setting.
 
@@ -19,6 +31,14 @@
 - After jumping to a bookmark, "Return to page" is now offered to take you back to where you came from when you navigated to the bookmark.
 
 ### What's fixed
+
+- Inherited paragraph indentation no longer reverses at some text sizes.
+
+- On Kobo, reading-pace queries stay spaced apart when Nickel's background worker is busy.
+
+- Full-page SVG images retain their vertical alignment. Full-height chapter tables can centre their contents vertically, and chapters beginning with tables keep their page break.
+
+- Footnote popups now recognise unmarked numbered, lettered and superscript references, plus older endnote markup. Image references can now be selected. Chapter links keep opening in the book.
 
 - Settings tabs keep their icon and label visible while pressed in both themes.
 

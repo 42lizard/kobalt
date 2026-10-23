@@ -148,7 +148,7 @@ WordSelection ReaderModel::wordAt(QPoint point) {
     result.end = qstring(endPointer.toString());
     return result;
 }
-QVector<QRect> ReaderModel::rangeRects(const QString &start, const QString &end) {
+QVector<QRect> ReaderModel::rangeRects(const QString &start, const QString &end, bool includeImages) {
     QVector<QRect> result;
     if (!engine_)
         return result;
@@ -158,7 +158,7 @@ QVector<QRect> ReaderModel::rangeRects(const QString &start, const QString &end)
         return result;
     ldomXRange range(a, b);
     LVArray<lvRect> rectangles;
-    range.getSegmentRects(rectangles);
+    range.getSegmentRects(rectangles, includeImages);
     for (int i = 0; i < rectangles.length(); ++i) {
         const auto &r = rectangles[i];
         lvPoint top(r.left, r.top), bottom(r.right, r.bottom);

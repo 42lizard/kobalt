@@ -8,7 +8,13 @@ namespace {
 class Bridge final : public ReadingBridge {
 public:
     Bridge(QString identity, std::unique_ptr<NativeProgress> progress)
-        : progress_(std::move(progress)), reading_(std::move(identity)) {}
+        : progress_(std::move(progress)), reading_(std::move(identity)) {
+        reading_.estimatesChanged = [this] {
+            if (estimatesChanged) {
+                estimatesChanged();
+            }
+        };
+    }
     bool deviceTransition() const override {
         return progress_->deviceTransition();
     }

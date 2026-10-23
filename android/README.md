@@ -6,6 +6,8 @@ The opening screen offers Choose book and Exit. Choose book launches the Android
 
 The Android version name follows the source version; the numeric version code defaults to 1 for development and can be set with `--version-code`. Dictionary lookup, frontlight control and device-specific e-ink waveforms are not implemented. This is a development build, not a finished Android release. The reader reads EPUB resources locally. Android's INTERNET permission is used for dictionary downloads. It does not connect to Kobo accounts or sync services.
 
+Reading-time estimates use a rough 250 words per minute at first. In the header and footer, a `≈` prefix marks the rough estimate until 5 minutes and 3 accepted page samples have accumulated. Stats continues to mark all time estimates with `≈`. Kobalt saves aggregate words and reading time in `reading-speed.json` in the app profile, so another book or app session uses the learned speed. It saves at most once a minute during reading and saves pending samples when reading stops. This file contains no book identities or passages. Clearing app data removes the history.
+
 ## Toolchain
 
 The build uses these versions:

@@ -2,6 +2,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonArray>
+
 #include <utime.h>
 #include <QTemporaryDir>
 #include <cstdio>
@@ -123,6 +126,147 @@ int main() {
         BookmarkStore store(root.path(), "file:///mnt/onboard/b.epub",
                             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "B");
         require(store.load() && store.bookmarks().isEmpty(), "Another book took these bookmarks");
+    }
+    // A legacy library is indexed once, including a negative lookup. Reopening
+    // unrelated unmarked books must not read every book's metadata again.
+    {
+        QTemporaryDir library;
+        require(library.isValid(), "No bookmark library fixture");
+        const QString identity = "file:///legacy.epub";
+        for (int i = 0; i < 100; ++i) {
+            BookmarkStore legacy(library.path(), i == 42 ? identity : QString("file:///other-%1.epub").arg(i),
+                                 QByteArray::number(i, 16).rightJustified(64, '0'), "Legacy");
+            legacy.setBookmarks({mark(QString::number(i), "2026-09-20T10:00:00Z")});
+            require(legacy.save(), "Cannot create legacy bookmarks");
+        }
+        BookmarkStore first(library.path(), "file:///unmarked.epub", QByteArray(64, 'e'), "Unmarked");
+        require(first.load() && first.bookmarks().isEmpty() && first.adoptionMetadataReads() == 100,
+                "Initial migration did not inspect the legacy library");
+        const auto cache = library.path() + "/.index/paths.json";
+        require(QFile::exists(cache), "Legacy adoption index was not persisted");
+        for (int i = 0; i < 3; ++i) {
+            BookmarkStore unmarked(library.path(), QString("file:///unmarked-%1.epub").arg(i), QByteArray(64, 'e'),
+                                   "Unmarked");
+            require(unmarked.load() && unmarked.bookmarks().isEmpty() && unmarked.adoptionMetadataReads() == 0,
+                    "An unmarked opening scanned the indexed library again");
+        }
+        BookmarkStore changed(library.path(), identity, QByteArray(64, 'f'), "Changed");
+        require(changed.load() && changed.adoptionMetadataReads() == 1 && changed.bookmarks().size() == 1 &&
+                    changed.bookmarks().first().position == "42",
+                "Indexed lookup lost legacy changed-book adoption");
+        require(changed.save(), "Cannot save an indexed revision");
+        const struct utimbuf indexTime {
+            1300000000, 1300000000
+        };
+        require(utime(QFile::encodeName(cache).constData(), &indexTime) == 0,
+                "Cannot prepare bookmark-only save timestamp");
+        const auto metadataModified = QFileInfo(changed.folder() + "/book.json").lastModified();
+        changed.setBookmarks({mark("bookmark-only edit", "2026-09-20T10:00:00Z")});
+        require(changed.save() && QFileInfo(cache).lastModified().toMSecsSinceEpoch() == 1300000000000LL &&
+                    QFileInfo(changed.folder() + "/book.json").lastModified() == metadataModified,
+                "A bookmark-only edit rewrote metadata or the adoption index");
+        BookmarkStore again(library.path(), identity, QByteArray(64, 'd'), "Changed again");
+        require(again.load() && again.bookmarks().size() == 1 && again.adoptionMetadataReads() == 2,
+                "Saving a new revision invalidated the entire library index");
+        // Bookmark timestamps can change without a directory change. Select
+        // from all path candidates at lookup time, rather than caching a winner.
+        const auto oldest =
+            library.path() + "/file-" + QString::fromLatin1(QByteArray::number(42, 16).rightJustified(64, '0'));
+        const struct utimbuf newestTime {
+            2000000000, 2000000000
+        }, olderTime{1000000000, 1000000000};
+        require(utime(QFile::encodeName(oldest + "/bookmarks.json").constData(), &newestTime) == 0 &&
+                    utime(QFile::encodeName(changed.folder() + "/bookmarks.json").constData(), &olderTime) == 0,
+                "Cannot set indexed revision times");
+        BookmarkStore retimed(library.path(), identity, QByteArray(64, 'd'), "Retimed");
+        require(retimed.load() && retimed.adoptedFrom() == QFileInfo(oldest).fileName() &&
+                    retimed.adoptionMetadataReads() == 2,
+                "Indexed adoption ignored an externally changed bookmark timestamp");
+        // Corrupt and oversized derived data must fall back to authoritative
+        // folders without disabling edits or accepting an injected path.
+        auto unsafeIndex = QJsonDocument::fromJson(read(cache)).object();
+        auto unsafePaths = unsafeIndex.value("paths").toObject();
+        unsafePaths[unsafePaths.keys().first()] = QJsonArray{QString("../outside")};
+        unsafeIndex["paths"] = unsafePaths;
+        for (const auto &bytes :
+             {QByteArray("{broken"), QByteArray(4 * 1024 * 1024 + 1, 'x'), QJsonDocument(unsafeIndex).toJson()}) {
+            QFile file(cache);
+            require(file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.write(bytes) == bytes.size(),
+                    "Cannot damage the derived bookmark index");
+            file.close();
+            BookmarkStore recover(library.path(), identity, QByteArray(64, 'd'), "Recover");
+            require(recover.load() && recover.bookmarks().size() == 1 && recover.adoptionMetadataReads() >= 101,
+                    "A damaged adoption index did not rebuild from the library");
+        }
+        // Restore an existing metadata file in place, preserving its length,
+        // mtime and root timestamp. Open the new identity first. Only ctime
+        // changes, so a size or mtime cache alone cannot discover the restore.
+        const struct utimbuf metadataTime {
+            1400000000, 1400000000
+        }, restoreRootTime{1500000000, 1500000000};
+        require(utime(QFile::encodeName(oldest + "/book.json").constData(), &metadataTime) == 0 &&
+                    utime(QFile::encodeName(library.path()).constData(), &restoreRootTime) == 0,
+                "Cannot prepare restored metadata timestamps");
+        BookmarkStore beforeMetadataRestore(library.path(), "file:///before-metadata.epub", QByteArray(64, 'd'),
+                                            "Before metadata restore");
+        require(beforeMetadataRestore.load(), "Cannot prepare metadata restore index");
+        auto restoredMetadata = read(oldest + "/book.json");
+        require(restoredMetadata.contains("file:///legacy.epub"), "Missing original metadata identity");
+        restoredMetadata.replace("file:///legacy.epub", "file:///edited.epub");
+        QFile metadata(oldest + "/book.json");
+        require(metadata.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+                    metadata.write(restoredMetadata) == restoredMetadata.size(),
+                "Cannot reassign indexed metadata without changing its size");
+        metadata.close();
+        require(utime(QFile::encodeName(oldest + "/book.json").constData(), &metadataTime) == 0 &&
+                    utime(QFile::encodeName(library.path()).constData(), &restoreRootTime) == 0,
+                "Cannot preserve restored metadata timestamps");
+        BookmarkStore newIdentity(library.path(), "file:///edited.epub", QByteArray(64, 'd'), "Reassigned");
+        require(newIdentity.load() && newIdentity.bookmarks().size() == 1 && newIdentity.adoptionMetadataReads() >= 102,
+                "An in-place metadata restore was invisible to its new identity");
+        BookmarkStore reassigned(library.path(), identity, QByteArray(64, 'd'), "Reassigned");
+        require(reassigned.load() && reassigned.adoptedFrom() == QFileInfo(changed.folder()).fileName() &&
+                    reassigned.adoptionMetadataReads() == 1,
+                "Restored metadata supplied another book's bookmarks");
+        // Restores can add folders without changing the directory time on a
+        // coarse filesystem. Folder membership must invalidate the inventory.
+        const struct utimbuf rootTime {
+            1500000000, 1500000000
+        };
+        require(utime(QFile::encodeName(library.path()).constData(), &rootTime) == 0,
+                "Cannot set library directory timestamp");
+        BookmarkStore beforeRestore(library.path(), "file:///before-restore.epub", QByteArray(64, 'b'), "Before");
+        require(beforeRestore.load(), "Cannot prepare the pre-restore index");
+        const auto external = library.path() + "/file-" + QString(64, 'a');
+        require(QDir().mkpath(external), "Cannot add external bookmark folder");
+        QFile externalBook(external + "/book.json"), externalMarks(external + "/bookmarks.json");
+        require(externalBook.open(QIODevice::WriteOnly) &&
+                    externalBook.write("{\"identity\":\"file:///external.epub\"}") > 0 &&
+                    externalMarks.open(QIODevice::WriteOnly) &&
+                    externalMarks.write("{\"bookmarks\":[{\"position\":\"external\"}]}") > 0,
+                "Cannot populate external bookmark folder");
+        externalBook.close();
+        externalMarks.close();
+        require(utime(QFile::encodeName(library.path()).constData(), &rootTime) == 0,
+                "Cannot restore the unchanged library timestamp");
+        BookmarkStore externalLookup(library.path(), "file:///external.epub", QByteArray(64, 'b'), "External");
+        require(externalLookup.load() && externalLookup.bookmarks().size() == 1 &&
+                    externalLookup.adoptionMetadataReads() >= 103,
+                "An externally added folder stayed absent from the index");
+        // Failure to write derived data does not prevent bookmark adoption.
+        require(QFile::remove(cache) && QDir().mkdir(cache), "Cannot obstruct the index cache");
+        BookmarkStore blocked(library.path(), identity, QByteArray(64, 'd'), "Blocked cache");
+        require(blocked.load() && blocked.bookmarks().size() == 1,
+                "An unwritable derived index made legacy bookmarks unavailable");
+        require(QDir().rmdir(cache), "Cannot clear the obstructed index cache");
+        // A library restored without derived data is indexed again.
+        BookmarkStore added(library.path(), "file:///added.epub", QByteArray(64, 'c'), "Added");
+        added.setBookmarks({mark("added", "2026-09-20T10:00:00Z")});
+        require(added.save(), "Cannot create added bookmark fixture");
+        QFile::remove(cache);
+        BookmarkStore restored(library.path(), "file:///added.epub", QByteArray(64, 'b'), "Restored");
+        require(restored.load() && restored.bookmarks().size() == 1 && restored.adoptionMetadataReads() >= 102,
+                "Restoring a legacy library lost changed-book adoption");
     }
     // A failed load must not turn the old data into an editable empty list.
     for (const auto &original : {QByteArray("{\"bookmarks\": ["), QByteArray("{\"bookmarks\": null}"),

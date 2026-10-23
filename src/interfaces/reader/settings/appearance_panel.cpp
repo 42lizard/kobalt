@@ -152,7 +152,10 @@ AppearancePanel::AppearancePanel(const AppearanceLayout &layout, const Appearanc
     // look the same on every screen; the engine gets device pixels.
     sizeSlider =
         kobalt::ui::sliderRow(typography, typeRows, "rrTextSize", "rrTextSizeValue", strings::get("reader.text_size"),
-                              "rrSmaller", "rrLarger", kobalt::minimumHalfPoints, kobalt::maximumHalfPoints, 2, {});
+                              "rrSmaller", "rrLarger", kobalt::minimumHalfPoints, kobalt::maximumHalfPoints, 1, {});
+    QObject::connect(sizeSlider, &QSlider::valueChanged, sizeSlider, [slider = sizeSlider](int halfPoints) {
+        slider->setSingleStep(halfPoints < 64 ? 1 : 2);
+    });
     sizeSlider->setMarkers({14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48, 56, 64, 80, 96},
                            ui::SettingSlider::MarkerMode::Stops);
     opticalSizeSlider =

@@ -10,19 +10,21 @@ using namespace kobalt;
 int main() {
     // Appearance settings decide the layout. The list must stay complete, because a
     // missing key would let a retained layout survive a changed setting.
-    require(appearance::keys.size() == 16, "The appearance keys changed without this check");
+    require(appearance::keys.size() == 17, "The appearance keys changed without this check");
 
     const auto from = qt::object({{"font_pixels", 40},
                                   {"line_spacing", QJsonValue(QJsonValue::Null)},
                                   {"font_face", "Libron"},
                                   {"dark_mode", true},
                                   {"hide_nonlinear_fragments", true},
+                                  {"avoid_wasteful_styling", false},
                                   {"show_header", false}});
     auto to =
         qt::object({{"font_pixels", 30}, {"margin_pixels", 12}, {"hyphenation", "on"}, {"page_animations", true}});
     appearance::copy(to, from);
     require(to.value("font_pixels").toInt() == 40 && to.value("font_face").toString() == "Libron" &&
-                to.value("dark_mode").toBool() && to.value("hide_nonlinear_fragments").toBool(),
+                to.value("dark_mode").toBool() && to.value("hide_nonlinear_fragments").toBool() &&
+                to.contains("avoid_wasteful_styling") && !to.value("avoid_wasteful_styling").toBool(),
             "Copy lost an appearance value");
     // A null value stays null, and a key the source lacks is removed, so the
     // engine applies its own default instead of an old value.
@@ -41,6 +43,9 @@ int main() {
         appearance::copy(copied, vertical);
         require(copied.value(key).toInt() == 36, "Appearance copy lost a vertical margin");
     }
+    auto publisher = from;
+    publisher["avoid_wasteful_styling"] = true;
+    require(!appearance::same(publisher, from), "Publisher spacing reused an old layout");
     auto bionic = from;
     bionic["bold_reading"] = QStringLiteral("bold");
     require(!appearance::same(bionic, from), "Bionic mode changes reused an old layout");

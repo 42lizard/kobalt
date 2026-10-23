@@ -1,6 +1,7 @@
 #pragma once
 #include <QString>
 #include "reading_estimates.h"
+#include "reading_pace_cache.h"
 
 namespace kobalt {
 // Construct only after firmwareSupported() accepts Nickel, on the GUI thread.
@@ -16,6 +17,7 @@ public:
         return estimates(activity_.current(), result);
     }
     void stop();
+    std::function<void()> estimatesChanged;
 #ifndef KOBALT_READER_HARDWARE
     static void testCommand();
 #endif
@@ -24,7 +26,6 @@ private:
     double percent = 0;
     bool running = false;
     nickel::PageReadingActivity activity_;
-    double secondsPerWord_ = -1;
-    bool paceDirty_ = true;
+    nickel::ReadingPaceCache pace_;
 };
 }

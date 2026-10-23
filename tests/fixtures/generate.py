@@ -46,6 +46,7 @@ def write(directory, source_root=ROOT):
     load('word_count_fixture').book(directory / 'word-counts.epub')
     load('word_count_fixture').book(directory / 'word-count-many.epub', repeats=1500)
     links.book(directory / 'links.epub')
+    links.book(directory / 'links-unmarked.epub', unmarked=True)
     publisher.book(directory / 'publisher.epub')
     publisher.book(directory / 'publisher-non-linear.epub', svg_spine=False)
     publisher.equations_book(directory / 'equations.epub')

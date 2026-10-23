@@ -72,6 +72,22 @@ inline constexpr Px titleText{60}, detailText{32}, batteryText{28}, batteryGap{1
 inline constexpr int dimAlpha = 40;
 inline constexpr auto lightPaper = "#ffffff", darkPaper = "#202020";
 }
+namespace scrubber {
+inline constexpr Px barHeight{144}, verticalPadding{16}, gap{20}, captionHeight{68}, padding{16}, text{24};
+inline constexpr Px actionHeight{72}, actionTop{40}, closeWidth{80};
+inline constexpr Px overviewHeight{192}, overviewWindow{64}, overviewBottomPadding{20}, rangeLabelHeight{28};
+inline constexpr Px overviewTrack{28}, overviewGrip{64}, overviewIcon{32}, overviewIconPadding{8}, overviewLens{56};
+inline constexpr Px overviewBracketMinimum{10}, overviewBracketMaximum{20};
+inline constexpr Px overviewDashSpacing{20}, overviewDashHeight{10}, overviewTickGap{8}, overviewTickHeight{12};
+inline constexpr auto overviewPaperLight = "#f1f1f1", overviewPaperDark = "#242424";
+inline constexpr qreal previewHeightFraction = .9;
+inline constexpr int previewFadeAlpha = 242;
+inline constexpr int minimumZoomSpan = 60;
+}
+namespace loading {
+inline constexpr Px dot{40}, dotGap{24}, square{34}, squareGap{14}, logoWidth{144}, logoHeight{155};
+inline constexpr int delayMilliseconds = 1000, dotMilliseconds = 300, segmentMilliseconds = 180;
+}
 namespace settings {
 inline constexpr PxMargins displayMargins{16, 24, 16, 24}, screenMargins{16, 24, 16, 24};
 inline constexpr PxMargins miscellaneousMargins{16, 24, 16, 24};

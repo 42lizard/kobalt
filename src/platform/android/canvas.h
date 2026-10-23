@@ -11,6 +11,7 @@
 #include <QTouchEvent>
 #include <QPointingDevice>
 #include <QResizeEvent>
+#include <QtMath>
 #include <functional>
 
 namespace kobalt::android {
@@ -20,6 +21,28 @@ class RegionProxy final : public QGraphicsProxyWidget {
 public:
     explicit RegionProxy(bool nativePixels = false) : nativePixels(nativePixels) {
         setCacheMode(QGraphicsItem::DeviceCoordinateCache);
+    }
+    void setNativePixels(bool value) {
+        if (nativePixels == value)
+            return;
+        nativePixels = value;
+        pixels = {};
+        setCacheMode(QGraphicsItem::NoCache);
+        setCacheMode(QGraphicsItem::DeviceCoordinateCache);
+        update();
+    }
+    void setRasterScale(qreal value) {
+        value = qBound(.1, value, 2.0);
+        if (rasterScale == value)
+            return;
+        rasterScale = value;
+        pixels = {};
+        setCacheMode(QGraphicsItem::NoCache);
+        setCacheMode(QGraphicsItem::DeviceCoordinateCache);
+        update();
+    }
+    QSize rasterSize() const {
+        return pixels.size();
     }
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *) override {
         if (!widget() || !widget()->isVisible())
@@ -32,30 +55,46 @@ public:
         if (region.isEmpty())
             return;
         if (!nativePixels) {
+            // Keep images smooth while Qt paints rules directly on the target pixel grid.
+            painter->save();
+            painter->setRenderHint(QPainter::SmoothPixmapTransform);
             widget()->render(painter, region.boundingRect().topLeft(), region);
+            painter->restore();
             return;
         }
-        // Render the complete screen in device coordinates before scaling.
-        // Sampling its text, images and controls once avoids uneven strokes
-        // from rendering individual widgets at a fractional preview scale.
+        // Keep the source layout fixed while choosing the preview's raster resolution.
+        // This buffer is at most 64 MiB. The scene owns its separate display cache.
+        constexpr qreal maximumPixels = 16 * 1024 * 1024;
+        const QSize screen = widget()->size();
+        if (screen.isEmpty())
+            return;
+        const qreal scale = qMin(rasterScale, qSqrt(maximumPixels / (qreal(screen.width()) * screen.height())));
+        QSize target(qMax(1, qRound(screen.width() * scale)), qMax(1, qRound(screen.height() * scale)));
+        if (qreal(target.width()) * target.height() > maximumPixels)
+            target.setHeight(qMax(1, int(maximumPixels / target.width())));
         QRegion damage = region;
-        if (pixels.size() != widget()->size()) {
-            pixels = QImage(widget()->size(), QImage::Format_ARGB32_Premultiplied);
+        if (pixels.size() != target) {
+            pixels = QImage(target, QImage::Format_ARGB32_Premultiplied);
+            if (pixels.isNull())
+                return;
             pixels.fill(Qt::transparent);
             damage = widget()->rect();
         }
         {
             QPainter source(&pixels);
+            source.setRenderHint(QPainter::SmoothPixmapTransform);
+            source.scale(qreal(target.width()) / screen.width(), qreal(target.height()) / screen.height());
             widget()->render(&source, damage.boundingRect().topLeft(), damage);
         }
         painter->save();
         painter->setRenderHint(QPainter::SmoothPixmapTransform);
-        painter->drawImage(QPointF(), pixels);
+        painter->drawImage(QRectF(widget()->rect()), pixels, QRectF(pixels.rect()));
         painter->restore();
     }
 
 private:
     bool nativePixels;
+    qreal rasterScale = 1;
     QImage pixels;
 };
 // Keep the existing UI in physical pixels. Qt maps its damage rectangles to
@@ -73,11 +112,23 @@ public:
         setViewportUpdateMode(QGraphicsView::MinimalViewportUpdate);
         setScene(new QGraphicsScene(this));
     }
-    void setContent(QWidget *widget, bool nativePixels = false) {
+    void setContent(QWidget *widget, bool nativePixels = false, qreal rasterScale = 1) {
         content = widget;
-        auto *proxy = new RegionProxy(nativePixels);
+        proxy = new RegionProxy(nativePixels);
+        proxy->setRasterScale(rasterScale);
         scene()->addItem(proxy);
         proxy->setWidget(widget);
+    }
+    void setNativePixels(bool value) {
+        if (proxy)
+            proxy->setNativePixels(value);
+    }
+    void setRasterScale(qreal value) {
+        if (proxy)
+            proxy->setRasterScale(value);
+    }
+    QSize rasterSize() const {
+        return proxy ? proxy->rasterSize() : QSize();
     }
     QSize pixelSize() const {
         const auto dpr = devicePixelRatioF();
@@ -163,6 +214,7 @@ protected:
     }
 
 private:
+    QPointer<RegionProxy> proxy;
     QPointer<QWidget> target;
     void cancel() {
         // Cancellation handlers can delete the target or start another gesture.

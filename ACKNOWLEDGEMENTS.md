@@ -25,6 +25,8 @@ This list covers the Kobo, Android and macOS reader builds, adapted source, bund
 
 Dependency revisions and checksums are recorded in [dependencies/manifest.json](dependencies/manifest.json), [android/dependencies.json](android/dependencies.json) and the [Qt source pin](toolchains/qt6/source/source.json). CREngine and Qt also carry upstream code and data in their source trees; the corresponding source archives retain those upstream notices.
 
+Kobalt's independent footnote matcher follows the popup detection rules developed by the [KOReader contributors](https://github.com/koreader/koreader/blob/892034c96ef6c4f8606809133d16bb604f8853c1/frontend/apps/reader/modules/readerlink.lua#L1411) and implemented in [KOReader-base](https://github.com/koreader/koreader-base/blob/51bc7096973bc8eab5f2fd6ca3ae9a0227c8905e/cre.cpp). Nico Verbruggen maintains the Kobalt implementation.
+
 ## Adapted code and Kobo integration
 
 | Project | Authors and contributors | Use in Kobalt | Notices |

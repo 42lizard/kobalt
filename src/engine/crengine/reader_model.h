@@ -134,7 +134,8 @@ public:
     QVector<PageLink> pageLinks();
     LinkDetails linkDetails(const QString &source);
     SearchBatch searchPage(const QString &query, int page);
-    QVector<QRect> rangeRects(const QString &start, const QString &end);
+    // Text selection excludes images. Links also need their image hit regions.
+    QVector<QRect> rangeRects(const QString &start, const QString &end, bool includeImages = false);
     bool applyAppearance(const QJsonObject &settings, QSize size = {}, OpeningProgress progress = {});
     bool style(int pixels, int spacing);
     bool style(int pixels, int spacing, const QString &face, int margin);
@@ -272,6 +273,7 @@ private:
     QString hyphenation_ = "off";
     bool darkMode_ = false;
     bool hideNonlinearFragments_ = false;
+    bool avoidWastefulStyling_ = true;
     QMap<int, QImage> cache_;
     // One retired page, owned only by this model. Never retain client images.
     QImage spareImage_;

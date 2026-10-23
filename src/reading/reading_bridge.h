@@ -1,6 +1,7 @@
 #pragma once
 #include "reading_progress.h"
 #include "chapter.h"
+#include <functional>
 
 namespace kobalt {
 // A completed reader frame. Platforms can use its source counts and layout
@@ -35,5 +36,7 @@ public:
         return false;
     }
     virtual void stopReading() = 0;
+    // Called on the GUI thread when a background pace refresh changes estimates.
+    std::function<void()> estimatesChanged;
 };
 }

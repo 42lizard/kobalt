@@ -44,6 +44,12 @@ public:
         return adoptedFrom_;
     }
 
+    // Metadata JSON files read during the last load, including index rebuilding.
+    // Inventory validation still checks metadata file stats throughout the library.
+    int adoptionMetadataReads() const {
+        return adoptionMetadataReads_;
+    }
+
     const QVector<Bookmark> &bookmarks() const {
         return bookmarks_;
     }
@@ -61,6 +67,7 @@ private:
     QByteArray fingerprint_;
     QVector<Bookmark> bookmarks_;
     bool loadFailed_ = false;
+    int adoptionMetadataReads_ = 0;
     bool readFolder(const QString &folder, QString *error);
 };
 

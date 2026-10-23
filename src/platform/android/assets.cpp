@@ -8,7 +8,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
-#include <QStandardPaths>
 
 namespace kobalt::android {
 namespace {
@@ -19,16 +18,19 @@ bool write(const QString &path, const QByteArray &bytes) {
     return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit();
 }
 }
-QString installAssets() {
+std::unique_ptr<AssetBundle> installAssets(const QString &applicationData) {
+    if (applicationData.isEmpty()) {
+        return {};
+    }
     QFile manifest(":/android-assets/manifest.json");
     if (!manifest.open(QIODevice::ReadOnly))
         return {};
     const auto bytes = manifest.readAll();
     const auto digest = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex();
-    const auto root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/assets/" + digest;
-    AssetBundle bundle(root, QStringLiteral(KOBALT_VERSION));
-    if (bundle.available())
-        return root;
+    const auto root = applicationData + "/assets/" + digest;
+    auto bundle = std::make_unique<AssetBundle>(root, QStringLiteral(KOBALT_VERSION));
+    if (bundle->available())
+        return bundle;
     const auto entries = QJsonDocument::fromJson(bytes).object().value("files").toArray();
     if (entries.isEmpty())
         return {};
@@ -47,8 +49,8 @@ QString installAssets() {
             !write(root + '/' + name, data))
             return {};
     }
-    if (!write(root + "/manifest.json", bytes) || !bundle.available())
+    if (!write(root + "/manifest.json", bytes) || !bundle->available())
         return {};
-    return root;
+    return bundle;
 }
 }

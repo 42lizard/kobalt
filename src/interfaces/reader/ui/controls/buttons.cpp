@@ -102,7 +102,7 @@ void Button::paintEvent(QPaintEvent *) {
     QPainter painter(this);
     const bool active = isEnabled() && (isChecked() || isDown());
     const auto ink = palette().color(isEnabled() ? QPalette::WindowText : QPalette::Mid);
-    const auto paper = palette().color(QPalette::Window);
+    const auto paper = palette().color(fill);
     const bool toolbar = mode == ButtonPaintMode::ToolbarSquare || mode == ButtonPaintMode::ToolbarCell;
     if (toolbar) {
         painter.fillRect(rect(), paper);
@@ -342,6 +342,15 @@ CaptionButton::CaptionButton(ControlIcon icon, QWidget *parent) : CaptionButton(
 CaptionButton::CaptionButton(Presentation presentation, QWidget *parent)
     : Button(parent), mode(presentation), chevron(presentation == Presentation::ListAction),
       iconVisible(presentation == Presentation::Caption) {}
+QSize CaptionButton::sizeHint() const {
+    if (mode != Presentation::CompactAction) {
+        return Button::sizeHint();
+    }
+    const int gap = text().isEmpty() ? 0 : px(16);
+    return {interfaceTextWidth(text(), interfaceFont(m::chrome::labelText)) + int(m::chrome::cellIcon) + gap + px(32) +
+                int(m::control::padding),
+            m::scrubber::actionHeight};
+}
 CaptionButton *makeCaptionButton(QWidget *parent, QBoxLayout *layout, const char *name, const QString &text,
                                  std::function<void()> action) {
     auto *button = new CaptionButton(CaptionButton::Presentation::ListAction, parent);
@@ -354,6 +363,31 @@ CaptionButton *makeCaptionButton(QWidget *parent, QBoxLayout *layout, const char
     return button;
 }
 void CaptionButton::paintEvent(QPaintEvent *) {
+    if (mode == Presentation::ToolbarAction || mode == Presentation::CompactAction) {
+        QPainter painter(this);
+        const auto ink = palette().color(isEnabled() ? QPalette::WindowText : QPalette::Mid);
+        const auto paper = palette().color(QPalette::Window);
+        const bool pressed = isEnabled() && isDown();
+        painter.fillRect(rect(), pressed ? ink : paper);
+        paintEdges(painter, rect(), rule, dividerColor(this));
+        painter.setPen(pressed ? paper : ink);
+        painter.setFont(interfaceFont(m::chrome::labelText));
+        const int iconSize = m::chrome::cellIcon, gap = text().isEmpty() ? 0 : px(16);
+        const int inset = mode == Presentation::CompactAction ? px(16) : int(m::chrome::inset);
+        const int available = qMax(0, width() - 2 * inset - iconSize - gap);
+        const auto label = elideInterfaceText(text(), painter.font(), available);
+        const int labelWidth = interfaceTextWidth(label, painter.font());
+        const int left = (width() - iconSize - gap - labelWidth) / 2;
+        icon().paint(&painter, QRect(left, (height() - iconSize) / 2, iconSize, iconSize), Qt::AlignCenter,
+                     isEnabled() ? QIcon::Normal : QIcon::Disabled, pressed ? QIcon::On : QIcon::Off);
+        const QRect labelArea(left + iconSize + gap, 0, labelWidth, height());
+        if (mode == Presentation::CompactAction) {
+            drawOpticalPrivateText(painter, labelArea, label, Qt::AlignHCenter);
+        } else {
+            drawInterfaceText(painter, labelArea, label, Qt::AlignCenter);
+        }
+        return;
+    }
     if (mode == Presentation::ListAction) {
         namespace c = m::chrome;
         QPainter painter(this);
@@ -422,6 +456,20 @@ void CaptionButton::paintEvent(QPaintEvent *) {
         painter.drawLine(x - px(8), y - px(10), x + px(2), y);
         painter.drawLine(x + px(2), y, x - px(8), y + px(10));
     }
+}
+void DismissButton::paintEvent(QPaintEvent *) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const auto ink = palette().color(isEnabled() ? QPalette::WindowText : QPalette::Mid);
+    const auto paper = palette().color(QPalette::Window);
+    const bool pressed = isEnabled() && isDown();
+    const int side = px(44);
+    const QPoint center = contentsRect().center();
+    painter.fillRect(contentsRect(), pressed ? ink : paper);
+    painter.fillRect(QRect(contentsRect().left(), contentsRect().top(), m::control::border, contentsRect().height()),
+                     palette().color(QPalette::Mid));
+    const QRect bounds(center.x() - side / 2, center.y() - side / 2, side, side);
+    controlIcon(ControlIcon::Close, pressed ? paper : ink).paint(&painter, bounds);
 }
 CellButton::CellButton(ControlIcon icon, QWidget *parent, int iconPixels)
     : Button(parent), glyph(icon), iconPixels(iconPixels) {

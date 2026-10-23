@@ -44,9 +44,9 @@ protected:
 };
 // SVG still uses the buffered vector path. Raster images use ZipResource
 // directly, so their encoded source is never accumulated by this server.
-QByteArray plainEntry(const QString &archive, const QString &name) {
+QByteArray plainEntry(const QString &archive, const QString &name, ZipResourceIndex &index) {
     ZipResource stream;
-    if (!stream.open(archive, name))
+    if (!stream.open(archive, name, index))
         return {};
     QByteArray bytes;
     while (stream.valid() && !stream.finished())
@@ -62,8 +62,9 @@ bool svgSource(const QByteArray &bytes) {
 class Transfer : public QObject {
 public:
     Transfer(QTcpSocket *socket, ResourceArchive &archive, const QString &route, const QString &path,
-             const QMap<QString, qint64> &sizes, QObject *parent)
-        : QObject(parent), socket_(socket), archive_(archive), route_(route), path_(path), sizes_(sizes) {
+             const QMap<QString, qint64> &sizes, ZipResourceIndex &index, QObject *parent)
+        : QObject(parent), socket_(socket), archive_(archive), route_(route), path_(path), sizes_(sizes),
+          index_(index) {
         elapsed_.start();
         socket_->setParent(this);
         socket_->setReadBufferSize(16 * 1024);
@@ -95,6 +96,7 @@ private:
     ResourceArchive &archive_;
     QString route_, path_, name_;
     const QMap<QString, qint64> &sizes_;
+    ZipResourceIndex &index_;
     QTimer deadline_;
     QElapsedTimer elapsed_;
     QNetworkReply *reply_ = nullptr;
@@ -190,7 +192,7 @@ private:
     }
     bool startZip(const QSize &expected = {}) {
         auto stream = std::make_unique<ZipResource>();
-        if (!stream->open(path_, name_))
+        if (!stream->open(path_, name_, index_))
             return false;
         auto prefix = stream->next();
         if (!stream->valid())
@@ -261,7 +263,7 @@ private:
             // unencrypted, passes its CRC and is SVG text; a protected book's
             // entries are encrypted and keep the native raster below.
             if (name_.endsWith(".svg", Qt::CaseInsensitive)) {
-                const auto source = plainEntry(path_, name_);
+                const auto source = plainEntry(path_, name_, index_);
                 if (svgSource(source)) {
                     send(source);
                     return;
@@ -419,6 +421,8 @@ struct ResourceServer::Data {
     std::unique_ptr<ResourceArchive> archive;
     QTcpServer listener;
     QMap<QString, qint64> sizes;
+    // Transfers share the GUI thread and open each stream synchronously.
+    ZipResourceIndex index;
     QString route, path;
 };
 ResourceServer::ResourceServer(QObject *parent) : QObject(parent) {}
@@ -485,7 +489,7 @@ bool ResourceServer::open(const QString &path, const OpenArchive &openArchive) {
                 delete socket;
                 continue;
             }
-            new Transfer(socket, *data_->archive, data_->route, data_->path, data_->sizes, this);
+            new Transfer(socket, *data_->archive, data_->route, data_->path, data_->sizes, data_->index, this);
         }
     });
     return true;

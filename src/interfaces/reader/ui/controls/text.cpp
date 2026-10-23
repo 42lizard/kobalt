@@ -17,6 +17,7 @@
 #include <QTextDocument>
 #include <QTextFragment>
 #include <QTextLayout>
+#include <QtMath>
 
 namespace kobalt::ui {
 namespace m = metrics;
@@ -28,6 +29,14 @@ struct ExcerptLine {
     int ascent, advance;
     Qt::LayoutDirection direction;
 };
+qreal excerptLineBottom(const QTextLayout &layout, const QTextLine &line) {
+    qreal bottom = layout.position().y() + line.y() + line.height();
+    // A proportional text line can end above its glyph ink, including descenders.
+    for (const auto &run : line.glyphRuns()) {
+        bottom = qMax(bottom, layout.position().y() + run.boundingRect().bottom());
+    }
+    return qCeil(bottom);
+}
 bool privateExcerptNeeded(const QTextDocument &document, const QFont &font) {
     auto text = document.toPlainText();
     text.remove(QChar::LineSeparator);
@@ -136,7 +145,14 @@ qreal excerptTextHeight(const QString &html, const QFont &font, int width) {
         return lines.isEmpty() ? 0 : lines.last().top + lines.last().height;
     }
     document.setTextWidth(width);
-    return document.size().height();
+    qreal bottom = document.size().height();
+    for (auto block = document.begin(); block.isValid(); block = block.next()) {
+        const auto *layout = block.layout();
+        for (int i = 0; i < layout->lineCount(); ++i) {
+            bottom = qMax(bottom, excerptLineBottom(*layout, layout->lineAt(i)));
+        }
+    }
+    return bottom;
 }
 void WholeLineLabel::paintEvent(QPaintEvent *) {
     QTextDocument document;
@@ -181,21 +197,29 @@ void WholeLineLabel::paintEvent(QPaintEvent *) {
     for (auto block = document.begin(); block.isValid(); block = block.next()) {
         const auto *layout = block.layout();
         for (int i = 0; i < layout->lineCount(); ++i) {
-            const auto line = layout->lineAt(i);
-            const qreal end = layout->position().y() + line.y() + line.height();
-            if (end <= height())
+            const auto end = excerptLineBottom(*layout, layout->lineAt(i));
+            if (end <= height()) {
                 bottom = qMax(bottom, end);
+            }
         }
     }
     QPainter painter(this);
-    const QRectF clip(0, 0, width(), bottom);
-    if (alignment() & Qt::AlignVCenter)
+    painter.setPen(palette().color(QPalette::WindowText));
+    painter.setClipRect(rect());
+    if (alignment() & Qt::AlignVCenter) {
         painter.translate(0, (height() - bottom) / 2);
-    painter.setClipRect(clip);
-    QAbstractTextDocumentLayout::PaintContext context;
-    context.palette = palette();
-    context.clip = clip;
-    document.documentLayout()->draw(&painter, context);
+    }
+    // Paint admitted lines only; an ink overhang must not expose the next partial line.
+    for (auto block = document.begin(); block.isValid(); block = block.next()) {
+        const auto *layout = block.layout();
+        for (int i = 0; i < layout->lineCount(); ++i) {
+            const auto line = layout->lineAt(i);
+            if (excerptLineBottom(*layout, line) > bottom) {
+                return;
+            }
+            line.draw(&painter, layout->position());
+        }
+    }
 }
 QVector<QPair<int, int>> samplePrefixes(const QString &text) {
     const auto letters = text.toUcs4();

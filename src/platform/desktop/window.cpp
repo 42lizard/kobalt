@@ -5,23 +5,32 @@
 #include "interfaces/reader/views/reading_page.h"
 #include "reading/reading_density.h"
 #include "interfaces/reader/ui/style/scale.h"
+#include <QActionGroup>
 #include <QComboBox>
 #include <QCloseEvent>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QDateTime>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLineEdit>
 #include <QLabel>
 #include <QGridLayout>
+#include <QHBoxLayout>
 #include <QFile>
 #include <lunasvg.h>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMimeData>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QShortcut>
 #include <QStackedWidget>
+#include <QStandardPaths>
+#include <QTemporaryFile>
 #include <QToolBar>
+#include <QToolTip>
 #include <QPainter>
 #include <QTime>
 #include <QScreen>
@@ -88,6 +97,7 @@ protected:
 class DeviceFrame final : public QWidget {
 public:
     explicit DeviceFrame(QWidget *parent) : QWidget(parent) {
+        setObjectName("desktopDeviceFrame");
         previous = new DeviceButton(this);
         next = new DeviceButton(this);
         previous->setObjectName("desktopDevicePrevious");
@@ -158,7 +168,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
               return services;
           },
           [](Qt::ScreenOrientation) {}) {
-    setWindowTitle("Kobalt");
+    setWindowTitle(QStringLiteral(""));
     setMinimumSize(420, 500);
     resize(640, 800);
     setAcceptDrops(true);
@@ -183,13 +193,25 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         if (auto *reader = controller.window())
             reader->pageButton(1);
     });
-    auto *toolbar = addToolBar(tr("Screen"));
+    auto *toolbar = addToolBar(tr("Preview Toolbar"));
+    toolbar->setObjectName("desktopPreviewToolbar");
     toolbar->setMovable(false);
     toolbar->setFloatable(false);
     screenPicker = new QComboBox(toolbar);
     screenPicker->setObjectName("desktopScreenPicker");
     screenPicker->setAccessibleName(tr("Reader screen"));
     screenPicker->addItems({tr("Fill window"), tr("6-inch e-reader"), tr("7-inch e-reader with buttons")});
+    screenPicker->setMinimumWidth(100);
+    screenPicker->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    resolutionPicker = new QComboBox(toolbar);
+    resolutionPicker->setObjectName("desktopResolutionPicker");
+    resolutionPicker->setAccessibleName(tr("Rendering resolution"));
+    resolutionPicker->setToolTip(
+        tr("Change preview sharpness without changing the book layout. Native uses the Mac display resolution."));
+    resolutionPicker->addItem(tr("212 DPI"), 212);
+    resolutionPicker->addItem(tr("300 DPI"), 300);
+    resolutionPicker->addItem(tr("Native"), 0);
+    resolutionPicker->setCurrentIndex(resolutionPicker->findData(renderingDpi));
     auto *contents = new QWidget(toolbar);
     contents->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     auto *layout = new QGridLayout(contents);
@@ -197,17 +219,46 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     auto *logo = new ToolbarLogo(contents);
     auto *version = new QLabel(QStringLiteral(KOBALT_VERSION), contents);
     version->setObjectName("desktopVersion");
-    // Equal side columns keep the picker centered even when the version is wider than the icon.
+    // Equal side columns keep both pickers centered.
     const int sideWidth = qMax(logo->width(), version->sizeHint().width());
     layout->setColumnMinimumWidth(0, sideWidth);
     layout->setColumnMinimumWidth(2, sideWidth);
     layout->setColumnStretch(0, 1);
     layout->setColumnStretch(2, 1);
     layout->addWidget(logo, 0, 0, Qt::AlignLeft | Qt::AlignVCenter);
-    layout->addWidget(screenPicker, 0, 1, Qt::AlignCenter);
+    auto *pickers = new QWidget(contents);
+    pickers->setObjectName("desktopPreviewPickers");
+    auto *choices = new QHBoxLayout(pickers);
+    choices->setContentsMargins(0, 0, 0, 0);
+    choices->setSpacing(8);
+    choices->addWidget(screenPicker, 1);
+    choices->addWidget(resolutionPicker);
+    auto *screenshot = new QPushButton(tr("Screenshot"), pickers);
+    screenshot->setObjectName("desktopScreenshot");
+    screenshot->setToolTip(tr("Save the current preview to the Desktop as a PNG."));
+    screenshot->setFocusPolicy(Qt::NoFocus);
+    choices->addWidget(screenshot);
+    connect(screenshot, &QPushButton::clicked, this, [this, screenshot] {
+        QString error;
+        const auto path = saveScreenshot(QStandardPaths::writableLocation(QStandardPaths::DesktopLocation), &error);
+        if (path.isEmpty()) {
+            QMessageBox::warning(this, tr("Screenshot could not be saved"), error);
+        } else {
+            QToolTip::showText(screenshot->mapToGlobal(screenshot->rect().bottomLeft()),
+                               tr("Saved to %1").arg(QDir::toNativeSeparators(path)), screenshot);
+        }
+    });
+    layout->addWidget(pickers, 0, 1);
     layout->addWidget(version, 0, 2, Qt::AlignRight | Qt::AlignVCenter);
     toolbar->addWidget(contents);
+    layout->activate();
+    const int toolbarInset = qMax(0, toolbar->sizeHint().width() - contents->sizeHint().width());
+    setMinimumWidth(qMax(minimumWidth(), contents->minimumSizeHint().width() + toolbarInset));
     connect(screenPicker, qOverload<int>(&QComboBox::currentIndexChanged), this, &Window::selectScreen);
+    connect(resolutionPicker, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
+        renderingDpi = resolutionPicker->currentData().toInt();
+        sizeCanvas();
+    });
     start = new android::StartScreen(readerServices().presentation);
     start->setLastBook(controller.lastBook());
     connect(start, &android::StartScreen::reopenRequested, this, &Window::openBook);
@@ -228,6 +279,37 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     auto *quit = file->addAction(tr("Quit Kobalt"), this, &QWidget::close);
     quit->setShortcut(QKeySequence::Quit);
     quit->setMenuRole(QAction::QuitRole);
+    auto *view = menuBar()->addMenu(tr("&View"));
+    view->setObjectName("desktopViewMenu");
+    const auto choicesMenu = [view](QComboBox *picker, const QString &title, const QString &name) {
+        auto *menu = view->addMenu(title);
+        menu->setObjectName(name);
+        auto *group = new QActionGroup(menu);
+        group->setExclusive(true);
+        for (int index = 0; index < picker->count(); ++index) {
+            auto *action = menu->addAction(picker->itemText(index));
+            action->setCheckable(true);
+            action->setChecked(index == picker->currentIndex());
+            action->setData(index);
+            group->addAction(action);
+            connect(action, &QAction::triggered, picker, [picker, index] {
+                picker->setCurrentIndex(index);
+            });
+        }
+        connect(picker, qOverload<int>(&QComboBox::currentIndexChanged), group, [group](int index) {
+            for (auto *action : group->actions())
+                action->setChecked(action->data().toInt() == index);
+        });
+        return group;
+    };
+    screenActions = choicesMenu(screenPicker, tr("Device"), "desktopDeviceMenu");
+    resolutionActions = choicesMenu(resolutionPicker, tr("Rendering Resolution"), "desktopResolutionMenu");
+    view->addSeparator();
+    auto *showToolbar = toolbar->toggleViewAction();
+    showToolbar->setObjectName("desktopShowToolbar");
+    showToolbar->setText(tr("Show Toolbar"));
+    showToolbar->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+T")));
+    view->addAction(showToolbar);
     for (const auto key : {Qt::Key_Right, Qt::Key_PageDown, Qt::Key_Left, Qt::Key_PageUp}) {
         auto *shortcut = new QShortcut(QKeySequence(key), this);
         connect(shortcut, &QShortcut::activated, this, [this, key] {
@@ -236,6 +318,9 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     }
     resizeTimer.setSingleShot(true);
     resizeTimer.setInterval(100);
+    connect(toolbar, &QToolBar::visibilityChanged, this, [this] {
+        resizeTimer.start();
+    });
     canvas->viewportResized = [this] {
         resizeTimer.start();
     };
@@ -251,16 +336,15 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     connect(&controller, &android::ReaderController::openingProgress, start, &android::StartScreen::setProgress);
     connect(&controller, &android::ReaderController::opened, this, [this] {
         auto *reader = controller.window();
-        canvas->setContent(reader, true);
+        canvas->setContent(reader, renderingDpi != 0, renderingDpi ? renderingDpi / 300.0 : 1.0);
         stack->setCurrentWidget(canvas);
         sizeCanvas();
         reader->show();
         setUpdatesEnabled(true);
-        setWindowTitle(QFileInfo(controller.path()).fileName() + " | Kobalt");
         start->setLastBook(controller.lastBook());
         reader->checkpoint();
         emit bookOpened();
-        screenPicker->setEnabled(true);
+        setPreviewControlsEnabled(true);
     });
     connect(&controller, &android::ReaderController::failed, this, [this](const QString &error) {
         failed = true;
@@ -272,18 +356,65 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         if (!failed)
             start->showReady();
         stack->setCurrentWidget(start);
-        setWindowTitle("Kobalt");
         sizeCanvas();
         if (closing) {
             emit drained();
             close();
-        } else
-            screenPicker->setEnabled(true);
+        } else {
+            setPreviewControlsEnabled(true);
+        }
     });
     connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
         if (state != Qt::ApplicationActive && controller.window())
             controller.window()->checkpoint();
     });
+}
+QString Window::saveScreenshot(const QString &directory, QString *error) {
+    if (error) {
+        error->clear();
+    }
+    const auto fail = [error](const QString &message) {
+        if (error) {
+            *error = message;
+        }
+        return QString();
+    };
+    if (directory.isEmpty()) {
+        return fail(tr("The Desktop folder is unavailable."));
+    }
+    // One temporary image at the window's display resolution; no screenshot cache is retained.
+    auto *stage = centralWidget();
+    const qreal dpr = stage->devicePixelRatioF();
+    QImage image(QSize(qRound(stage->width() * dpr), qRound(stage->height() * dpr)),
+                 QImage::Format_ARGB32_Premultiplied);
+    if (image.isNull()) {
+        return fail(tr("There is not enough memory to capture the current preview."));
+    }
+    image.setDevicePixelRatio(dpr);
+    image.fill(Qt::transparent);
+    {
+        QPainter painter(&image);
+        if (screenPreset) {
+            // Draw the frame and reader separately, omitting only the stage's white paper.
+            // Keep antialiased frame corners transparent and the reader's own white pixels opaque.
+            deviceFrame->render(&painter, deviceFrame->pos(), {}, QWidget::DrawChildren);
+            stack->render(&painter, stack->pos());
+        } else {
+            stage->render(&painter);
+        }
+    }
+    const auto name = tr("Kobalt Screenshot %1 XXXXXX.png")
+                          .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss")));
+    QTemporaryFile file(QDir(directory).filePath(name));
+    if (!file.open()) {
+        return fail(
+            tr("Could not create a screenshot in %1: %2").arg(QDir::toNativeSeparators(directory), file.errorString()));
+    }
+    if (!image.save(&file, "PNG") || !file.flush()) {
+        return fail(tr("Could not write the PNG screenshot: %1").arg(file.errorString()));
+    }
+    file.setAutoRemove(false);
+    return file.fileName();
 }
 QSize Window::pixels() const {
     if (screenPreset == 1)
@@ -311,6 +442,8 @@ void Window::sizeCanvas() {
     const qreal scale = screenPreset
                             ? qMin(qreal(stack->width()) / pixels().width(), qreal(stack->height()) / pixels().height())
                             : 1.0 / readerPixelsPerPoint;
+    canvas->setRasterScale(renderingDpi ? renderingDpi / 300.0 : 1.0);
+    canvas->setNativePixels(renderingDpi != 0);
     canvas->setTransform(QTransform::fromScale(scale, scale));
     canvas->setSceneRect(QRectF(QPointF(), pixels()));
 }
@@ -321,6 +454,12 @@ void Window::selectScreen(int index) {
     if (auto *reader = controller.window())
         reader->refreshHostPresentation();
     sizeCanvas();
+}
+void Window::setPreviewControlsEnabled(bool enabled) {
+    screenPicker->setEnabled(enabled);
+    resolutionPicker->setEnabled(enabled);
+    screenActions->setEnabled(enabled);
+    resolutionActions->setEnabled(enabled);
 }
 void Window::chooseBook() {
     const auto path = QFileDialog::getOpenFileName(this, tr("Open EPUB"), {}, tr("EPUB books (*.epub)"));
@@ -333,7 +472,7 @@ void Window::openBook(const QString &path) {
         return;
     failed = false;
     sizeCanvas();
-    screenPicker->setEnabled(false);
+    setPreviewControlsEnabled(false);
     deviceFrame->previous->setEnabled(false);
     deviceFrame->next->setEnabled(false);
     start->showOpening();
@@ -344,7 +483,8 @@ void Window::turnPage(int direction) {
     auto *reader = controller.window();
     if (!reader || !reader->isVisible() || !reader->isEnabled() || QApplication::activeModalWidget())
         return;
-    if (screenPicker->hasFocus() || qobject_cast<QLineEdit *>(QApplication::focusWidget()))
+    if (screenPicker->hasFocus() || resolutionPicker->hasFocus() ||
+        qobject_cast<QLineEdit *>(QApplication::focusWidget()))
         return;
     // Only turn from the reading surface. The same keys must remain available
     // to search fields, sliders, lists and dialogs while controls are open.

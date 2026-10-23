@@ -13,6 +13,10 @@ public:
         return tracking;
     }
     enum class MarkerMode { Positions, Stops };
+    void setDotMarkers(bool enabled) {
+        dotMarkers = enabled;
+        update();
+    }
     // Stops are evenly spaced and snap pointer gestures. Buttons retain singleStep().
     void setMarkers(const QVector<int> &values, MarkerMode mode = MarkerMode::Positions);
     void nudge(int steps);
@@ -27,6 +31,7 @@ protected:
 
 private:
     bool tracking = false;
+    bool dotMarkers = false;
     int original = 0;
     QVector<int> markers;
     MarkerMode markerMode = MarkerMode::Positions;
@@ -34,6 +39,35 @@ private:
     void moveTo(qreal x);
     void cancel();
     void finish();
+};
+// A full-range rail with a draggable viewport. Presentation updates never emit
+// moved; pointer input reports the first visible value while preserving the span.
+class RangeOverview final : public QWidget {
+public:
+    explicit RangeOverview(QWidget *parent);
+    void setRange(int count, int first, int last, int current);
+    QRect windowBounds() const;
+    std::function<void(int)> moved;
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+    bool event(QEvent *) override;
+    void mousePressEvent(QMouseEvent *) override;
+    void mouseMoveEvent(QMouseEvent *) override;
+    void mouseReleaseEvent(QMouseEvent *) override;
+    void hideEvent(QHideEvent *) override;
+
+private:
+    int count = 1, first = 0, last = 0, current = 0;
+    int original = 0;
+    qreal grab = 0;
+    bool tracking = false;
+    QRect trackBounds() const;
+    qreal valueAt(qreal x) const;
+    int xAt(int value) const;
+    void begin(qreal x);
+    void move(qreal x);
+    void cancel();
 };
 SettingSlider *sliderRow(QWidget *parent, QVBoxLayout *rows, const char *name, const char *labelName,
                          const QString &label, const char *lessName, const char *moreName, int minimum, int maximum,

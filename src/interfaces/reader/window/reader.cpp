@@ -13,6 +13,7 @@
 #include "interfaces/reader/ui/style/styles.h"
 #include "platform/api/kobo_refresh.h"
 #include "reading/appearance_settings.h"
+#include "reading/page_navigation.h"
 #include "reading/sleep_screen.h"
 #include "model/page_refresh_regions.h"
 #include "support/diagnostics.h"
@@ -43,6 +44,12 @@ using kobalt::platform::textRefresh;
 using kobalt::Choice;
 
 Reader::~Reader() {
+    book->onEstimatesChanged({});
+    model->cancelPagePreview();
+    if (pageScrubber) {
+        pageScrubber->cancel();
+        pageScrubber->cancelled = {};
+    }
     model->renderProgressChanged = {};
     renderNoticeTimer.stop();
     model->cancelPendingTurn();
@@ -67,7 +74,9 @@ void Reader::observeReading() {
         book->stopReading();
         return;
     }
-    book->observeReading();
+    book->observeReading(!topControls->isVisible() && !general->isVisible() && !choices->isVisible() &&
+                         !dictionaryPanel->isVisible() && !searchPanel->isVisible() && !linksActive() &&
+                         !appearanceEdit.panelOpen() && !syncDialog && !finishDialog);
 }
 
 void Reader::prepareShutdown(std::function<void()> finished) {
@@ -77,6 +86,8 @@ void Reader::prepareUsb(std::function<void()> finished) {
     prepareTransition(std::move(finished), 2000);
 }
 void Reader::prepareTransition(std::function<void()> finished, int timeoutMs) {
+    if (pageScrubber)
+        pageScrubber->cancel();
     sleepImage = {};
     presentation->clearSleepScreen();
     auto elapsed = std::make_shared<QElapsedTimer>();
@@ -137,6 +148,8 @@ void Reader::prepareSleepCover() {
 }
 
 void Reader::sleepReader() {
+    if (pageScrubber)
+        pageScrubber->cancel();
     if (lifecycleHidden)
         return;
     setProperty("reader_sleep_clean_pending", true);
@@ -324,6 +337,7 @@ QVector<QWidget *> Reader::popups() const {
             sleepPopup.data(),
             pageNavigationPopup.data(),
             tapZonesPopup.data(),
+            navigationBarPopup.data(),
             removeDialog.data(),
             customReplaceDialog.data(),
             bookmarkErrorDialog.data(),
@@ -377,6 +391,11 @@ bool Reader::event(QEvent *event) {
 
 bool Reader::eventFilter(QObject *watched, QEvent *event) {
     const auto type = event->type();
+    if (type == QEvent::Show && (watched == topControls || watched == general || watched == choices ||
+                                 watched == dictionaryPanel || watched == searchPanel || watched == linkPanel ||
+                                 watched == linkDialog || watched == syncDialog || watched == finishDialog)) {
+        book->pauseLocalPace();
+    }
     if (watched == menu && type == QEvent::Hide && fieldChooser) {
         fieldChooser->hide();
         headerFooterView->hide();
@@ -442,6 +461,10 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
     }
     if (tapZonesPopup && watched == tapZonesPopup && type == QEvent::MouseButtonRelease) {
         closeTapZones();
+        return true;
+    }
+    if (navigationBarPopup && watched == navigationBarPopup && type == QEvent::MouseButtonRelease) {
+        closeNavigationBarButtons();
         return true;
     }
     if (pageNavigationPopup && watched == pageNavigationPopup && type == QEvent::MouseButtonRelease) {
@@ -576,6 +599,8 @@ void Reader::showEvent(QShowEvent *event) {
 }
 
 void Reader::hideEvent(QHideEvent *event) {
+    if (pageScrubber)
+        pageScrubber->cancel();
     renderNoticeTimer.stop();
     busyNotice->setDelayedProgress(false, 0, 0);
     model->cancelPendingTurn();
@@ -958,6 +983,7 @@ void Reader::startClock() {
 
 void Reader::configureNavigation() {
     navigation = std::make_unique<kobalt::reader::Navigation>(this, toolbarComposition);
+    navigation->setScrubber(pageScrubber);
     navigation->setStatusVisible(!hideNativeStatus());
     chapterGraph->setTopPadding(navigation->statsTopPadding());
     topControls->setGeometry(0, 0, width(), navigation->toolbarHeight());
@@ -1068,7 +1094,10 @@ void Reader::syncLinkDiscovery() {
     if (!count)
         hideRevealedLinks();
     const bool controls = topControls->isVisible() || revealingLinks;
-    linkDiscovery->setVisible(!blocked && controls && count > 0);
+    const bool linksAvailable = !blocked && controls && count > 0;
+    pageScrubber->setLinksAction(linksAvailable && !revealingLinks ? strings::get("reader.highlight_links").arg(count)
+                                                                   : QString());
+    linkDiscovery->setVisible(linksAvailable && revealingLinks);
     linkIndicator->setVisible(!blocked && !controls && count > 0 &&
                               preferences.value("show_link_indicator").toBool(false));
     QVector<QRect> rectangles;
@@ -1220,6 +1249,11 @@ void Reader::syncNavigation() {
                            : lightPopup->isVisible() ? int(Nav::Light)
                            : chapterGraph->isVisible() && !pinned ? int(Nav::Stats)
                                                                   : -1;
+        pageScrubber->setReturnAction(
+            linkReturnAvailable ? strings::get("reader.return_page").arg(linkHistory.last().page + 1) : QString(),
+            linkHistory.isEmpty() || linkHistory.last().chapter.isEmpty()
+                ? QString()
+                : strings::get("reader.jumped_from_chapter").arg(linkHistory.last().chapter));
         navigation->update(
             size(),
             {bottomControls, menu, chapterGraph,
@@ -1234,7 +1268,8 @@ void Reader::syncNavigation() {
              lightPopup, pinned,
              linkHistory.isEmpty() || linkHistory.last().chapter.isEmpty()
                  ? QString()
-                 : strings::get("reader.jumped_from_chapter").arg(linkHistory.last().chapter)});
+                 : strings::get("reader.jumped_from_chapter").arg(linkHistory.last().chapter),
+             preferences.value(pageNavigation::barVisibleKey).toBool(true)});
     };
     update();
     syncLinkDiscovery();
@@ -1322,6 +1357,8 @@ void Reader::showControls() {
 }
 
 void Reader::dismissControls() {
+    if (pageScrubber)
+        pageScrubber->cancel();
     hideRevealedLinks();
     lightPopup->hide();
     chapterGraph->hide();
@@ -1476,6 +1513,8 @@ void Reader::pageButton(int direction) {
 }
 
 void Reader::turnPage(int direction) {
+    if (pageScrubber)
+        pageScrubber->cancel();
     turnStarted.start();
     if (finishDialog || syncDialog || bookmarkErrorDialog || formattingWarningDialog || settingsWriteErrorDialog ||
         !model->canTurn() || closing || exitPending || lifecycleHidden || services.suspended() ||

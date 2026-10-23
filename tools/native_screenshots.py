@@ -22,6 +22,7 @@ BOOKS = ROOT / 'tests/fixtures/screenshot_books.json'
 GROUPS = {
     'android-startup': ('alice', 'Android startup, last-book cover and no-cover states'),
     'reading': ('alice', 'Reading page and menu'),
+    'reading-long': ('war-and-peace', 'Long-book map zoom and page previews'),
     'bluetooth': ('alice', 'Bluetooth status beside the battery, with controls shown and hidden'),
     'settings': ('alice', 'Every settings tab, restore confirmation and refresh picker'),
     'sleep': ('alice', 'Kobalt sleep card over the reading page; native sleep and PIN are tested separately'),
@@ -33,6 +34,8 @@ GROUPS = {
     'layout-system-rotation': ('alice', 'Layout controls without manual rotation, as on Android'),
     'chapters': ('alice', 'Every page of the chapter picker'),
     'links': ('alice', 'Book contents, link actions, destination and return row'),
+    'links-long': ('war-and-peace', 'Long-book link and return buttons with map zoom'),
+    'links-legacy': ('alice', 'Standalone link and return buttons with the navigation bar disabled'),
     'footnotes': ('maths', 'Footnote reference, preview, full passage and return row'),
     'dictionary': ('alice', 'English selection, definition, dictionary picker and error states'),
     'search': ('alice', 'Search editor, results, pagination and no matches'),
@@ -171,12 +174,13 @@ def report(output, manifest):
             if any(word in group for word in ('japanese', 'korean', 'chinese', 'writing-modes')):
                 return 'cjk-vertical' if 'vertical' in group or group == 'international-writing-modes' else 'cjk-horizontal'
             return 'reading-multilingual'
-        if group == 'reading':
+        if group in ('reading', 'reading-long'):
             return 'settings' if scene == 'menu' else 'text' if scene == 'supplemental-fonts' else 'reading'
         if group == 'maths':
             return 'reading-mathematics'
         if group == 'stats-dense': return 'stats'
         if group == 'layout-saved-field': return 'layout'
+        if group in ('links-legacy', 'links-long'): return 'links'
         if group in ('typography', 'embedded-fonts', 'bionic'):
             return 'text'
         if group in ('about', 'dialogs', 'sync'):

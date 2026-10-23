@@ -1,5 +1,7 @@
 #include "sliders.h"
+#include "icons.h"
 #include "../style/metrics.h"
+#include "../style/theme.h"
 #include "../style/styles.h"
 #include "../style/fonts.h"
 #include "support/strings.h"
@@ -53,8 +55,14 @@ void SettingSlider::paintEvent(QPaintEvent *) {
     for (const int marker : markers) {
         if (marker < minimum() || marker > maximum())
             continue;
-        painter.drawLine(positionForValue(marker), m::control::sliderMarkerTop, positionForValue(marker),
-                         m::control::sliderMarkerTop + m::control::sliderMarkerHeight);
+        if (dotMarkers) {
+            painter.setBrush(palette().color(QPalette::WindowText));
+            painter.drawEllipse(QPoint(positionForValue(marker), height() / 2), int(m::control::sliderMarkerHeight) / 2,
+                                int(m::control::sliderMarkerHeight) / 2);
+        } else {
+            painter.drawLine(positionForValue(marker), m::control::sliderMarkerTop, positionForValue(marker),
+                             m::control::sliderMarkerTop + m::control::sliderMarkerHeight);
+        }
     }
     painter.setPen(QPen(palette().color(QPalette::WindowText), m::control::border));
     painter.drawLine(m::control::sliderInset, height() / 2, width() - m::control::sliderInset, height() / 2);
@@ -154,6 +162,165 @@ void SettingSlider::finish() {
     tracking = false;
     if (changed && committed)
         committed(value());
+}
+
+RangeOverview::RangeOverview(QWidget *parent) : QWidget(parent) {
+    setAttribute(Qt::WA_AcceptTouchEvents);
+    setFocusPolicy(Qt::NoFocus);
+}
+void RangeOverview::setRange(int values, int begin, int end, int reading) {
+    values = qMax(1, values);
+    begin = qBound(0, begin, values - 1);
+    end = qBound(begin, end, values - 1);
+    reading = qBound(0, reading, values - 1);
+    if (count == values && first == begin && last == end && current == reading) {
+        return;
+    }
+    count = values;
+    first = begin;
+    last = end;
+    current = reading;
+    setAccessibleDescription(strings::get("reader.zoom_range").arg(first + 1).arg(last + 1).arg(count));
+    update();
+}
+QRect RangeOverview::trackBounds() const {
+    const int inset = qMin(int(m::control::sliderInset), qMax(0, (width() - 1) / 2));
+    const int center = contentsRect().top() + contentsRect().height() / 2;
+    return {inset, center - int(m::scrubber::overviewTrack) / 2, qMax(1, width() - 2 * inset),
+            m::scrubber::overviewTrack};
+}
+int RangeOverview::xAt(int value) const {
+    const QRect track = trackBounds();
+    return track.left() + qRound(qreal(value) * (track.width() - 1) / qMax(1, count - 1));
+}
+qreal RangeOverview::valueAt(qreal x) const {
+    const QRect track = trackBounds();
+    return (x - track.left()) * qMax(1, count - 1) / qMax(1, track.width() - 1);
+}
+QRect RangeOverview::windowBounds() const {
+    const QRect track = trackBounds();
+    const int left = xAt(first), right = xAt(last);
+    const int span = count == 1 ? track.width() : right - left + 1;
+    const int grip = qMin(track.width(), qMax(int(m::scrubber::overviewGrip), span));
+    const int x = qBound(track.left(), left + (span - grip) / 2, track.right() - grip + 1);
+    const int center = contentsRect().top() + contentsRect().height() / 2;
+    return {x, center - int(m::scrubber::overviewWindow) / 2, grip, m::scrubber::overviewWindow};
+}
+void RangeOverview::paintEvent(QPaintEvent *) {
+    QPainter painter(this);
+    painter.fillRect(rect(), palette().color(QPalette::Base));
+    const auto ink = palette().color(QPalette::WindowText);
+    const auto paper = palette().color(QPalette::Base);
+    const auto divider = dividerColor(this);
+    const Edges outline = Edges(Qt::TopEdge) | Qt::BottomEdge | Qt::LeftEdge | Qt::RightEdge;
+    const QRect track = trackBounds();
+    painter.fillRect(track, QColor(darkTheme(this) ? m::scrubber::overviewPaperDark : m::scrubber::overviewPaperLight));
+    const QRect window = windowBounds();
+    const int border = m::control::border;
+    painter.fillRect(track.adjusted(border, border, -border, -border).intersected(window), paper);
+    paintEdges(painter, track, outline, divider);
+    const int center = contentsRect().top() + contentsRect().height() / 2;
+    for (int x = track.left() + int(m::scrubber::overviewDashSpacing); x < track.right();
+         x += int(m::scrubber::overviewDashSpacing)) {
+        paintEdges(painter,
+                   {x, center - int(m::scrubber::overviewDashHeight) / 2, int(m::control::border),
+                    m::scrubber::overviewDashHeight},
+                   Qt::LeftEdge, divider);
+    }
+    const int cap = qMin(window.width(), qBound(int(m::scrubber::overviewBracketMinimum), qRound(window.width() * .1),
+                                                int(m::scrubber::overviewBracketMaximum)));
+    paintEdges(painter, {window.left(), window.top(), cap, window.height()},
+               Edges(Qt::LeftEdge) | Qt::TopEdge | Qt::BottomEdge, ink);
+    paintEdges(painter, {window.right() - cap + 1, window.top(), cap, window.height()},
+               Edges(Qt::RightEdge) | Qt::TopEdge | Qt::BottomEdge, ink);
+    const int icon = qMin(int(m::scrubber::overviewIcon),
+                          qMin(window.width(), window.height()) - 2 * int(m::scrubber::overviewIconPadding));
+    if (icon > 0) {
+        const int diameter = qMin(int(m::scrubber::overviewLens), qMin(window.width(), window.height()) - 2 * border);
+        painter.save();
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(paper);
+        painter.drawEllipse(QRectF(window.x() + (window.width() - diameter) / 2,
+                                   window.y() + (window.height() - diameter) / 2, diameter, diameter));
+        painter.restore();
+        controlIcon(ControlIcon::Search, ink)
+            .paint(&painter, QRect(window.x() + (window.width() - icon) / 2, window.y() + (window.height() - icon) / 2,
+                                   icon, icon));
+    }
+    // Keep the reading marker below the grip, including when it shares the icon's x position.
+    paintEdges(painter,
+               {xAt(current), window.bottom() + 1 + int(m::scrubber::overviewTickGap), int(m::control::border),
+                m::scrubber::overviewTickHeight},
+               Qt::LeftEdge, ink);
+}
+void RangeOverview::begin(qreal x) {
+    tracking = count > last - first + 1;
+    original = first;
+    const qreal value = valueAt(x);
+    const QRect window = windowBounds();
+    grab = x >= window.left() && x <= window.right() ? value - first : (last - first) / 2.0;
+    move(x);
+}
+void RangeOverview::move(qreal x) {
+    if (!tracking) {
+        return;
+    }
+    const int target = qRound(qBound(qreal(0), valueAt(x) - grab, qreal(count - 1 - (last - first))));
+    if (target != first && moved) {
+        moved(target);
+    }
+}
+void RangeOverview::cancel() {
+    const bool restore = tracking && first != original;
+    tracking = false;
+    if (restore && moved) {
+        moved(original);
+    }
+}
+bool RangeOverview::event(QEvent *event) {
+    if (isHoverEvent(event)) {
+        return true;
+    }
+    if (event->type() == QEvent::TouchCancel) {
+        cancel();
+        event->accept();
+        return true;
+    }
+    if (event->type() == QEvent::TouchBegin || event->type() == QEvent::TouchUpdate ||
+        event->type() == QEvent::TouchEnd) {
+        const auto points = touchPositions(static_cast<QTouchEvent *>(event));
+        if (points.size() != 1) {
+            cancel();
+        } else if (event->type() == QEvent::TouchBegin) {
+            begin(points.first().x());
+        } else {
+            move(points.first().x());
+        }
+        if (event->type() == QEvent::TouchEnd) {
+            tracking = false;
+        }
+        event->accept();
+        return true;
+    }
+    return QWidget::event(event);
+}
+void RangeOverview::mousePressEvent(QMouseEvent *event) {
+    if (isPointerMouse(event) && event->button() == Qt::LeftButton) {
+        begin(mousePosition(event).x());
+    }
+}
+void RangeOverview::mouseMoveEvent(QMouseEvent *event) {
+    move(mousePosition(event).x());
+}
+void RangeOverview::mouseReleaseEvent(QMouseEvent *event) {
+    if (isPointerMouse(event) && event->button() == Qt::LeftButton) {
+        move(mousePosition(event).x());
+        tracking = false;
+    }
+}
+void RangeOverview::hideEvent(QHideEvent *) {
+    tracking = false;
 }
 
 SettingSlider *sliderRow(QWidget *parent, QVBoxLayout *rows, const char *name, const char *labelName,

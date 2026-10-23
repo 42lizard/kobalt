@@ -1,3 +1,6 @@
+#include "interfaces/reader/ui/controls/page_scrubber.h"
+#include "interfaces/reader/ui/controls/loading.h"
+#include <QDynamicPropertyChangeEvent>
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/icons.h"
 #include "interfaces/reader/ui/controls/text.h"
@@ -37,6 +40,7 @@
 #include "platform/nickel/common/engine_positions.h"
 #include "reader_canvas.h"
 #include "platform/android/canvas.h"
+#include <climits>
 #include <QStackedLayout>
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
@@ -45,6 +49,7 @@
 #include "reading/reading_density.h"
 #include "engine/crengine/engine_activity.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/theme.h"
 #include "interfaces/reader/ui/style/private_text.h"
 #include <QApplication>
 #include <QKeyEvent>
@@ -72,9 +77,13 @@
 #include <QCryptographicHash>
 #include <QContextMenuEvent>
 #include <QTextDocument>
+#include <QTextBlock>
+#include <QTextLayout>
+#include <QAbstractTextDocumentLayout>
 #include <QTemporaryDir>
 #include <QPaintEvent>
 #include <QThread>
+#include <algorithm>
 #include <atomic>
 
 using namespace kobalt;
@@ -376,6 +385,72 @@ bool captureSearchMetrics(QWidget *result, const QString &query) {
 class NativeReaderTest : public QObject {
     Q_OBJECT
 private slots:
+    void searchExcerptKeepsDescenders() {
+        const int previousDensity = ui::density();
+        for (int density : {300, 212}) {
+            ui::setDensity(density);
+            QFont font("Libron");
+            font.setPixelSize(ui::metrics::search::excerptText);
+            font.setHintingPreference(QFont::PreferNoHinting);
+            for (const auto &body :
+                 {QString::fromUtf8("…was the man’s <b><u>strong</u></b> accent. “You’re not from Arelon”"),
+                  QString::fromUtf8("<div dir=\"rtl\">אבג שפה <b><u>שלום</u></b> טקסט</div>"),
+                  QString("strong accent<br>gyp strong accent")}) {
+                const QString html = QString("<div style=\"line-height:130%\">%1</div>").arg(body);
+                for (bool dark : {false, true}) {
+                    for (int width : {500, 800, 1192}) {
+                        ui::WholeLineLabel label;
+                        label.ensurePolished();
+                        label.setFont(font);
+                        label.setAlignment(Qt::AlignLeft | Qt::AlignTop);
+                        label.setTextFormat(Qt::RichText);
+                        label.setText(html);
+                        QPalette palette;
+                        palette.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+                        palette.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+                        palette.setColor(QPalette::Text, dark ? Qt::white : Qt::black);
+                        label.setPalette(palette);
+                        QTextDocument document;
+                        document.setDefaultFont(label.font());
+                        document.setDocumentMargin(0);
+                        document.setHtml(html);
+                        document.setTextWidth(width);
+                        label.resize(width, qCeil(document.size().height()) + 20);
+                        QImage expected(label.size(), QImage::Format_RGB32);
+                        expected.fill(palette.color(QPalette::Window));
+                        QPainter reference(&expected);
+                        QAbstractTextDocumentLayout::PaintContext context;
+                        context.palette = palette;
+                        document.documentLayout()->draw(&reference, context);
+                        reference.end();
+                        QImage actual(label.size(), QImage::Format_RGB32);
+                        actual.fill(palette.color(QPalette::Window));
+                        QPainter painter(&actual);
+                        label.render(&painter, QPoint(), QRegion(), QWidget::DrawChildren);
+                        painter.end();
+                        QCOMPARE(actual, expected);
+                        const auto *layout = document.begin().layout();
+                        if (layout->lineCount() > 1) {
+                            const auto next = layout->lineAt(1);
+                            const int cutoff = qFloor(next.y() + next.ascent() / 2);
+                            label.resize(width, cutoff);
+                            QImage partial(label.size(), QImage::Format_RGB32);
+                            partial.fill(palette.color(QPalette::Window));
+                            QPainter partialPainter(&partial);
+                            label.render(&partialPainter, QPoint(), QRegion(), QWidget::DrawChildren);
+                            partialPainter.end();
+                            QImage admitted = expected.copy(0, 0, width, cutoff);
+                            QPainter erase(&admitted);
+                            erase.fillRect(QRect(0, qFloor(next.y()), width, cutoff), palette.color(QPalette::Window));
+                            erase.end();
+                            QCOMPARE(partial, admitted);
+                        }
+                    }
+                }
+            }
+        }
+        ui::setDensity(previousDensity);
+    }
     void rotationOwnership() {
         QList<int> calls;
         {
@@ -443,21 +518,26 @@ private slots:
 #endif
     }
     void sharedWordCountsReachStats_data() {
-        QTest::addColumn<bool>("platformProgress");
+        QTest::addColumn<int>("paceMode");
         QTest::addColumn<bool>("dark");
         QTest::addColumn<int>("ppi");
-        for (bool platform : {false, true}) {
+        for (int mode : {0, 1, 2}) {
             for (bool dark : {false, true}) {
                 for (int ppi : {212, 300}) {
-                    const auto name =
-                        QString("%1-%2-%3").arg(platform ? "bridge" : "local").arg(dark ? "dark" : "light").arg(ppi);
-                    QTest::newRow(qPrintable(name)) << platform << dark << ppi;
+                    const auto name = QString("%1-%2-%3")
+                                          .arg(mode == 1   ? "bridge"
+                                               : mode == 2 ? "learned"
+                                                           : "rough")
+                                          .arg(dark ? "dark" : "light")
+                                          .arg(ppi);
+                    QTest::newRow(qPrintable(name)) << mode << dark << ppi;
                 }
             }
         }
     }
     void sharedWordCountsReachStats() {
-        QFETCH(bool, platformProgress);
+        QFETCH(int, paceMode);
+        const bool platformProgress = paceMode == 1;
         QFETCH(bool, dark);
         QFETCH(int, ppi);
         const auto previousDensity = ui::density();
@@ -475,7 +555,15 @@ private slots:
         QVERIFY(root.isValid());
         auto paths = testPaths();
         paths.directory = root.path();
-        QVERIFY(storage::writeJson(paths.preferences(), {{"dark_mode", dark}}));
+        QVERIFY(storage::writeJson(paths.preferences(),
+                                   {{"dark_mode", dark},
+                                    {"header_footer", "custom"},
+                                    {"header_footer_custom", QJsonObject{{"bottom_left", "chapter_time_left"},
+                                                                         {"bottom_right", "book_time_left"}}}}));
+        if (paceMode == 2) {
+            QVERIFY(storage::writeJson(paths.readingSpeed(),
+                                       {{"schema", 1}, {"milliseconds", 300000}, {"words", 1500}, {"samples", 3}}));
+        }
         test::ReaderHost host(paths, testFonts, testPlaceholder);
         CloseHost cleanup{host};
         if (platformProgress) {
@@ -496,12 +584,21 @@ private slots:
         for (int i = 0; i < chapters.size(); ++i) {
             QCOMPARE(chapters[i].words, expected[i]);
         }
+        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        QVERIFY(page);
+        if (!platformProgress) {
+            QTRY_VERIFY(!page->slotContents[5].text.isEmpty());
+            QCOMPARE(page->slotContents[5].text.startsWith("≈ "), paceMode == 0);
+            QVERIFY(capture(canvas, host, QString("standalone-pace-%1").arg(QTest::currentDataTag())));
+        }
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
         QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrNavStats")));
         auto *detail = host.window()->findChild<QLabel *>("rrGraphBookDetail");
         QVERIFY(detail);
         QTRY_VERIFY(detail->isVisible());
-        QCOMPARE(detail->text(), strings::get("stats.words").arg("40"));
+        const auto timeLeft = strings::get("stats.time_left").arg(strings::get("stats.duration_minutes").arg(1));
+        const auto expectedDetail = platformProgress ? strings::get("stats.words").arg("40") : timeLeft;
+        QCOMPARE(detail->text(), expectedDetail);
         QVERIFY(capture(canvas, host, QString("shared-words-%1").arg(QTest::currentDataTag())));
         const auto anchor = host.session()->state().value("position");
         auto settings = host.session()->state();
@@ -511,7 +608,1040 @@ private slots:
         QCOMPARE(host.session()->totalWords(), qint64(40));
         QCOMPARE(host.session()->state().value("position"), anchor);
         QCOMPARE(host.session()->chapterGraph().last().words, qint64(9));
-        QCOMPARE(detail->text(), strings::get("stats.words").arg("40"));
+        QCOMPARE(detail->text(), expectedDetail);
+    }
+    void loadingControls_data() {
+        QTest::addColumn<int>("style");
+        QTest::addColumn<int>("ppi");
+        QTest::addColumn<bool>("dark");
+        for (int style = 0; style < 3; ++style) {
+            for (int ppi : {212, 300}) {
+                for (bool dark : {false, true}) {
+                    const auto name = QString("%1-%2-%3").arg(style).arg(ppi).arg(dark ? "dark" : "light");
+                    QTest::newRow(qPrintable(name)) << style << ppi << dark;
+                }
+            }
+        }
+    }
+    void loadingControls() {
+        QFETCH(int, style);
+        QFETCH(int, ppi);
+        QFETCH(bool, dark);
+        struct RestoreDensity {
+            int ppi = ui::density();
+            ~RestoreDensity() {
+                ui::setDensity(ppi);
+            }
+        } restore;
+        ui::setDensity(ppi);
+        QWidget owner;
+        auto palette = owner.palette();
+        palette.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        owner.setPalette(palette);
+        owner.setAutoFillBackground(true);
+        ui::LoadingIndicator loader(static_cast<ui::LoadingIndicator::Style>(style), &owner);
+        loader.resize(loader.sizeHint());
+        owner.resize(loader.size());
+        owner.show();
+        loader.setPalette(palette);
+        auto *timer = loader.findChild<QTimer *>();
+        QVERIFY(timer && !timer->isActive());
+        QVERIFY(loader.testAttribute(Qt::WA_TransparentForMouseEvents));
+        QVERIFY(!loader.isRunning());
+        const QImage blank = loader.grab().toImage();
+        QCOMPARE(blank.pixelColor(0, 0), palette.color(QPalette::Window));
+        loader.start();
+        QVERIFY(loader.isRunning() && timer->isActive());
+        QCOMPARE(timer->interval(), 1000);
+        QCOMPARE(loader.grab().toImage(), blank);
+        QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+        QCOMPARE(timer->interval(), style == 0 ? 300 : 180);
+        const QImage outline = loader.grab().toImage();
+        QVERIFY(outline != blank);
+        const int count = style == 0 ? 3 : 6;
+        const int gap = ui::px(16);
+        QImage stages((count + 1) * (outline.width() + gap), outline.height(), QImage::Format_RGB32);
+        stages.fill(palette.color(QPalette::Window));
+        QPainter painter(&stages);
+        const auto inkPixels = [&](const QImage &image) {
+            int total = 0;
+            const QRgb ink = palette.color(QPalette::WindowText).rgba();
+            for (int y = 0; y < image.height(); ++y) {
+                for (int x = 0; x < image.width(); ++x) {
+                    total += image.pixel(x, y) == ink;
+                }
+            }
+            return total;
+        };
+        int previousInk = inkPixels(outline);
+        painter.drawImage(0, 0, outline);
+        for (int filled = 1; filled <= count; ++filled) {
+            QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+            const auto image = loader.grab().toImage();
+            const int ink = inkPixels(image);
+            QVERIFY(ink > previousInk);
+            previousInk = ink;
+            painter.drawImage(filled * (outline.width() + gap), 0, image);
+        }
+        painter.end();
+        QVERIFY(stages.save(QString("native-loader-%1.png").arg(QTest::currentDataTag())));
+        QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+        QCOMPARE(loader.grab().toImage(), outline);
+        owner.hide();
+        QVERIFY(!timer->isActive());
+        owner.show();
+        QVERIFY(timer->isActive());
+        QCOMPARE(timer->interval(), 1000);
+        QCOMPARE(loader.grab().toImage(), blank);
+        loader.stop();
+        QVERIFY(!loader.isRunning() && !timer->isActive());
+        QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+        QCOMPARE(loader.grab().toImage(), blank);
+        loader.hide();
+        loader.start(-1);
+        QVERIFY(!timer->isActive());
+        loader.show();
+        QVERIFY(timer->isActive());
+        QCOMPARE(timer->interval(), 0);
+        loader.stop();
+    }
+    void navigationActionsStayAboveScrubber_data() {
+        QTest::addColumn<int>("ppi");
+        QTest::addColumn<bool>("navigationBar");
+        QTest::addColumn<bool>("dark");
+        for (int ppi : {212, 300}) {
+            for (bool bar : {false, true}) {
+                for (bool dark : {false, true}) {
+                    const auto name = QString("%1-%2-%3")
+                                          .arg(ppi)
+                                          .arg(bar ? "navigation" : "standalone")
+                                          .arg(dark ? "dark" : "light");
+                    QTest::newRow(qPrintable(name)) << ppi << bar << dark;
+                }
+            }
+        }
+    }
+    void navigationActionsStayAboveScrubber() {
+        QFETCH(int, ppi);
+        QFETCH(bool, navigationBar);
+        QFETCH(bool, dark);
+        struct RestoreDensity {
+            int density = ui::density();
+            ~RestoreDensity() {
+                ui::setDensity(density);
+            }
+        } restore;
+        ui::setDensity(ppi);
+        QWidget owner;
+        owner.setProperty("reader_dark", dark);
+        owner.resize(ppi == 212 ? QSize(758, 902) : QSize(1264, 1508));
+        ui::PageScrubber scrubber(&owner);
+        scrubber.setGeometry(owner.rect());
+        scrubber.setBook(5, 100, {{0, "Chapter one"}, {30, "Chapter two"}}, QSize(758, 1024));
+        scrubber.setBarVisible(navigationBar);
+        auto *links = scrubber.findChild<QPushButton *>("rrScrubberLinks");
+        auto *back = scrubber.findChild<QPushButton *>("rrScrubberReturn");
+        auto *stay = scrubber.findChild<QPushButton *>("rrScrubberStay");
+        auto *actions = scrubber.findChild<QWidget *>("rrScrubberActions");
+        QVERIFY(links && back && stay && actions);
+        owner.show();
+        scrubber.show();
+        auto palette = owner.palette();
+        palette.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::Base, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        owner.setPalette(palette);
+        for (auto *widget : owner.findChildren<QWidget *>()) {
+            widget->setPalette(palette);
+        }
+        for (bool hasLinks : {false, true}) {
+            for (bool hasReturn : {false, true}) {
+                scrubber.setLinksAction(hasLinks ? "Highlight links (3)" : QString());
+                scrubber.setReturnAction(hasReturn ? "Return to page 3603" : QString(), "Chapter two");
+                QCoreApplication::processEvents();
+                QCOMPARE(actions->isVisible(), hasLinks || hasReturn);
+                QCOMPARE(links->isVisible(), hasLinks);
+                QCOMPARE(back->isVisible(), hasReturn);
+                QCOMPARE(stay->isVisible(), hasReturn);
+                if (hasLinks) {
+                    QCOMPARE(links->width(), links->sizeHint().width());
+                }
+                if (actions->isVisible()) {
+                    QCOMPARE(actions->geometry().bottom() + 1 + int(ui::metrics::scrubber::gap),
+                             scrubber.panelBounds().top());
+                    QVERIFY(actions->width() < scrubber.width());
+                    QVERIFY(qAbs(actions->geometry().center().x() - scrubber.rect().center().x()) <= 1);
+                    QVERIFY(scrubber.mask().contains(actions->geometry().center()));
+                    if (hasLinks && hasReturn) {
+                        QCOMPARE(links->y(), back->y());
+                        QVERIFY(!links->geometry().intersects(back->geometry()));
+                    }
+                    if (hasReturn) {
+                        QCOMPARE(back->width(), back->sizeHint().width());
+                        const int available =
+                            back->width() - ui::px(32) - int(ui::metrics::chrome::cellIcon) - ui::px(16);
+                        QCOMPARE(ui::elideInterfaceText(back->text(), ui::interfaceFont(ui::metrics::chrome::labelText),
+                                                        available),
+                                 back->text());
+                        QVERIFY(back->geometry().right() < stay->x());
+                        QVERIFY(stay->width() >= ui::px(72));
+                        QVERIFY(stay->width() < ui::px(96));
+                        QVERIFY(stay->height() >= ui::px(112));
+                        QVERIFY(back->height() <= ui::px(72));
+                        QVERIFY(stay->height() > back->height());
+                        QVERIFY(qAbs(stay->mapTo(&scrubber, stay->contentsRect().center()).y() -
+                                     back->mapTo(&scrubber, back->rect().center()).y()) <= 1);
+                    }
+                }
+                for (auto *action : {links, back}) {
+                    if (action->isVisible()) {
+                        const auto image = scrubber.grab().toImage();
+                        const QPoint bottom =
+                            action->mapTo(&scrubber, QPoint(action->width() / 2,
+                                                            action->height() + int(ui::metrics::control::border) - 1));
+                        QCOMPARE(image.pixel(bottom), scrubber.palette().color(QPalette::WindowText).rgba());
+                        if (action == back) {
+                            const int closeX = stay->mapTo(&scrubber, stay->rect().center()).x();
+                            QCOMPARE(image.pixel(closeX, bottom.y()),
+                                     scrubber.palette().color(QPalette::WindowText).rgba());
+                        }
+                    }
+                }
+                if (!navigationBar) {
+                    QVERIFY(!scrubber.slider()->isVisible());
+                    continue;
+                }
+                auto *next = scrubber.findChild<QPushButton *>("rrNavigationNext");
+                QTest::mouseClick(next, Qt::LeftButton);
+                QVERIFY(scrubber.selecting());
+                if (actions->isVisible()) {
+                    QVERIFY(scrubber.previewBounds().bottom() < actions->y());
+                }
+                auto *caption = scrubber.findChild<QLabel *>("rrPreviewChapterCaption");
+                if (actions->isVisible()) {
+                    QCOMPARE(actions->geometry().bottom() + 1 + int(ui::metrics::scrubber::gap), caption->y());
+                }
+                QVERIFY(caption->geometry().bottom() < scrubber.barBounds().top());
+                scrubber.cancel();
+                QVERIFY(caption->isVisible());
+            }
+        }
+        scrubber.setLinksAction("Highlight links · 3");
+        scrubber.setReturnAction("Return to page 1", {});
+        const int shortLinks = links->width(), shortReturn = back->width();
+        scrubber.setLinksAction("Highlight links · 1234");
+        scrubber.setReturnAction("Return to page 3603", {});
+        QVERIFY(links->width() > shortLinks);
+        QVERIFY(back->width() > shortReturn);
+        QCOMPARE(links->width(), links->sizeHint().width());
+        QCOMPARE(back->width(), back->sizeHint().width());
+        QVERIFY(qAbs(actions->geometry().center().x() - scrubber.rect().center().x()) <= 1);
+    }
+    void overviewGripAndMarker_data() {
+        zoomableScrubber_data();
+    }
+    void overviewGripAndMarker() {
+        QFETCH(int, ppi);
+        QFETCH(bool, dark);
+        struct Restore {
+            int density = ui::density();
+            ~Restore() {
+                ui::setDensity(density);
+            }
+        } restore;
+        ui::setDensity(ppi);
+        QWidget owner;
+        owner.setProperty("reader_dark", dark);
+        ui::RangeOverview overview(&owner);
+        overview.resize(ui::px(600), ui::px(132));
+        overview.setContentsMargins(0, 0, 0, ui::metrics::scrubber::overviewBottomPadding);
+        auto palette = overview.palette();
+        palette.setColor(QPalette::Base, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        palette.setColor(QPalette::Midlight, dark ? QColor("#333333") : QColor("#dddddd"));
+        overview.setPalette(palette);
+        constexpr int count = 4874, span = 136;
+        int first = 2000, moves = 0;
+        const int reading = first + span / 2;
+        overview.moved = [&](int target) {
+            ++moves;
+            first = target;
+            overview.setRange(count, first, first + span - 1, reading);
+        };
+        overview.setRange(count, first, first + span - 1, reading);
+        const QRect grip = overview.windowBounds();
+        QVERIFY(grip.width() >= int(ui::metrics::scrubber::overviewGrip));
+        QVERIFY(overview.rect().contains(grip));
+        // Pressing the enlarged part of the grip must not center or shift the actual page range.
+        const QPoint wing(grip.left() + 1, grip.center().y());
+        QTest::mousePress(&overview, Qt::LeftButton, Qt::NoModifier, wing);
+        QCOMPARE(moves, 0);
+        QTest::mouseMove(&overview, wing + QPoint(ui::px(30), 0));
+        QVERIFY(first > 2000);
+        QEvent cancel(QEvent::TouchCancel);
+        QCoreApplication::sendEvent(&overview, &cancel);
+        QCOMPARE(first, 2000);
+        QTest::mouseRelease(&overview, Qt::LeftButton, Qt::NoModifier, wing);
+        const auto capture = [&]() {
+            QImage image(overview.size(), QImage::Format_RGB32);
+            image.fill(Qt::red);
+            overview.render(&image);
+            return image;
+        };
+        const QImage centered = capture();
+        const int padding = ui::metrics::scrubber::overviewIconPadding;
+        const QRect inside = grip.adjusted(padding, padding, -padding, -padding);
+        const QColor ink = palette.color(QPalette::WindowText);
+        int iconPixels = 0;
+        for (int y = inside.top(); y <= inside.bottom(); ++y) {
+            for (int x = inside.left(); x <= inside.right(); ++x) {
+                iconPixels += centered.pixelColor(x, y) == ink;
+            }
+        }
+        QVERIFY(iconPixels > 0);
+        // Moving the reading marker through the magnifier's x position changes only pixels below the grip.
+        overview.setRange(count, first, first + span - 1, 0);
+        const QImage start = capture();
+        int changes = 0;
+        for (int y = 0; y < start.height(); ++y) {
+            for (int x = 0; x < start.width(); ++x) {
+                if (start.pixel(x, y) != centered.pixel(x, y)) {
+                    QVERIFY(y >= grip.bottom() + 1 + int(ui::metrics::scrubber::overviewTickGap));
+                    ++changes;
+                }
+            }
+        }
+        QVERIFY(changes > 0);
+        for (int edge : {0, count - span}) {
+            overview.setRange(count, edge, edge + span - 1, reading);
+            const QRect bounds = overview.windowBounds();
+            QVERIFY(bounds.left() >= int(ui::metrics::control::sliderInset));
+            QVERIFY(bounds.right() < overview.width() - int(ui::metrics::control::sliderInset));
+            QCOMPARE(bounds.width(), grip.width());
+        }
+        // Brackets leave the top and bottom open. Track notches retain their full-book positions.
+        overview.setRange(count, count - 2000, count - 1, reading);
+        const QImage outside = capture();
+        overview.setRange(count, 1600, 3599, reading);
+        const QRect brackets = overview.windowBounds();
+        const QImage selected = capture();
+        const QColor paper = palette.color(QPalette::Base);
+        QCOMPARE(selected.pixelColor(brackets.center().x(), brackets.top()), paper);
+        QCOMPARE(selected.pixelColor(brackets.center().x(), brackets.bottom()), paper);
+        QCOMPARE(selected.pixelColor(brackets.topLeft()), ink);
+        QCOMPARE(selected.pixelColor(brackets.topRight()), ink);
+        QCOMPARE(selected.pixelColor(brackets.bottomLeft()), ink);
+        QCOMPARE(selected.pixelColor(brackets.bottomRight()), ink);
+        const QColor notch = ui::dividerColor(&overview);
+        int notches = 0, whiteGaps = 0;
+        const int trackY = brackets.center().y();
+        const int lensLeft = brackets.x() + (brackets.width() - int(ui::metrics::scrubber::overviewLens)) / 2;
+        for (int x = brackets.left() + int(ui::metrics::scrubber::overviewBracketMaximum);
+             x < lensLeft - int(ui::metrics::control::border); ++x) {
+            if (outside.pixelColor(x, trackY) == notch) {
+                QCOMPARE(selected.pixelColor(x, trackY), notch);
+                ++notches;
+            } else {
+                QCOMPARE(selected.pixelColor(x, trackY), paper);
+                whiteGaps += outside.pixelColor(x, trackY) != paper;
+            }
+        }
+        QVERIFY(notches > 0);
+        QVERIFY(whiteGaps > 0);
+        // The paper circle clears the rail beside the icon and adds no circular outline.
+        const int lensRight = brackets.x() + (brackets.width() + int(ui::metrics::scrubber::overviewLens)) / 2;
+        const int iconRight = brackets.x() + (brackets.width() + int(ui::metrics::scrubber::overviewIcon)) / 2;
+        for (int x = iconRight + 1; x < lensRight - int(ui::metrics::control::border); ++x) {
+            QCOMPARE(selected.pixelColor(x, trackY), paper);
+        }
+        // A narrow host still keeps the grip inside its track, even when the icon no longer fits.
+        overview.resize(ui::px(28), overview.height());
+        QVERIFY(overview.rect().contains(overview.windowBounds()));
+        overview.setRange(0, -1, 100, INT_MAX);
+        QVERIFY(overview.rect().contains(overview.windowBounds()));
+        const int before = moves;
+        QTest::mouseClick(&overview, Qt::LeftButton, Qt::NoModifier, overview.windowBounds().center());
+        QCOMPARE(moves, before);
+    }
+    void zoomableScrubber_data() {
+        QTest::addColumn<int>("ppi");
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("300-light") << 300 << false;
+        QTest::newRow("300-dark") << 300 << true;
+        QTest::newRow("212-light") << 212 << false;
+        QTest::newRow("212-dark") << 212 << true;
+    }
+    void zoomableScrubber() {
+        QFETCH(int, ppi);
+        QFETCH(bool, dark);
+        const int oldDensity = ui::density();
+        struct Restore {
+            int density;
+            ~Restore() {
+                ui::setDensity(density);
+            }
+        } restore{oldDensity};
+        ui::setDensity(ppi);
+        QWidget owner;
+        owner.resize(ppi == 300 ? QSize(1264, 1508) : QSize(758, 902));
+        ui::PageScrubber scrubber(&owner);
+        scrubber.setGeometry(owner.rect());
+        auto palette = owner.palette();
+        palette.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::Base, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        owner.setPalette(palette);
+        for (auto *widget : owner.findChildren<QWidget *>()) {
+            widget->setPalette(palette);
+        }
+        scrubber.setBook(0, 1, {}, {3, 4});
+        QCOMPARE(scrubber.findChild<QLabel *>("rrScrubberRange")->text(), QString("1× ZOOM"));
+        QVector<QPair<int, QString>> chapters;
+        for (int page = 0; page < 3603; page += 10) {
+            chapters.append({page, QString::number(page / 10 + 1)});
+        }
+        scrubber.setBook(1792, 3603, chapters, {3, 4});
+        owner.show();
+        scrubber.show();
+        auto *slider = scrubber.slider();
+        auto *overview = scrubber.findChild<ui::RangeOverview *>("rrScrubberOverview");
+        auto *plus = scrubber.findChild<QPushButton *>("rrScrubberZoomIn");
+        auto *minus = scrubber.findChild<QPushButton *>("rrScrubberZoomOut");
+        auto *next = scrubber.findChild<QPushButton *>("rrNavigationNext");
+        auto *previous = scrubber.findChild<QPushButton *>("rrNavigationPrevious");
+        auto *caption = scrubber.findChild<QLabel *>("rrPreviewChapterCaption");
+        QVERIFY(overview && plus && minus && next && previous && caption);
+        QVERIFY(caption->isVisible());
+        auto *toggle = scrubber.findChild<QPushButton *>("rrScrubberOverviewToggle");
+        QVERIFY(toggle && toggle->isVisible());
+        QVERIFY(!overview->isVisible());
+        toggle->click();
+        QCOMPARE(scrubber.findChild<QLabel *>("rrScrubberRange")->text(), QString("4× ZOOM"));
+        QCOMPARE(slider->maximum() - slider->minimum() + 1, 901);
+        while (minus->isEnabled()) {
+            minus->click();
+        }
+        QCOMPARE(scrubber.findChild<QLabel *>("rrScrubberRangeStart")->text(), QString("1"));
+        QCOMPARE(scrubber.findChild<QLabel *>("rrScrubberRangeEnd")->text(), QString("3603"));
+        QVERIFY(caption->accessibleName().contains("1793 OF 3603"));
+        QVERIFY(overview->isVisible());
+        QVERIFY(!overview->isEnabled());
+        QVERIFY(!minus->isEnabled());
+        QVERIFY(plus->isEnabled());
+        QTest::mouseClick(overview, Qt::LeftButton, Qt::NoModifier, overview->rect().center());
+        QVERIFY(!scrubber.selecting());
+        const QRect panel = scrubber.panelBounds();
+        QVERIFY(panel.contains(plus->geometry()));
+        QVERIFY(panel.contains(minus->geometry()));
+        QCOMPARE(plus->geometry().bottom() + 1, scrubber.barBounds().top());
+        QCOMPARE(plus->y(), minus->y());
+        QVERIFY(scrubber.barBounds().contains(next->geometry()));
+        QVERIFY(scrubber.barBounds().contains(previous->geometry()));
+        QVERIFY(plus->geometry().bottom() < next->y());
+        int accepts = 0, requests = 0;
+        scrubber.accepted = [&](int) {
+            ++accepts;
+        };
+        scrubber.previewRequested = [&](int page, QSize size) {
+            ++requests;
+            QImage image(size, QImage::Format_RGB32);
+            image.fill(Qt::white);
+            scrubber.setPreview(page, image);
+        };
+        int previousSpan = 3603;
+        int scaleIndex = 0;
+        const QList<int> scales{2, 4, 8, 16, 24, 36};
+        for (int span : {1802, 901, 451, 226, 151, 101}) {
+            plus->click();
+            QCOMPARE(slider->maximum() - slider->minimum() + 1, span);
+            QCOMPARE(scrubber.findChild<QLabel *>("rrScrubberRange")->text(),
+                     QString("%1× ZOOM").arg(scales[scaleIndex++]));
+            QVERIFY(overview->isVisible());
+            QVERIFY(overview->isEnabled());
+            QCOMPARE(scrubber.panelBounds(), panel);
+            QVERIFY(!scrubber.selecting());
+            QVERIFY(caption->isVisible());
+            QCOMPARE(caption->y(), scrubber.panelBounds().top());
+            QVERIFY(slider->minimum() <= 1792 && slider->maximum() >= 1792);
+            QVERIFY(span < previousSpan);
+            previousSpan = span;
+        }
+        QVERIFY(!plus->isEnabled());
+        QCOMPARE(accepts, 0);
+        QCOMPARE(requests, 0);
+        const int first = slider->minimum();
+        const int offset = slider->value() - first;
+        QTest::mousePress(overview, Qt::LeftButton, Qt::NoModifier, overview->windowBounds().center());
+        QTest::mouseMove(overview, QPoint(overview->width(), overview->height() / 2));
+        QTest::mouseRelease(overview, Qt::LeftButton, Qt::NoModifier,
+                            QPoint(overview->width(), overview->height() / 2));
+        QCOMPARE(slider->maximum(), 3602);
+        QCOMPARE(scrubber.selectedPage(), slider->minimum() + offset);
+        QTRY_VERIFY(scrubber.previewReady());
+        QCOMPARE(accepts, 0);
+        const int previewBeforeZoom = scrubber.selectedPage();
+        while (minus->isEnabled()) {
+            minus->click();
+        }
+        QVERIFY(scrubber.selecting());
+        QCOMPARE(scrubber.selectedPage(), previewBeforeZoom);
+        QVERIFY(overview->isVisible());
+        QVERIFY(!overview->isEnabled());
+        while (plus->isEnabled()) {
+            plus->click();
+        }
+        QVERIFY(scrubber.selecting());
+        QCOMPARE(scrubber.selectedPage(), previewBeforeZoom);
+        QTRY_VERIFY(scrubber.previewReady());
+        // A cancelled pointer gesture restores both the viewport and its selection.
+        const int beforeCancel = slider->minimum(), selectionBeforeCancel = scrubber.selectedPage();
+        QTest::mousePress(overview, Qt::LeftButton, Qt::NoModifier, overview->windowBounds().center());
+        QTest::mouseMove(overview, QPoint(0, overview->height() / 2));
+        QVERIFY(slider->minimum() < beforeCancel);
+        QEvent cancelGesture(QEvent::TouchCancel);
+        QCoreApplication::sendEvent(overview, &cancelGesture);
+        QCOMPARE(slider->minimum(), beforeCancel);
+        QCOMPARE(scrubber.selectedPage(), selectionBeforeCancel);
+        QTest::mouseRelease(overview, Qt::LeftButton, Qt::NoModifier, overview->windowBounds().center());
+        QTRY_VERIFY(scrubber.previewReady());
+        const int destination = scrubber.selectedPage();
+        const int rangeStart = slider->minimum();
+        scrubber.setBook(1792, 3603, chapters, {3, 4});
+        QCOMPARE(scrubber.selectedPage(), destination);
+        QCOMPARE(slider->minimum(), rangeStart);
+        QVERIFY(caption->accessibleName().contains(QString::number(destination + 1) + " OF 3603"));
+        // Stale images cannot replace the current selection.
+        scrubber.setPreview(destination - 1, {});
+        QVERIFY(scrubber.previewReady());
+        scrubber.cancel();
+        QVERIFY(caption->isVisible());
+        QCOMPARE(slider->value(), 1792);
+        QVERIFY(slider->minimum() <= 1792 && slider->maximum() >= 1792);
+        // Page arrows can leave the zoom window and keep the full-book boundaries.
+        scrubber.setBook(3602, 3603, chapters, {3, 4});
+        QVERIFY(!next->isEnabled());
+        previous->click();
+        QCOMPARE(scrubber.selectedPage(), 3601);
+        scrubber.cancel();
+        scrubber.setBook(0, 3603, chapters, {3, 4});
+        QVERIFY(!previous->isEnabled());
+        scrubber.setChapterJumps(true);
+        next->click();
+        QCOMPARE(scrubber.selectedPage(), 10);
+        scrubber.cancel();
+        scrubber.setChapterJumps(false);
+        while (minus->isEnabled()) {
+            minus->click();
+        }
+        QCOMPARE(slider->minimum(), 0);
+        QCOMPARE(slider->maximum(), 3602);
+        QVERIFY(overview->isVisible());
+        QVERIFY(!overview->isEnabled());
+        QVERIFY(caption->isVisible());
+        scrubber.setBarVisible(false);
+        for (QWidget *widget : QList<QWidget *>{slider, overview, plus, minus, next, previous, caption, toggle}) {
+            QVERIFY(!widget->isVisible());
+        }
+        scrubber.setBarVisible(true);
+        QVERIFY(caption->isVisible());
+        // Reflow resets zoom, and small/empty books cannot produce an empty range.
+        plus->click();
+        scrubber.setBook(4, 5, {}, {3, 4});
+        QCOMPARE(slider->minimum(), 0);
+        QCOMPARE(slider->maximum(), 4);
+        QVERIFY(!overview->isVisible());
+        QVERIFY(!plus->isVisible());
+        QVERIFY(!plus->isEnabled());
+        scrubber.setBook(0, 5, {{2, "Chapter one"}}, {3, 4});
+        QVERIFY(caption->accessibleName().contains("FRONT MATTER"));
+        scrubber.setBook(0, 0, {}, {3, 4});
+        QCOMPARE(slider->maximum(), 0);
+        QVERIFY(!next->isEnabled());
+        QVERIFY(!previous->isEnabled());
+        // Large page counts must not overflow zoom arithmetic.
+        scrubber.setBook(1000, INT_MAX, {}, {3, 4});
+        while (minus->isEnabled()) {
+            minus->click();
+        }
+        int levels = 0;
+        while (plus->isEnabled() && ++levels < 20) {
+            plus->click();
+        }
+        QCOMPARE(levels, 6);
+        const int maximumSpan = INT_MAX / 36 + (INT_MAX % 36 != 0);
+        QCOMPARE(slider->maximum() - slider->minimum() + 1, maximumSpan);
+        QTest::mouseClick(overview, Qt::LeftButton, Qt::NoModifier,
+                          QPoint(overview->width() - 1, overview->height() / 2));
+        QCOMPARE(slider->maximum(), INT_MAX - 1);
+        QCOMPARE(slider->minimum(), INT_MAX - maximumSpan);
+        // Availability follows the current pagination, including after reflow.
+        scrubber.setBook(0, 119, {}, {3, 4});
+        QVERIFY(!overview->isVisible());
+        QVERIFY(!plus->isVisible());
+        QVERIFY(!minus->isVisible());
+        const int shortTop = scrubber.panelBounds().top();
+        scrubber.setBook(0, 120, {}, {3, 4});
+        QVERIFY(toggle->isVisible());
+        QVERIFY(!overview->isVisible());
+        toggle->click();
+        QVERIFY(overview->isVisible());
+        QVERIFY(plus->isVisible() && plus->isEnabled());
+        QCOMPARE(scrubber.panelBounds().top(), shortTop - int(ui::metrics::scrubber::overviewHeight));
+        plus->click();
+        QCOMPARE(slider->maximum() - slider->minimum() + 1, 60);
+        QVERIFY(!plus->isEnabled());
+    }
+    void scrubberZoomThresholds() {
+        QWidget owner;
+        ui::PageScrubber scrubber(&owner);
+        auto *plus = scrubber.findChild<QPushButton *>("rrScrubberZoomIn");
+        auto *label = scrubber.findChild<QLabel *>("rrScrubberRange");
+        const QList<int> scales{1, 2, 4, 8, 16, 24, 36};
+        for (int i = 1; i < scales.size(); ++i) {
+            for (int delta : {-1, 0}) {
+                const int pages = scales[i] * 60 + delta;
+                scrubber.setBook(0, pages, {}, {3, 4});
+                while (plus->isEnabled()) {
+                    plus->click();
+                }
+                const int scale = scales[i - (delta < 0)];
+                QCOMPARE(label->text(), QString("%1× ZOOM").arg(scale));
+                QCOMPARE(scrubber.slider()->maximum() - scrubber.slider()->minimum() + 1,
+                         pages / scale + (pages % scale != 0));
+            }
+        }
+    }
+    void scrubberOverviewDisclosure_data() {
+        zoomableScrubber_data();
+    }
+    void scrubberOverviewDisclosure() {
+        QFETCH(int, ppi);
+        QFETCH(bool, dark);
+        struct Restore {
+            int density = ui::density();
+            ~Restore() {
+                ui::setDensity(density);
+            }
+        } restore;
+        ui::setDensity(ppi);
+        QWidget owner;
+        owner.setProperty("reader_dark", dark);
+        owner.resize(ppi == 300 ? QSize(1264, 1508) : QSize(758, 902));
+        ui::PageScrubber scrubber(&owner);
+        scrubber.setGeometry(owner.rect());
+        scrubber.setBook(1792, 3603, {{0, "One"}, {2000, "Two"}}, {3, 4});
+        scrubber.setChapterJumps(true);
+        owner.show();
+        scrubber.show();
+        auto *toggle = scrubber.findChild<ui::Button *>("rrScrubberOverviewToggle");
+        auto *overview = scrubber.findChild<QWidget *>("rrScrubberOverview");
+        auto *plus = scrubber.findChild<QPushButton *>("rrScrubberZoomIn");
+        auto *caption = scrubber.findChild<QLabel *>("rrPreviewChapterCaption");
+        const QRect collapsed = scrubber.panelBounds();
+        const QString status = caption->accessibleName();
+        QVERIFY(toggle->isVisible());
+        QCOMPARE(toggle->iconConfiguration()->glyph, ui::ControlIcon::Up);
+        QVERIFY(!overview->isVisible() && !plus->isVisible());
+        QCOMPARE(scrubber.slider()->maximum() - scrubber.slider()->minimum() + 1, 901);
+        int accepts = 0;
+        scrubber.accepted = [&](int) {
+            ++accepts;
+        };
+        scrubber.previewRequested = [&](int page, QSize size) {
+            QImage image(size, QImage::Format_RGB32);
+            image.fill(Qt::white);
+            scrubber.setPreview(page, image);
+        };
+        toggle->click();
+        QVERIFY(overview->isVisible() && plus->isVisible());
+        QCOMPARE(toggle->iconConfiguration()->glyph, ui::ControlIcon::Down);
+        QCOMPARE(scrubber.panelBounds().top(), collapsed.top() - int(ui::metrics::scrubber::overviewHeight));
+        QCOMPARE(caption->accessibleName(), status);
+        QCOMPARE(scrubber.slider()->value(), 1792);
+        QVERIFY(!scrubber.selecting());
+        scrubber.findChild<QPushButton *>("rrNavigationNext")->click();
+        QTRY_VERIFY(scrubber.previewsReady());
+        QCOMPARE(scrubber.selectedPage(), 2000);
+        scrubber.findChild<QPushButton *>("rrPreviewNextPage")->click();
+        QCOMPARE(scrubber.selectedPage(), 2001);
+        QTRY_VERIFY(scrubber.previewsReady());
+        const int destination = scrubber.selectedPage();
+        const QRect expandedPreview = scrubber.previewBounds();
+        toggle->click();
+        QCOMPARE(scrubber.panelBounds(), collapsed);
+        QVERIFY(!overview->isVisible());
+        QCOMPARE(scrubber.selectedPage(), destination);
+        QVERIFY(scrubber.previewBounds().height() > expandedPreview.height());
+        QTRY_VERIFY(scrubber.previewsReady());
+        QCOMPARE(accepts, 0);
+        scrubber.cancel();
+        QVERIFY(!overview->isVisible());
+        QVERIFY(caption->isVisible());
+        scrubber.setBarVisible(false);
+        QVERIFY(!toggle->isVisible());
+        scrubber.setBarVisible(true);
+        QVERIFY(toggle->isVisible());
+        scrubber.setBook(0, 119, {}, {3, 4});
+        QVERIFY(!toggle->isVisible());
+    }
+    void initialScrubberZoom() {
+        QWidget owner;
+        ui::PageScrubber scrubber(&owner);
+        auto *minus = scrubber.findChild<QPushButton *>("rrScrubberZoomOut");
+        auto *label = scrubber.findChild<QLabel *>("rrScrubberRange");
+        const QList<QPair<int, int>> cases{{1000, 1},   {1001, 2},   {2000, 2},   {2001, 4},
+                                           {3603, 4},   {4001, 8},   {8001, 16},  {16001, 24},
+                                           {24001, 36}, {36000, 36}, {36001, 36}, {INT_MAX, 36}};
+        for (const auto &value : cases) {
+            const int pages = value.first, scale = value.second;
+            const int current = pages / 2;
+            scrubber.setBook(current, pages, {}, {3, 4});
+            QCOMPARE(label->text(), QString("%1× ZOOM").arg(scale));
+            const int span = pages / scale + (pages % scale != 0);
+            QCOMPARE(scrubber.slider()->maximum() - scrubber.slider()->minimum() + 1, span);
+            QCOMPARE(scrubber.slider()->value(), current);
+            QVERIFY(!scrubber.selecting());
+            QVERIFY(scrubber.slider()->minimum() >= 0);
+            QVERIFY(scrubber.slider()->maximum() < pages);
+            if (pages > 1000 && pages <= 36000) {
+                QVERIFY(span >= 500 && span <= 1000);
+            }
+            while (minus->isEnabled()) {
+                minus->click();
+            }
+            // Page updates keep the reader's manual zoom choice.
+            scrubber.setBook(pages - 1, pages, {}, {3, 4});
+            QCOMPARE(label->text(), QString("1× ZOOM"));
+            QCOMPARE(scrubber.slider()->value(), pages - 1);
+        }
+        scrubber.setBook(0, 3603, {}, {3, 4});
+        QCOMPARE(scrubber.slider()->minimum(), 0);
+        QCOMPARE(scrubber.slider()->maximum(), 900);
+        scrubber.setBook(3602, 3604, {}, {3, 4});
+        QCOMPARE(scrubber.slider()->maximum(), 3603);
+        QCOMPARE(scrubber.slider()->minimum(), 2703);
+    }
+    void adjacentPagePreviews_data() {
+        zoomableScrubber_data();
+    }
+    void adjacentPagePreviews() {
+        QFETCH(int, ppi);
+        QFETCH(bool, dark);
+        const int originalDensity = ui::density();
+        ui::setDensity(ppi);
+        QWidget owner;
+        owner.resize(ppi == 300 ? QSize(1264, 1508) : QSize(758, 902));
+        owner.setProperty("reader_dark", dark);
+        ui::PageScrubber scrubber(&owner);
+        scrubber.setGeometry(owner.rect());
+        scrubber.setBook(19, 300, {{0, "Chapter one"}}, {3, 4});
+        owner.show();
+        scrubber.show();
+        QVector<int> requested;
+        int accepted = 0;
+        scrubber.previewRequested = [&](int page, QSize bounds) {
+            requested.append(page);
+            QVERIFY(qint64(bounds.width()) * bounds.height() <= 1024 * 1024);
+            QImage image(bounds, QImage::Format_RGB32);
+            image.fill(Qt::white);
+            scrubber.setPreview(page, image);
+        };
+        scrubber.accepted = [&](int) {
+            ++accepted;
+        };
+        auto *before = scrubber.findChild<QPushButton *>("rrPreviewPreviousPage");
+        auto *after = scrubber.findChild<QPushButton *>("rrPreviewNextPage");
+        scrubber.findChild<QPushButton *>("rrNavigationNext")->click();
+        QVERIFY(scrubber.previewsReady());
+        QCOMPARE(requested, QVector<int>({20, 19, 21}));
+        QVERIFY(before->isVisible() && after->isVisible());
+        QVERIFY(before->height() < scrubber.previewBounds().height());
+        QVERIFY(before->x() < 0);
+        QVERIFY(after->geometry().right() >= scrubber.width());
+        const auto middle = scrubber.previewBounds();
+        QCOMPARE(middle.left() - before->geometry().right() - 1, int(ui::metrics::scrubber::gap));
+        QCOMPARE(after->x() - middle.right() - 1, int(ui::metrics::scrubber::gap));
+        before->click();
+        QCOMPARE(scrubber.selectedPage(), 19);
+        QVERIFY(scrubber.previewsReady());
+        QCOMPARE(accepted, 0);
+        after->click();
+        QCOMPARE(scrubber.selectedPage(), 20);
+        QCOMPARE(accepted, 0);
+        scrubber.cancel();
+        QVERIFY(!before->isVisible() && !after->isVisible());
+        QVERIFY(!scrubber.previewReady());
+        scrubber.setBook(1, 300, {}, {3, 4});
+        scrubber.findChild<QPushButton *>("rrNavigationPrevious")->click();
+        QCOMPARE(scrubber.selectedPage(), 0);
+        QVERIFY(!before->isVisible() && after->isVisible());
+        scrubber.cancel();
+        scrubber.setBook(298, 300, {}, {3, 4});
+        scrubber.findChild<QPushButton *>("rrNavigationNext")->click();
+        QCOMPARE(scrubber.selectedPage(), 299);
+        QVERIFY(before->isVisible() && !after->isVisible());
+        ui::setDensity(originalDensity);
+    }
+    void zoomPanelRepaintsExposedBook_data() {
+        zoomableScrubber_data();
+    }
+    void zoomPanelRepaintsExposedBook() {
+        QFETCH(int, ppi);
+        QFETCH(bool, dark);
+        struct Restore {
+            int density = ui::density();
+            ~Restore() {
+                ui::setDensity(density);
+            }
+        } restore;
+        ui::setDensity(ppi);
+        QWidget owner;
+        owner.setAutoFillBackground(true);
+        owner.resize(ppi == 300 ? QSize(1264, 1508) : QSize(758, 902));
+        auto palette = owner.palette();
+        palette.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        owner.setPalette(palette);
+        ui::PageScrubber scrubber(&owner);
+        scrubber.setGeometry(owner.rect());
+        scrubber.setBook(1260, 3603, {{0, "Chapter one"}, {1250, "Chapter two"}}, {3, 4});
+        scrubber.setReturnAction("Return to page 1824", {});
+        owner.show();
+        scrubber.show();
+        QCoreApplication::processEvents();
+        auto *plus = scrubber.findChild<QPushButton *>("rrScrubberZoomIn");
+        auto *minus = scrubber.findChild<QPushButton *>("rrScrubberZoomOut");
+        auto *overview = scrubber.findChild<ui::RangeOverview *>("rrScrubberOverview");
+        auto *label = scrubber.findChild<QLabel *>("rrScrubberOverviewLabel");
+        scrubber.findChild<QPushButton *>("rrScrubberOverviewToggle")->click();
+        while (minus->isEnabled()) {
+            minus->click();
+        }
+        PaintRegions damage;
+        owner.installEventFilter(&damage);
+        for (int cycle = 0; cycle < 3; ++cycle) {
+            plus->click();
+            QCoreApplication::processEvents();
+            QVERIFY(overview->isVisible());
+            QVERIFY(overview->height() >= ui::px(84));
+            const QRect window = overview->windowBounds().translated(overview->pos());
+            QVERIFY(label->y() - window.bottom() >= ui::px(12));
+            QVERIFY(scrubber.barBounds().top() - label->geometry().bottom() >= ui::px(20));
+            const QRegion before = scrubber.mask();
+            damage.painted = {};
+            minus->click();
+            // Zooming changes only the viewport, not the panel or book geometry.
+            QCOMPARE(scrubber.mask(), before);
+            QVERIFY(overview->isVisible());
+            QVERIFY(!overview->isEnabled());
+            QVERIFY(scrubber.findChild<QLabel *>("rrPreviewChapterCaption")->isVisible());
+        }
+        scrubber.findChild<QPushButton *>("rrNavigationNext")->click();
+        QVERIFY(scrubber.selecting());
+        QCoreApplication::processEvents();
+        damage.painted = {};
+        scrubber.cancel();
+        QVERIFY(!scrubber.selecting());
+        QTRY_VERIFY(damage.painted.contains(QPoint(ui::px(10), ui::px(100))));
+    }
+    void pageScrubberPreviewAndCommit_data() {
+        QTest::addColumn<bool>("dark");
+        QTest::addColumn<bool>("chapters");
+        QTest::newRow("light-pages") << false << false;
+        QTest::newRow("dark-pages") << true << false;
+        QTest::newRow("light-chapters") << false << true;
+        QTest::newRow("dark-chapters") << true << true;
+    }
+    void pageScrubberPreviewAndCommit() {
+        QFETCH(bool, dark);
+        QFETCH(bool, chapters);
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        auto paths = testPaths();
+        paths.directory = root.path();
+        QJsonObject preferences{{"dark_mode", dark}};
+        preferences[pageNavigation::barButtonsKey] = chapters ? "chapters" : "pages";
+        QVERIFY(storage::writeJson(paths.preferences(), preferences));
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        const int original = host.session()->page();
+        const auto frame = host.session()->image();
+        auto state = host.session()->state();
+        // Idle neighbour rendering can update this counter during the request.
+        // All reading positions, chapter metadata and appearance must stay equal.
+        state.remove("cached_pages");
+        QImage thumbnail;
+        bool stale = false;
+        host.session()->previewPage(0, {200, 300}, [&](QImage) {
+            stale = true;
+        });
+        host.session()->previewPage(host.session()->pages() - 1, {200, 300}, [&](QImage image) {
+            thumbnail = image;
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(!thumbnail.isNull(), 30000);
+        QVERIFY(!stale);
+        QVERIFY(thumbnail.width() <= 200 && thumbnail.height() <= 300);
+        QCOMPARE(host.session()->page(), original);
+        auto previewState = host.session()->state();
+        previewState.remove("cached_pages");
+        QCOMPARE(previewState, state);
+        QCOMPARE(host.session()->image(), frame);
+        host.session()->previewPage(0, {200, 300}, [&](QImage) {
+            stale = true;
+        });
+        host.session()->cancelPagePreview();
+        bool drained = false;
+        ReaderSession::drain([&] {
+            drained = true;
+        });
+        QTRY_VERIFY(drained);
+        QVERIFY(!stale);
+        QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+        auto *scrubber = dynamic_cast<ui::PageScrubber *>(host.window()->findChild<QWidget *>("rrPageScrubber"));
+        QVERIFY(scrubber && scrubber->isVisible());
+        QVERIFY(qAbs(scrubber->previewBounds().height() - qRound(scrubber->panelBounds().top() * .9)) <= 1);
+        QVERIFY(!host.window()->findChild<QPushButton *>("rrPreviousPage"));
+        QVERIFY(!host.window()->findChild<QPushButton *>("rrNextPage"));
+        QCOMPARE(scrubber->slider()->orientation(), Qt::Horizontal);
+        QVERIFY(scrubber->barBounds().contains(scrubber->slider()->geometry()));
+        QVERIFY(scrubber->previewBounds().bottom() < scrubber->barBounds().top());
+        auto *next = host.window()->findChild<QPushButton *>("rrNavigationNext");
+        QVERIFY(next && next->isEnabled());
+        QCOMPARE(static_cast<ui::Button *>(next)->paintMode(), ui::ButtonPaintMode::ToolbarCell);
+        QCOMPARE(next->geometry(),
+                 QRect(scrubber->width() - int(ui::metrics::chrome::cellWidth), scrubber->barBounds().top(),
+                       ui::metrics::chrome::cellWidth, scrubber->barBounds().height()));
+        const auto beforePreview = host.window()->grab().toImage();
+        auto *touchDevice = QTest::createTouchDevice();
+        const QPoint nativeButtonPoint = next->mapTo(canvas.surface(), next->rect().center());
+        canvas.ensureVisible(nativeButtonPoint.x(), nativeButtonPoint.y(), 30, 30);
+        QCoreApplication::processEvents();
+        const QPoint buttonPoint = next->mapTo(canvas.window(), next->rect().center());
+        QTest::touchEvent(canvas.windowHandle(), touchDevice).press(0, buttonPoint, canvas.windowHandle());
+        QTest::touchEvent(canvas.windowHandle(), touchDevice).release(0, buttonPoint, canvas.windowHandle());
+        QTRY_VERIFY_WITH_TIMEOUT(scrubber->previewReady(), 30000);
+        if (chapters) {
+            const auto links = host.session()->chapters();
+            auto nextChapter = std::find_if(links.begin(), links.end(), [original](const ChapterLink &chapter) {
+                return chapter.page > original;
+            });
+            QVERIFY(nextChapter != links.end());
+            QCOMPARE(scrubber->selectedPage(), nextChapter->page);
+        } else {
+            QCOMPARE(scrubber->selectedPage(), original + 1);
+        }
+        QCOMPARE(host.session()->page(), original);
+        QVERIFY(!scrubber->findChild<QLabel *>("rrScrubberChapter"));
+        auto *caption = scrubber->findChild<QLabel *>("rrPreviewChapterCaption");
+        QVERIFY(caption && caption->isVisible());
+        QVERIFY(caption->geometry().top() > scrubber->previewBounds().bottom());
+        const int mapHeight = scrubber->findChild<QWidget *>("rrScrubberOverview")->isVisible()
+                                  ? int(ui::metrics::scrubber::overviewHeight)
+                                  : 0;
+        QCOMPARE(caption->geometry().bottom() + 1 + mapHeight, scrubber->barBounds().top());
+        QCOMPARE(caption->geometry().left(), 0);
+        QCOMPARE(caption->width(), scrubber->width());
+        QCOMPARE(caption->geometry().center().x(), scrubber->barBounds().center().x());
+        QVERIFY(caption->accessibleName().contains(QString::number(scrubber->selectedPage() + 1)));
+        QVERIFY(caption->accessibleName().contains(QString::number(host.session()->pages())));
+        QCOMPARE(caption->text(), caption->text().toUpper());
+        QCOMPARE(caption->alignment(), Qt::Alignment(Qt::AlignCenter));
+        QVERIFY(!caption->font().italic());
+        const auto captionImage = scrubber->grab(caption->geometry()).toImage();
+        QCOMPARE(QColor(captionImage.pixel(0, 0)), QColor(dark ? Qt::white : Qt::black));
+        QCOMPARE(QColor(captionImage.pixel(captionImage.width() / 2, 4)), caption->palette().color(QPalette::Midlight));
+        QVERIFY(caption->palette().color(QPalette::Midlight) != caption->palette().color(QPalette::Base));
+        if (auto *toggle = scrubber->findChild<QWidget *>("rrScrubberOverviewToggle"); toggle->isVisible()) {
+            const auto toggleImage = toggle->grab().toImage();
+            QCOMPARE(QColor(toggleImage.pixel(toggleImage.width() / 4, 4)),
+                     caption->palette().color(QPalette::Midlight));
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(scrubber->previewsReady(), 30000);
+        const auto faded = host.window()->grab().toImage();
+        const QPoint offset = scrubber->mapTo(host.window(), QPoint());
+        const int paper = dark ? 0 : 255;
+        int fadedTextPixels = 0;
+        for (int y = 0; y < caption->y(); y += 3) {
+            for (int x = 0; x < scrubber->width(); x += 3) {
+                if (scrubber->previewBounds().adjusted(-2, -2, 2, 2).contains(x, y) ||
+                    scrubber->findChild<QWidget *>("rrPreviewPreviousPage")->geometry().contains(x, y) ||
+                    scrubber->findChild<QWidget *>("rrPreviewNextPage")->geometry().contains(x, y) ||
+                    next->geometry().contains(x, y) ||
+                    scrubber->findChild<QPushButton *>("rrNavigationPrevious")->geometry().contains(x, y)) {
+                    continue;
+                }
+                const QPoint point = offset + QPoint(x, y);
+                const int source = qGray(beforePreview.pixel(point));
+                const int actual = qGray(faded.pixel(point));
+                QVERIFY(qAbs(actual - qRound(paper * (242.0 / 255) + source * (13.0 / 255))) <= 2);
+                if (qAbs(source - paper) > 100) {
+                    ++fadedTextPixels;
+                }
+            }
+        }
+        QVERIFY(fadedTextPixels > 20);
+        scrubber->repaint();
+        QCOMPARE(host.window()->grab().toImage(), faded);
+        QCOMPARE(static_cast<ui::Button *>(next)->iconConfiguration()->glyph,
+                 chapters ? ui::ControlIcon::NextChapter : ui::ControlIcon::Next);
+        QVERIFY(capture(canvas, host, QString("native-reader-scrubber-preview-%1").arg(QTest::currentDataTag())));
+        QVERIFY(clickAt(canvas, scrubber->mapTo(canvas.surface(), QPoint(scrubber->width() - 20, 20))));
+        QCOMPARE(host.session()->page(), original);
+        QVERIFY(!scrubber->selecting());
+        QVERIFY(caption->isVisible());
+        const QRect readingArea(offset, QSize(scrubber->width(), caption->y()));
+        QCOMPARE(host.window()->grab().toImage().copy(readingArea), beforePreview.copy(readingArea));
+        auto *slider = scrubber->slider();
+        QTest::mousePress(slider, Qt::LeftButton, Qt::NoModifier, QPoint(slider->width() / 4, slider->height() / 2));
+        QTest::mouseMove(slider, QPoint(slider->width() * 3 / 4, slider->height() / 2));
+        QTest::mouseRelease(slider, Qt::LeftButton, Qt::NoModifier,
+                            QPoint(slider->width() * 3 / 4, slider->height() / 2));
+        QTRY_VERIFY_WITH_TIMEOUT(scrubber->previewReady(), 30000);
+        QVERIFY(scrubber->selectedPage() > original);
+        QCOMPARE(host.session()->page(), original);
+        scrubber->cancel();
+        QVERIFY(click(canvas, next));
+        QTRY_VERIFY_WITH_TIMEOUT(scrubber->previewReady(), 30000);
+        const int destination = scrubber->selectedPage();
+        struct PreviewRefresh : QObject {
+            ReaderSession *session = nullptr;
+            QVector<int> pages;
+            bool premature = false;
+            bool eventFilter(QObject *object, QEvent *event) override {
+                if (event->type() == QEvent::DynamicPropertyChange &&
+                    static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName() == "reader_full_flash" &&
+                    object->property("reader_full_flash").toBool()) {
+                    pages.append(session->page());
+                    premature |= session->busy();
+                }
+                return false;
+            }
+        } refresh;
+        refresh.session = host.session();
+        host.window()->setProperty("reader_full_flash", false);
+        host.window()->installEventFilter(&refresh);
+        QVERIFY(clickAt(canvas, scrubber->mapTo(canvas.surface(), scrubber->previewBounds().center())));
+        QTRY_VERIFY_WITH_TIMEOUT(!host.session()->busy(), 30000);
+        QCOMPARE(host.session()->page(), destination);
+        QVERIFY(scrubber->isVisible());
+        QVERIFY(!scrubber->selecting());
+        QTRY_COMPARE(refresh.pages, QVector<int>{destination});
+        QVERIFY(!refresh.premature);
+        auto *back = host.window()->findChild<QPushButton *>("rrScrubberReturn");
+        QVERIFY(back && back->isVisible());
+        QVERIFY(back->text().contains(QString::number(original + 1)));
+        QVERIFY(click(canvas, back));
+        QTRY_VERIFY_WITH_TIMEOUT(!host.session()->busy(), 30000);
+        QCOMPARE(host.session()->page(), original);
+        QVERIFY(!back->isVisible());
     }
     void navigationCompositionAndRelease() {
         QWidget owner;
@@ -999,6 +2129,31 @@ private slots:
         bottomNavigation->setPanelOpen(true);
         QCoreApplication::processEvents();
         QVERIFY(bottom.painted.isEmpty());
+        auto *scrubber = new ui::PageScrubber(&owner);
+        navigation.setScrubber(scrubber);
+        for (int destination = 0; destination < 6; ++destination) {
+            state.active = -1;
+            navigation.update(owner.size(), state);
+            QVERIFY(scrubber->isVisible());
+            scrubber->setBook(0, 20, {{0, "First"}, {10, "Second"}}, {3, 4});
+            scrubber->findChild<QPushButton *>("rrNavigationNext")->click();
+            QVERIFY(scrubber->selecting());
+            state.active = destination;
+            navigation.update(owner.size(), state);
+            QVERIFY(!scrubber->isVisible());
+            QVERIFY(!scrubber->selecting());
+            QVERIFY(!scrubber->findChild<QLabel *>("rrPreviewChapterCaption")->isVisible());
+            QVERIFY(bar->isVisible());
+        }
+        state.active = -1;
+        navigation.update(owner.size(), state);
+        scrubber->findChild<QPushButton *>("rrNavigationNext")->click();
+        QVERIFY(scrubber->selecting());
+        state.scrubberVisible = false;
+        navigation.update(owner.size(), state);
+        QVERIFY(!scrubber->isVisible());
+        QVERIFY(!scrubber->selecting());
+        QVERIFY(bar->isVisible());
     }
     void appearancePageComposition() {
         QWidget owner;
@@ -1017,7 +2172,7 @@ private slots:
             QCOMPARE(panel.marginSlider->parentWidget()->parentWidget(), layout);
             QCOMPARE(panel.sizeSlider->minimum(), 14);
             QCOMPARE(panel.sizeSlider->maximum(), 96);
-            QCOMPARE(panel.sizeSlider->singleStep(), 2);
+            QCOMPARE(panel.sizeSlider->singleStep(), 1);
             QCOMPARE(panel.weightSlider->minimum(), 0);
             QCOMPARE(panel.weightSlider->maximum(), 12);
             QCOMPARE(panel.weightSlider->singleStep(), 1);
@@ -1067,6 +2222,42 @@ private slots:
         QVERIFY(retainedFont); // The pages retain their controls after composition returns.
         delete typography;
         QVERIFY(retainedFont.isNull());
+    }
+    void appearanceTextSizeSteps_data() {
+        QTest::addColumn<int>("initial");
+        QTest::addColumn<int>("direction");
+        QTest::addColumn<int>("expected");
+        QTest::newRow("minimum") << 14 << -1 << 14;
+        QTest::newRow("minimum-increase") << 14 << 1 << 15;
+        QTest::newRow("whole-point") << 22 << 1 << 23;
+        QTest::newRow("half-point") << 23 << -1 << 22;
+        QTest::newRow("below-threshold") << 63 << 1 << 64;
+        QTest::newRow("threshold-decrease") << 64 << -1 << 62;
+        QTest::newRow("threshold-increase") << 64 << 1 << 66;
+        QTest::newRow("above-threshold-half-point") << 65 << -1 << 63;
+        QTest::newRow("above-threshold-whole-point") << 80 << 1 << 82;
+        QTest::newRow("maximum") << 96 << 1 << 96;
+    }
+    void appearanceTextSizeSteps() {
+        QFETCH(int, initial);
+        QFETCH(int, direction);
+        QFETCH(int, expected);
+        QWidget owner;
+        reader::AppearanceSheet sheet(&owner);
+        reader::AppearancePanel panel(sheet.controls(), {});
+        int commits = 0, committedValue = -1;
+        panel.sizeSlider->committed = [&](int value) {
+            ++commits;
+            committedValue = value;
+        };
+        panel.sizeSlider->setValue(initial);
+        auto *button = sheet.findChild<QPushButton *>(direction < 0 ? "rrSmaller" : "rrLarger");
+        QVERIFY(button);
+        button->click();
+        QCOMPARE(panel.sizeSlider->value(), expected);
+        QCOMPARE(commits, 1);
+        QCOMPARE(committedValue, expected);
+        QCOMPARE(panel.sizeSlider->singleStep(), expected < 64 ? 1 : 2);
     }
     void appearanceContentMeasurement_data() {
         QTest::addColumn<int>("ppi");
@@ -1450,13 +2641,17 @@ private slots:
         QVERIFY(!panel->findChild<QCheckBox *>("rrSmoothImages"));
         QVERIFY(!panel->findChild<QCheckBox *>("rrHeavierText"));
         QVERIFY(!panel->findChild<QPushButton *>("rrManageDictionaries"));
-        QCOMPARE(panel->findChildren<ui::DescribedOption *>().size(), 11);
+        QCOMPARE(panel->findChildren<ui::DescribedOption *>().size(), 13);
         QVERIFY(panel->sleepScreenButton->isHidden());
         QVERIFY(panel->automaticOpeningOption->isHidden());
         QVERIFY(panel->settingsTabButtons[reader::SystemSettings]->isHidden());
         QCOMPARE(panel->bionicOption->parentWidget(), panel->settingsPages->widget(reader::DisplaySettings));
         QCOMPARE(panel->pageNavigationButton->parentWidget(), panel->settingsPages->widget(reader::ControlsSettings));
         QCOMPARE(panel->edgeLightOption->parentWidget(), panel->settingsPages->widget(reader::ControlsSettings));
+        QCOMPARE(panel->navigationBarButton->parentWidget(), panel->settingsPages->widget(reader::ControlsSettings));
+        QVERIFY(panel->findChild<QWidget *>("rrControlsNavigationBarSection"));
+        QVERIFY(panel->navigationBarOption->isChecked());
+        QCOMPARE(panel->navigationBarButton->height(), panel->pageNavigationButton->height());
         QCOMPARE(panel->settingsTabButtons[reader::ControlsSettings]->property("reader_tab_icon").toInt(),
                  int(ui::ControlIcon::Swipe));
         QVERIFY(!panel->animationOption->isEnabled());
@@ -1543,13 +2738,22 @@ private slots:
         auto *scroll = panel.findChild<QScrollArea *>("rrSettingsScroll");
         QVERIFY(scroll && scroll->isVisible());
         QVERIFY(scroll->verticalScrollBar()->maximum() > 0);
-        scroll->ensureWidgetVisible(panel.hideNonlinearOption);
+        scroll->ensureWidgetVisible(panel.avoidWastefulStylingOption);
         QCoreApplication::processEvents();
-        const QRect last(panel.hideNonlinearOption->mapTo(scroll->viewport(), QPoint()),
-                         panel.hideNonlinearOption->size());
+        const QRect last(panel.avoidWastefulStylingOption->mapTo(scroll->viewport(), QPoint()),
+                         panel.avoidWastefulStylingOption->size());
         QVERIFY(scroll->viewport()->rect().contains(last));
         panel.settingsPages->setCurrentIndex(reader::ControlsSettings);
         panel.fitContent(available);
+        QCoreApplication::processEvents();
+        QVERIFY(scroll->isVisible());
+        scroll->ensureWidgetVisible(panel.navigationBarButton);
+        QCoreApplication::processEvents();
+        const QRect navigationButton(panel.navigationBarButton->mapTo(scroll->viewport(), QPoint()),
+                                     panel.navigationBarButton->size());
+        QVERIFY(scroll->viewport()->rect().contains(navigationButton));
+        const QSize taller(1680, 1396);
+        panel.resize(taller.width(), panel.fitContent(taller));
         QCoreApplication::processEvents();
         QVERIFY(scroll->isHidden());
         QVERIFY(!scroll->widget());
@@ -1853,6 +3057,172 @@ private slots:
         QCOMPARE(button->caption(), caption);
         button->click();
         QVERIFY(host.window()->findChild<QCheckBox *>("rrSleep_page")->isChecked());
+        auto *panel = dynamic_cast<reader::SettingsPanel *>(host.window()->findChild<QWidget *>("rrGeneralSettings"));
+        QVERIFY(panel && !panel->settingsError->isHidden());
+    }
+
+    void navigationBarButtonsDefaultAndBounds() {
+        QCOMPARE(pageNavigation::barButtons({{pageNavigation::barButtonsKey, "pages"}}),
+                 pageNavigation::BarButtons::Pages);
+        QCOMPARE(pageNavigation::barButtons({}), pageNavigation::BarButtons::Chapters);
+        QCOMPARE(pageNavigation::barButtons({{pageNavigation::barButtonsKey, "unknown"}}),
+                 pageNavigation::BarButtons::Chapters);
+        QWidget owner;
+        owner.resize(600, 900);
+        ui::PageScrubber scrubber(&owner);
+        scrubber.resize(owner.size());
+        owner.show();
+        scrubber.show();
+        auto *previous = scrubber.findChild<QPushButton *>("rrNavigationPrevious");
+        auto *next = scrubber.findChild<QPushButton *>("rrNavigationNext");
+        scrubber.setBook(0, 4, {}, {3, 4});
+        QVERIFY(!previous->isEnabled());
+        QVERIFY(next->isEnabled());
+        for (int page = 1; page < 4; ++page) {
+            next->click();
+            QCOMPARE(scrubber.selectedPage(), page);
+        }
+        QVERIFY(!next->isEnabled());
+        next->click();
+        QCOMPARE(scrubber.selectedPage(), 3);
+        previous->click();
+        QCOMPARE(scrubber.selectedPage(), 2);
+        scrubber.cancel();
+        QVERIFY(!previous->isEnabled());
+        scrubber.setBook(0, 4, {{0, "First"}, {2, "Second"}}, {3, 4});
+        scrubber.setChapterJumps(true);
+        next->click();
+        QCOMPARE(scrubber.selectedPage(), 2);
+        QVERIFY(!next->isEnabled());
+        previous->click();
+        QCOMPARE(scrubber.selectedPage(), 0);
+        QVERIFY(!previous->isEnabled());
+        scrubber.setChapterJumps(false);
+        QVERIFY(!scrubber.selecting());
+        next->click();
+        QCOMPARE(scrubber.selectedPage(), 1);
+        scrubber.cancel();
+        scrubber.setBook(0, 1, {}, {3, 4});
+        QVERIFY(!previous->isEnabled());
+        QVERIFY(!next->isEnabled());
+    }
+    void navigationBarVisibilityPersistsAndKeepsTabs() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        storage::Paths paths{directory.path()};
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        host.window()->show();
+        QTRY_VERIFY(host.window()->readyForPresentation());
+        auto settings = [&] {
+            host.window()->findChild<QPushButton *>("rrSettings")->click();
+        };
+        settings();
+        host.window()->findChild<QPushButton *>("rrSettingsControls")->click();
+        auto *option = host.window()->findChild<QCheckBox *>("rrShowNavigationBar");
+        QVERIFY(option && option->isChecked());
+        option->click();
+        QVERIFY(!host.window()->findChild<QPushButton *>("rrNavigationBarButtons")->isEnabled());
+        settings();
+        QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrGeneralSettings")->isVisible());
+        QVERIFY(!host.window()->findChild<QWidget *>("rrPageScrubber")->isVisible());
+        QVERIFY(host.window()->findChild<QWidget *>("rrBottomNavigation")->isVisible());
+        QCOMPARE(storage::readJson(paths.preferences()).value(pageNavigation::barVisibleKey), QJsonValue(false));
+        host.shutdown();
+        QTRY_VERIFY(host.idle());
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
+        host.window()->show();
+        QTRY_VERIFY(host.window()->readyForPresentation());
+        settings();
+        option = host.window()->findChild<QCheckBox *>("rrShowNavigationBar");
+        QVERIFY(!option->isChecked());
+        option->click();
+        settings();
+        QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrGeneralSettings")->isVisible());
+        QVERIFY(host.window()->findChild<QWidget *>("rrPageScrubber")->isVisible());
+        QVERIFY(host.window()->findChild<QWidget *>("rrBottomNavigation")->isVisible());
+        const auto saved = storage::readJson(paths.preferences());
+        QCOMPARE(saved.value(pageNavigation::barVisibleKey), QJsonValue(true));
+        settings();
+        host.window()->findChild<QCheckBox *>("rrShowNavigationBar")->click();
+        QVERIFY(QFile::remove(paths.preferences()));
+        QVERIFY(QDir().mkpath(paths.preferences()));
+        settings();
+        auto *panel = dynamic_cast<reader::SettingsPanel *>(host.window()->findChild<QWidget *>("rrGeneralSettings"));
+        QVERIFY(panel && panel->isVisible() && !panel->settingsError->isHidden());
+        QVERIFY(QDir(paths.preferences()).removeRecursively());
+        QVERIFY(storage::writeJson(paths.preferences(), saved));
+        host.window()->findChild<QCheckBox *>("rrShowNavigationBar")->click();
+        settings();
+        QTRY_VERIFY(!panel->isVisible());
+        QVERIFY(host.window()->findChild<QWidget *>("rrPageScrubber")->isVisible());
+    }
+
+    void navigationBarButtonsPersistAndRollBackFailedWrites() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        storage::Paths paths{directory.path()};
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        host.window()->show();
+        QTRY_VERIFY(host.window()->readyForPresentation());
+        host.window()->findChild<QPushButton *>("rrSettings")->click();
+        host.window()->findChild<QPushButton *>("rrSettingsControls")->click();
+        auto *button = host.window()->findChild<ui::CaptionButton *>("rrNavigationBarButtons");
+        QVERIFY(button && button->isVisible());
+        QCOMPARE(button->caption(), strings::get("settings.navigation_bar_chapters").toUpper());
+        const auto before = storage::readJson(paths.preferences());
+        button->click();
+        auto *popup = host.window()->findChild<ui::ModalOverlay *>("rrNavigationBarPopup");
+        QVERIFY(popup && popup->isVisible());
+        QCOMPARE(popup->findChildren<QCheckBox *>().size(), 2);
+        QVERIFY(popup->findChild<QCheckBox *>("rrNavigationBar_chapters")->isChecked());
+        QTest::mouseClick(popup, Qt::LeftButton, Qt::NoModifier, QPoint(2, 2));
+        QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrNavigationBarPopup"));
+        QCOMPARE(storage::readJson(paths.preferences()), before);
+        button->click();
+        popup = host.window()->findChild<ui::ModalOverlay *>("rrNavigationBarPopup");
+        QTest::keyClick(popup, Qt::Key_Escape);
+        QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrNavigationBarPopup"));
+        QCOMPARE(storage::readJson(paths.preferences()), before);
+        for (const auto mode : {pageNavigation::BarButtons::Pages, pageNavigation::BarButtons::Chapters}) {
+            button->click();
+            host.window()->findChild<QCheckBox *>("rrNavigationBar_" + pageNavigation::value(mode))->click();
+            QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrNavigationBarPopup"));
+            QCOMPARE(storage::readJson(paths.preferences()).value(pageNavigation::barButtonsKey).toString(),
+                     pageNavigation::value(mode));
+            auto *next = host.window()->findChild<QPushButton *>("rrNavigationNext");
+            QCOMPARE(static_cast<ui::Button *>(next)->iconConfiguration()->glyph,
+                     mode == pageNavigation::BarButtons::Chapters ? ui::ControlIcon::NextChapter
+                                                                  : ui::ControlIcon::Next);
+        }
+        const auto caption = button->caption();
+        host.shutdown();
+        QTRY_VERIFY(host.idle());
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
+        host.window()->show();
+        QTRY_VERIFY(host.window()->readyForPresentation());
+        host.window()->findChild<QPushButton *>("rrSettings")->click();
+        button = host.window()->findChild<ui::CaptionButton *>("rrNavigationBarButtons");
+        QCOMPARE(button->caption(), caption);
+        QVERIFY(QFile::remove(paths.preferences()));
+        QVERIFY(QDir().mkpath(paths.preferences()));
+        button->click();
+        host.window()->findChild<QCheckBox *>("rrNavigationBar_pages")->click();
+        QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrNavigationBarPopup"));
+        QCOMPARE(button->caption(), caption);
+        button->click();
+        QVERIFY(host.window()->findChild<QCheckBox *>("rrNavigationBar_chapters")->isChecked());
+        auto *next = host.window()->findChild<QPushButton *>("rrNavigationNext");
+        QCOMPARE(static_cast<ui::Button *>(next)->iconConfiguration()->glyph, ui::ControlIcon::NextChapter);
         auto *panel = dynamic_cast<reader::SettingsPanel *>(host.window()->findChild<QWidget *>("rrGeneralSettings"));
         QVERIFY(panel && !panel->settingsError->isHidden());
     }
@@ -2197,6 +3567,8 @@ private slots:
         QVERIFY(storage::writeJson(paths.preferences(), preferences));
         auto sleep = std::make_shared<test::SleepPresentationState>();
         test::ReaderHost host(paths, testFonts, testPlaceholder);
+        // Exercise Kobo's missing native pace, independently of standalone history.
+        host.progress = std::make_shared<test::HostProgress>();
         host.configureServices = [sleep, supported, chargeState, coverPath](ReaderHostServices &services) {
             services.coverImagePath = coverPath;
             services.battery = [chargeState] {
@@ -4278,6 +5650,72 @@ private slots:
             previous = next;
         }
     }
+    void backgroundPaceUpdatesOnlyIdleReadingStrips_data() {
+        QTest::addColumn<int>("ppi");
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("300-light") << 300 << false;
+        QTest::newRow("300-dark") << 300 << true;
+        QTest::newRow("212-light") << 212 << false;
+        QTest::newRow("212-dark") << 212 << true;
+    }
+    void backgroundPaceUpdatesOnlyIdleReadingStrips() {
+        QFETCH(int, ppi);
+        QFETCH(bool, dark);
+        struct Restore {
+            int density = ui::density(), ppi = readingPpi.load();
+            ~Restore() {
+                ui::setDensity(density);
+                readingPpi.store(ppi);
+            }
+        } restore;
+        ui::setDensity(ppi);
+        readingPpi.store(ppi);
+        QTemporaryDir directory;
+        const auto paths = storage::Paths{directory.path()};
+        QVERIFY(storage::writeJson(paths.preferences(), {{"dark_mode", dark}}));
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        auto progress = std::make_shared<test::HostProgress>();
+        progress->hasEstimates = true;
+        progress->remaining = {120000, 600000, false};
+        host.progress = progress;
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), ppi == 300 ? QSize(1072, 1448) : QSize(758, 1024));
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        host.window()->show();
+        QTRY_VERIFY(!host.session()->busy());
+        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        QVERIFY(page);
+        QVERIFY(bool(progress->notifyEstimates));
+        page->chrome.slotFields[3] = headerfooter::Field::ChapterTimeLeft;
+        page->chrome.slotFields[5] = headerfooter::Field::BookTimeLeft;
+        progress->notifyEstimates();
+        QCoreApplication::processEvents();
+        QVERIFY(!page->slotContents[5].text.isEmpty());
+        const auto first = page->slotContents;
+        PaintRegions paints;
+        page->installEventFilter(&paints);
+        progress->remaining.bookMilliseconds = 1200000;
+        progress->notifyEstimates();
+        QTRY_VERIFY(!paints.painted.isEmpty());
+        QVERIFY(page->slotContents != first);
+        QVERIFY(!paints.painted.intersects(
+            QRect(0, page->topHeight(), page->width(), page->height() - page->topHeight() - page->bottomHeight())));
+        QVERIFY(page->grab().save(QString("native-reader-pace-%1-%2.png").arg(ppi).arg(dark ? "dark" : "light")));
+        paints.painted = {};
+        progress->notifyEstimates();
+        QCoreApplication::processEvents();
+        QVERIFY(paints.painted.isEmpty());
+        const auto beforeTurn = page->slotContents;
+        QVERIFY(host.session()->turn(1));
+        QVERIFY(host.session()->busy());
+        progress->remaining.bookMilliseconds = 1800000;
+        progress->notifyEstimates();
+        QCOMPARE(page->slotContents, beforeTurn);
+        QVERIFY(paints.painted.isEmpty());
+        QTRY_VERIFY(!host.session()->busy());
+        QTRY_VERIFY(page->slotContents != beforeTurn);
+    }
     void readingStripChangesLeaveBodyUnpainted() {
         ReadingPage page(nullptr, [] {});
         page.resize(400, 600);
@@ -5354,6 +6792,41 @@ private slots:
             !host.session()->busy() && host.session()->state()["font_pixels"] == draft["font_pixels"], 30000);
         QCOMPARE(host.session()->state()["bold_reading"].toString(), QString("off"));
     }
+    void publisherSpacingPreferencePersists() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        storage::Paths paths{directory.path()};
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QTRY_VERIFY(!host.session()->busy());
+        {
+            test::ReaderCanvas canvas(host.window(), nativeSize);
+            canvas.resize(900, 900);
+            canvas.show();
+            QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+            QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
+            auto *settings = host.window()->findChild<QPushButton *>("rrSettings");
+            QVERIFY(click(canvas, settings));
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsAdvanced")));
+            auto *option = host.window()->findChild<QCheckBox *>("rrAvoidWastefulStyling");
+            QVERIFY(option && option->isChecked());
+            option->click();
+            QVERIFY(click(canvas, settings));
+            QTRY_VERIFY(!host.session()->busy());
+            QVERIFY(!host.session()->state().value("avoid_wasteful_styling").toBool(true));
+            QVERIFY(!storage::readJson(paths.preferences()).value("avoid_wasteful_styling").toBool(true));
+            canvas.takeWidget();
+        }
+        host.shutdown();
+        QTRY_VERIFY(host.idle());
+        host.open(fixture(), nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
+        QTRY_VERIFY(!host.session()->busy());
+        QVERIFY(!host.session()->state().value("avoid_wasteful_styling").toBool(true));
+    }
     void readerSettingsWriteErrors_data() {
         QTest::addColumn<QString>("optionName");
         QTest::addColumn<bool>("immediate");
@@ -5760,7 +7233,7 @@ private slots:
         QVERIFY(host.window()->grab().save(
             QString("native-reader-bookmark-jump-%1-%2.png").arg(dark ? "dark" : "light").arg(ppi)));
         QVERIFY(!host.window()->findChild<QWidget *>("rrBookmarkList")->isVisible());
-        auto *back = host.window()->findChild<ui::CaptionButton *>("rrNavLinkReturn");
+        auto *back = host.window()->findChild<ui::CaptionButton *>("rrScrubberReturn");
         QVERIFY(back);
         QVERIFY(!back->isVisible());
         QVERIFY(clickAt(canvas, center));
@@ -5804,7 +7277,7 @@ private slots:
         QTRY_VERIFY(!host.session()->busy());
         QVERIFY(clickAt(canvas, center));
         QTRY_VERIFY(back->isVisible());
-        auto *stay = host.window()->findChild<QPushButton *>("rrNavLinkStay");
+        auto *stay = host.window()->findChild<QPushButton *>("rrScrubberStay");
         QVERIFY(stay && stay->isVisible());
         QVERIFY(click(canvas, stay));
         QVERIFY(!back->isVisible());
@@ -6181,12 +7654,20 @@ private slots:
 
     void revealLinksWithoutReflow_data() {
         QTest::addColumn<int>("fontPixels");
-        QTest::newRow("default-size") << defaultFontPixels();
-        QTest::newRow("inherited-size") << 50;
+        QTest::addColumn<bool>("navigationBar");
+        for (bool enabled : {false, true}) {
+            QTest::newRow(enabled ? "navigation-default-size" : "standalone-default-size")
+                << defaultFontPixels() << enabled;
+            QTest::newRow(enabled ? "navigation-inherited-size" : "standalone-inherited-size") << 50 << enabled;
+        }
     }
     void revealLinksWithoutReflow() {
         QFETCH(int, fontPixels);
+        QFETCH(bool, navigationBar);
         const auto originalPreferences = storage::readJson(testPaths().preferences());
+        auto preferences = originalPreferences;
+        preferences[pageNavigation::barVisibleKey] = navigationBar;
+        QVERIFY(storage::writeJson(testPaths().preferences(), preferences));
         test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
         CloseHost cleanup{host};
         QSignalSpy opened(&host, &test::ReaderHost::opened);
@@ -6201,7 +7682,7 @@ private slots:
         QVERIFY(host.session()->style(fontPixels, host.session()->spacing()));
         QTRY_VERIFY(!host.session()->busy());
         auto *indicator = host.window()->findChild<QPushButton *>("rrLinkIndicator");
-        auto *reveal = host.window()->findChild<QPushButton *>("rrRevealLinks");
+        auto *reveal = host.window()->findChild<QPushButton *>("rrScrubberLinks");
         auto *panel = host.window()->findChild<QWidget *>("rrLinkDiscovery");
         auto *page = host.window()->findChild<ReadingPage *>("rrPage");
         QVERIFY(indicator && reveal && panel && page);
@@ -6223,7 +7704,7 @@ private slots:
         const auto image = host.session()->image().cacheKey();
         const auto position = host.session()->state().value("position").toString();
         QVERIFY(clickAt(canvas, menuPoint));
-        QTRY_VERIFY(panel->isVisible());
+        QTRY_VERIFY(reveal->isVisible());
         QCOMPARE(reveal->text(), strings::get("reader.highlight_links").arg(host.session()->pageLinks().size()));
         auto *exitLabel = host.window()->findChild<QLabel *>("rrLinkDiscoveryExit");
         QVERIFY(exitLabel);
@@ -6307,8 +7788,130 @@ private slots:
         QTRY_VERIFY(!host.session()->busy() && host.session()->state().value("position").toString() == position);
         QVERIFY(storage::writeJson(testPaths().preferences(), originalPreferences));
     }
+    void unmarkedFootnoteShowsPreview_data() {
+        QTest::addColumn<bool>("navigationBar");
+        QTest::addColumn<bool>("dark");
+        QTest::addColumn<int>("ppi");
+        for (const int ppi : {212, 300}) {
+            for (const bool dark : {false, true}) {
+                for (const bool navigationBar : {false, true}) {
+                    const auto name = QString("%1-%2-%3")
+                                          .arg(navigationBar ? "shared-actions" : "standalone-actions")
+                                          .arg(dark ? "dark" : "light")
+                                          .arg(ppi)
+                                          .toLatin1();
+                    QTest::newRow(name.constData()) << navigationBar << dark << ppi;
+                }
+            }
+        }
+    }
+    void unmarkedFootnoteShowsPreview() {
+        QFETCH(bool, navigationBar);
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        struct RestoreDensity {
+            int interface, reading;
+            ~RestoreDensity() {
+                ui::setDensity(interface);
+                readingPpi.store(reading);
+            }
+        } restore{ui::density(), readingPpi.load()};
+        ui::setDensity(ppi);
+        readingPpi.store(ppi);
+        const QSize size(qRound(nativeSize.width() * ppi / 300.), qRound(nativeSize.height() * ppi / 300.));
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        storage::Paths paths{directory.path()};
+        QVERIFY(storage::writeJson(paths.preferences(), {{pageNavigation::barVisibleKey, navigationBar}}));
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &test::ReaderHost::opened);
+        host.open(qEnvironmentVariable("KOBALT_FIXTURES") + "/links-unmarked.epub", size);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        test::ReaderCanvas canvas(host.window(), size);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        host.session()->apply({{"dark_mode", dark}});
+        QTRY_VERIFY(!host.session()->busy());
+        host.session()->go(0);
+        QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 0);
+        const auto links = host.session()->pageLinks();
+        QVERIFY(!links.isEmpty());
+        LinkDetails details;
+        bool resolved = false;
+        host.session()->linkDetails(links.first().source, [&](const LinkDetails &value) {
+            details = value;
+            resolved = true;
+        });
+        QTRY_VERIFY(resolved);
+        QCOMPARE(details.label, QString("[1]"));
+        QCOMPARE(details.kind, LinkKind::Footnote);
+        QVERIFY(details.html.contains("Second paragraph"));
+        const auto origin = host.session()->state().value("position").toString();
+        auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+        QVERIFY(page);
+        const QPoint point =
+            page->mapTo(canvas.surface(), links.first().rectangles.first().center() + QPoint(0, page->topHeight()));
+        const auto hold = [&] {
+            canvas.ensureVisible(point.x(), point.y(), 30, 30);
+            QCoreApplication::processEvents();
+            const auto at = canvas.surface()->mapTo(&canvas, point);
+            QTest::mousePress(canvas.windowHandle(), Qt::LeftButton, Qt::NoModifier, at);
+            QTest::qWait(ui::metrics::lookup::holdMilliseconds + 200);
+            QTest::mouseRelease(canvas.windowHandle(), Qt::LeftButton, Qt::NoModifier, at);
+        };
+        hold();
+        QPushButton *follow = nullptr;
+        QTRY_VERIFY((follow = host.window()->findChild<QPushButton *>("rrLinkGo")) && follow->isVisible());
+        QVERIFY(click(canvas, follow));
+        auto *panel = host.window()->findChild<LinkPanel *>("rrLinkPanel");
+        QVERIFY(panel);
+        QTRY_VERIFY(panel->isVisible());
+        QCOMPARE(host.session()->state().value("position").toString(), origin);
+        const QRect body = host.window()->rect().adjusted(0, page->topHeight(), 0, -page->bottomHeight());
+        QVERIFY(body.contains(panel->geometry()));
+        auto *show = panel->findChild<QPushButton *>("rrLinkOpen");
+        auto *close = panel->findChild<QPushButton *>("rrLinkClose");
+        QVERIFY(show && close && show->isVisible());
+        QCOMPARE(show->text(), strings::get("link_panel.show_in_book"));
+        QVERIFY(host.window()->grab().save(QString("native-reader-unmarked-note-%1-%2-%3.png")
+                                               .arg(navigationBar ? "shared-actions" : "standalone-actions")
+                                               .arg(dark ? "dark" : "light")
+                                               .arg(ppi)));
+        QVERIFY(click(canvas, close));
+        QVERIFY(!panel->isVisible());
+        QCOMPARE(host.session()->state().value("position").toString(), origin);
+        hold();
+        QTRY_VERIFY((follow = host.window()->findChild<QPushButton *>("rrLinkGo")) && follow->isVisible());
+        QVERIFY(click(canvas, follow));
+        QTRY_VERIFY(panel->isVisible());
+        QVERIFY(click(canvas, show));
+        QTRY_VERIFY(!host.session()->busy() && host.session()->state().value("position").toString() != origin);
+        QVERIFY(!panel->isVisible());
+        QVERIFY(clickAt(canvas, QPoint(size.width() / 2, size.height() / 2)));
+        auto *scrubber = host.window()->findChild<ui::PageScrubber *>("rrPageScrubber");
+        QVERIFY(scrubber);
+        QCOMPARE(scrubber->slider()->isVisible(), navigationBar);
+        auto *back = host.window()->findChild<QPushButton *>("rrScrubberReturn");
+        QVERIFY(back);
+        QTRY_VERIFY(back->isVisible());
+        QVERIFY(click(canvas, back));
+        QTRY_VERIFY(!host.session()->busy() && host.session()->state().value("position").toString() == origin);
+    }
+
+    void followLinkAndReturn_data() {
+        QTest::addColumn<bool>("navigationBar");
+        QTest::newRow("shared-actions") << true;
+        QTest::newRow("standalone-actions") << false;
+    }
     void followLinkAndReturn() {
-        test::ReaderHost host(testPaths(), testFonts, testPlaceholder);
+        QFETCH(bool, navigationBar);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        storage::Paths paths{directory.path()};
+        QVERIFY(storage::writeJson(paths.preferences(), {{pageNavigation::barVisibleKey, navigationBar}}));
+        test::ReaderHost host(paths, testFonts, testPlaceholder);
         CloseHost cleanup{host};
         QSignalSpy opened(&host, &test::ReaderHost::opened);
         host.open(qEnvironmentVariable("KOBALT_FIXTURES") + "/links.epub", nativeSize);
@@ -6375,24 +7978,40 @@ private slots:
         QVERIFY(click(canvas, go));
         QTRY_VERIFY_WITH_TIMEOUT(
             !host.session()->busy() && host.session()->state().value("position").toString() != origin, 10000);
-        auto *hiddenReturn = host.window()->findChild<QPushButton *>("rrNavLinkReturn");
+        auto *hiddenReturn = host.window()->findChild<QPushButton *>("rrScrubberReturn");
         QVERIFY(hiddenReturn);
         QVERIFY(!hiddenReturn->isVisible());
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
         QPushButton *back = nullptr;
-        QTRY_VERIFY((back = host.window()->findChild<QPushButton *>("rrNavLinkReturn")) && back->isVisible());
+        QTRY_VERIFY((back = host.window()->findChild<QPushButton *>("rrScrubberReturn")) && back->isVisible());
         QCOMPARE(back->text(), strings::get("reader.return_page").arg(1));
         QVERIFY(static_cast<ui::CaptionButton *>(back)->caption().startsWith("You jumped from "));
-        // The destination has a link of its own: the links row stacks above
-        // the return row instead of covering it.
+        // Both actions stay compact and share a row, with or without the scrubber.
         QVERIFY(!host.session()->pageLinks().isEmpty());
-        auto *discovery = host.window()->findChild<QWidget *>("rrLinkDiscovery");
+        auto *discovery = host.window()->findChild<QWidget *>("rrScrubberLinks");
         QVERIFY(discovery);
         QTRY_VERIFY(discovery->isVisible());
         const QRect discoveryBounds(discovery->mapTo(host.window(), QPoint()), discovery->size());
         const QRect returnBounds(back->mapTo(host.window(), QPoint()), back->size());
         QVERIFY(!discoveryBounds.intersects(returnBounds));
-        QVERIFY(discoveryBounds.bottom() < returnBounds.top());
+        if (navigationBar) {
+            QCOMPARE(discoveryBounds.top(), returnBounds.top());
+            auto *scrubber = host.window()->findChild<ui::PageScrubber *>("rrPageScrubber");
+            QVERIFY(scrubber && scrubber->isVisible());
+            QVERIFY(returnBounds.bottom() < scrubber->mapTo(host.window(), scrubber->barBounds().topLeft()).y());
+            auto *next = host.window()->findChild<QPushButton *>("rrNavigationNext");
+            QVERIFY(click(canvas, next));
+            QTRY_VERIFY(scrubber->previewReady());
+            const QRect caption = host.window()->findChild<QLabel *>("rrPreviewChapterCaption")->geometry();
+            QVERIFY(scrubber->previewBounds().bottom() < discovery->parentWidget()->y());
+            QCOMPARE(discovery->parentWidget()->geometry().bottom() + 1 + int(ui::metrics::scrubber::gap),
+                     caption.top());
+            scrubber->cancel();
+        } else {
+            QCOMPARE(discoveryBounds.top(), returnBounds.top());
+            QVERIFY(host.window()->findChild<QWidget *>("rrPageScrubber")->isVisible());
+            QVERIFY(!host.window()->findChild<QWidget *>("rrBookPosition")->isVisible());
+        }
         QVERIFY(host.window()->grab().save("native-reader-link-return.png"));
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
         QTRY_VERIFY(!back->isVisible());
@@ -6421,7 +8040,7 @@ private slots:
         QVERIFY(click(canvas, go));
         QTRY_VERIFY(!host.session()->busy());
         QVERIFY(clickAt(canvas, QPoint(nativeSize.width() / 2, nativeSize.height() / 2)));
-        auto *stay = host.window()->findChild<QPushButton *>("rrNavLinkStay");
+        auto *stay = host.window()->findChild<QPushButton *>("rrScrubberStay");
         QVERIFY(stay);
         QTRY_VERIFY(stay->isVisible());
         const auto destination = host.session()->state().value("position").toString();

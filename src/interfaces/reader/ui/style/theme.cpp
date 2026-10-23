@@ -5,15 +5,34 @@
 
 namespace kobalt::ui {
 namespace m = metrics;
+namespace {
+QRectF pixelAlignedRect(const QPainter &painter, const QRectF &rect) {
+    const auto transform = painter.deviceTransform();
+    if (transform.type() > QTransform::TxScale || transform.m11() <= 0 || transform.m22() <= 0)
+        return rect;
+    const QRectF device = transform.mapRect(rect);
+    const QRectF aligned(qRound(device.left()), qRound(device.top()),
+                         qMax(1, qRound(device.right()) - qRound(device.left())),
+                         qMax(1, qRound(device.bottom()) - qRound(device.top())));
+    return transform.inverted().mapRect(aligned);
+}
+}
 void paintEdges(QPainter &painter, const QRect &rect, Edges edges, const QColor &ink, int width) {
+    if (rect.isEmpty() || width <= 0 || !edges)
+        return;
+    const auto transform = painter.deviceTransform();
+    const bool scaled = transform.type() <= QTransform::TxScale && transform.m11() > 0 && transform.m22() > 0;
+    const QRectF bounds = pixelAlignedRect(painter, rect);
+    const qreal horizontal = scaled ? qMax(1, qRound(width * transform.m22())) / transform.m22() : width;
+    const qreal vertical = scaled ? qMax(1, qRound(width * transform.m11())) / transform.m11() : width;
     if (edges.testFlag(Qt::TopEdge))
-        painter.fillRect(rect.x(), rect.y(), rect.width(), width, ink);
+        painter.fillRect(QRectF(bounds.left(), bounds.top(), bounds.width(), horizontal), ink);
     if (edges.testFlag(Qt::BottomEdge))
-        painter.fillRect(rect.x(), rect.bottom() - width + 1, rect.width(), width, ink);
+        painter.fillRect(QRectF(bounds.left(), bounds.bottom() - horizontal, bounds.width(), horizontal), ink);
     if (edges.testFlag(Qt::LeftEdge))
-        painter.fillRect(rect.x(), rect.y(), width, rect.height(), ink);
+        painter.fillRect(QRectF(bounds.left(), bounds.top(), vertical, bounds.height()), ink);
     if (edges.testFlag(Qt::RightEdge))
-        painter.fillRect(rect.right() - width + 1, rect.y(), width, rect.height(), ink);
+        painter.fillRect(QRectF(bounds.right() - vertical, bounds.top(), vertical, bounds.height()), ink);
 }
 void paintButtonShape(QPainter &painter, const QRect &rect, const QColor &paper, const QColor &fill,
                       const QColor &border) {
@@ -23,8 +42,8 @@ void paintButtonShape(QPainter &painter, const QRect &rect, const QColor &paper,
     painter.setPen(QPen(border, m::control::border));
     painter.setBrush(fill);
     const qreal inset = int(m::control::border) / 2.0;
-    painter.drawRoundedRect(QRectF(rect).adjusted(inset, inset, -inset, -inset), m::control::buttonRadius,
-                            m::control::buttonRadius);
+    painter.drawRoundedRect(pixelAlignedRect(painter, rect).adjusted(inset, inset, -inset, -inset),
+                            m::control::buttonRadius, m::control::buttonRadius);
     painter.restore();
 }
 bool darkTheme(const QWidget *widget) {

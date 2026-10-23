@@ -1,6 +1,7 @@
 #include "interfaces/reader/ui/controls/text.h"
 #include "reader_p.h"
 #include "reading/appearance_settings.h"
+#include "reading/page_navigation.h"
 #include "support/strings.h"
 #include "support/diagnostics.h"
 #include <QtMath>
@@ -51,7 +52,7 @@ void Reader::refresh() {
     // the new page is painted.
     const bool turnFrame =
         !model->busy() && model->turnDirection() != 0 && model->image().cacheKey() != page->image.cacheKey();
-    if (!turnFrame)
+    if (!turnFrame || book->usesLocalPace())
         observeReading();
     const bool afterTurn = !turnFrame && std::exchange(turnPainted, false);
     if (!publishPendingDarkMode())
@@ -84,12 +85,14 @@ void Reader::refresh() {
         saveSoon();
     else
         save();
-    // Returning to the page from the menu flashes once to clear ghosting.
-    // The menu can close later than the tap, after Settings apply.
-    if (flashAfterMenu && isVisible() && !appearanceEdit.panelOpen() && !topControls->isVisible() &&
-        !general->isVisible() && !choices->isVisible()) {
+    // Wait for the selected preview page before clearing the dimmed frame.
+    // Settings can also close the menu later than the tap, after applying.
+    if ((flashAfterMenu || flashAfterPagePreview) && (!flashAfterPagePreview || !model->busy()) && isVisible() &&
+        !appearanceEdit.panelOpen() && (flashAfterPagePreview || !topControls->isVisible()) && !general->isVisible() &&
+        !choices->isVisible()) {
+        const bool preview = std::exchange(flashAfterPagePreview, false);
         flashAfterMenu = false;
-        requestFlash("menu");
+        requestFlash(preview ? "page-preview" : "menu");
         page->update();
     }
     // Panels invalidate their own pixels. Repaint the reading area only
@@ -346,19 +349,14 @@ void Reader::syncAppearanceControls(bool pickingFont) {
 }
 
 void Reader::syncReadingControls() {
-    if (!bookSlider->interacting()) {
-        bookSlider->setRange(0, qMax(0, model->pages() - 1));
-        QVector<int> chapterStarts;
-        for (const auto &chapter : model->chapters())
-            chapterStarts.append(chapter.page);
-        bookSlider->setMarkers(chapterStarts);
-        bookSlider->setValue(model->page());
-        progressLabel->setText(!model->error().isEmpty() ? model->error()
-                               : !model->imageWarning().isEmpty()
-                                   ? model->imageWarning()
-                                   : strings::get("reader.menu_page_of").arg(model->page() + 1).arg(model->pages()));
-    }
-    bookSlider->setEnabled(!model->busy() && model->pages() > 1);
+    if (model->busy())
+        pageScrubber->cancel();
+    QVector<QPair<int, QString>> chapters;
+    for (const auto &chapter : model->chapters())
+        chapters.append({chapter.page, chapter.title});
+    pageScrubber->setChapterJumps(pageNavigation::barButtons(preferences) == pageNavigation::BarButtons::Chapters);
+    pageScrubber->setBook(model->page(), model->pages(), chapters, model->image().size());
+    pageScrubber->setEnabled(!model->busy() && model->pages() > 1);
     const auto chapter = model->chapterTitle().isEmpty() ? strings::get("reader.contents") : model->chapterTitle();
     chapterButton->setText(chapter);
     chapterButton->setAccessibleName(strings::get("reader.contents_detail").arg(chapter));
@@ -376,8 +374,6 @@ void Reader::syncReadingControls() {
     // Settings applies the newest draft, or waits for the preview to open.
     // Its click handler ignores taps while a panel's changes apply.
     findChild<QPushButton *>("rrSettings")->setEnabled(!model->busy() || appearanceEdit.applying());
-    previousPage->setEnabled(model->canTurn() && model->page() > 0);
-    nextPage->setEnabled(model->canTurn() && model->page() + 1 < model->pages());
     findChild<QPushButton *>("rrTypography")
         ->setChecked(!general->isVisible() && appearanceEdit.panelOpen() && panels->currentIndex() == 0);
     findChild<QPushButton *>("rrLayout")

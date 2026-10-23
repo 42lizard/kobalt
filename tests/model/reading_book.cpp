@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <utility>
@@ -35,9 +36,9 @@ void waitUntil(const std::function<bool()> &ready) {
     timeout.start(60000);
     loop.exec();
 }
-void tick() {
+void tick(int milliseconds = 10) {
     QEventLoop loop;
-    qt::later(10, &loop, [&] {
+    qt::later(milliseconds, &loop, [&] {
         loop.quit();
     });
     loop.exec();
@@ -117,16 +118,15 @@ int main(int argc, char **argv) {
     QTemporaryDir temporary;
     require(temporary.isValid(), "Cannot create state directory");
     storage::Paths paths{temporary.path()};
-    const auto open = [&] {
+    const auto open = [&](QSize size = QSize(758, 900)) {
         auto session = std::make_unique<ReaderSession>(test::readerFonts(), test::readerPlaceholder());
         bool ready = false;
         auto lease = std::make_shared<SourceLease>();
-        session->open(
-            {"test-book", path, QSize(758, 900), {}, {}, {}, lease, nativeResourceFactory(path, server.port(), lease)},
-            [&](const OpeningResult &result) {
-                require(result.ready(), qPrintable(openingMessage(result)));
-                ready = true;
-            });
+        session->open({"test-book", path, size, {}, {}, {}, lease, nativeResourceFactory(path, server.port(), lease)},
+                      [&](const OpeningResult &result) {
+                          require(result.ready(), qPrintable(openingMessage(result)));
+                          ready = true;
+                      });
         waitUntil([&] {
             return ready;
         });
@@ -234,8 +234,8 @@ int main(int argc, char **argv) {
         require(!storage::readJson(paths.preferences()).contains("show_clock"),
                 "Book layout changed global preferences");
         require(!local.canWriteNative() && !local.deviceTransition(), "Local book acquired platform services");
-        require(local.estimates().learningPace && local.estimates().bookMilliseconds == -1,
-                "Standalone book stopped using its session pace");
+        require(local.estimates().learningPace && local.estimates().bookMilliseconds > 0,
+                "Standalone book did not provide a rough estimate at opening");
         local.pollProgress();
         local.observeProgress();
         require(!local.readProgress().valid && !local.pendingProgress(), "Local book invented external progress");
@@ -268,6 +268,54 @@ int main(int argc, char **argv) {
         tick();
         require(local.readingMilliseconds() == active && !local.offerFinish(),
                 "Released local book became active again");
+    }
+    {
+        auto session = open(QSize(400, 600));
+        const auto hash = session->sourceHash();
+        ReadingBook first(std::move(session), paths.bookState("pace-first"), paths, "pace-first", hash, nullptr, {},
+                          {});
+        auto *model = first.session();
+        const ReadingActivity activity{model->state().value("position").toString(),
+                                       0,
+                                       model->page(),
+                                       model->pages(),
+                                       0,
+                                       model->totalWords(),
+                                       model->chapterGraph(),
+                                       model->graphSelection()};
+        const int words = wordEstimates::pageWords(activity);
+        require(words >= 2 && words < 1000, "Pace persistence fixture has no usable page sample");
+        first.observeReading();
+        tick(qMax(2100, words * 60));
+        require(model->turn(1), "Pace persistence fixture cannot turn");
+        waitUntil([&] {
+            return !model->busy();
+        });
+        first.observeReading();
+        first.stopReading();
+        const auto saved = storage::readJson(paths.readingSpeed());
+        require(
+            saved.value("samples").toInt() == 1 && saved.value("words").toDouble() == words,
+            qPrintable(
+                QString(
+                    "Stopping did not save accepted reading history: words=%1, elapsed=%2, page=%3, direction=%4, saved=%5")
+                    .arg(words)
+                    .arg(first.readingMilliseconds())
+                    .arg(model->page())
+                    .arg(model->turnDirection())
+                    .arg(QString::fromUtf8(QJsonDocument(saved).toJson(QJsonDocument::Compact)))));
+        ReadingSpeed expected;
+        expected.restore(saved);
+        auto next = open(QSize(400, 600));
+        ReadingBook second(std::move(next), paths.bookState("pace-second"), paths, "pace-second", hash, nullptr, {},
+                           {});
+        require(second.estimates().bookMilliseconds == expected.estimates(activity).bookMilliseconds &&
+                    second.estimates().learningPace,
+                "Another book did not reuse saved partial history");
+        second.observeReading();
+        second.observeReading(false);
+        second.stopReading();
+        require(storage::readJson(paths.readingSpeed()) == saved, "Unsampled reading overwrote saved history");
     }
     {
         Calls calls;

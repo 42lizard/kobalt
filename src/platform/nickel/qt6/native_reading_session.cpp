@@ -179,7 +179,13 @@ bool addTime(const QString &book, int seconds) {
     return verified;
 }
 }
-NativeReadingSession::NativeReadingSession(QString identity) : book(std::move(identity)) {}
+NativeReadingSession::NativeReadingSession(QString identity) : book(std::move(identity)) {
+    pace_.changed = [this] {
+        if (estimatesChanged) {
+            estimatesChanged();
+        }
+    };
+}
 NativeReadingSession::~NativeReadingSession() {
     stop();
 }
@@ -193,10 +199,13 @@ void NativeReadingSession::start(const ReadingActivity &activity) {
     auto volume = api().get(book, api().dbName(api().device()));
     if (api().values(&volume).value("ContentID").toString() != book)
         return;
-    account = api().account();
+    const auto currentAccount = api().account();
+    if (account != currentAccount) {
+        pace_.clear();
+    }
+    account = currentAccount;
     percent = qBound(0.0, activity.percent, 100.0);
     activity_.start(activity);
-    paceDirty_ = true;
     SessionPosition state;
     state.percent = percent;
     QElapsedTimer timer;
@@ -207,6 +216,17 @@ void NativeReadingSession::start(const ReadingActivity &activity) {
     testActive = this;
 #endif
     const bool persisted = flush();
+    if (api().pace) {
+        const auto identity = book;
+        const auto owner = account;
+        pace_.start(engine, [identity, owner] {
+            if (!api().open() || api().account() != owner) {
+                return -1.0;
+            }
+            const auto volume = api().get(identity, api().dbName(api().device()));
+            return api().values(&volume).value("ContentID").toString() == identity ? api().pace(volume) : -1.0;
+        });
+    }
     QSettings settings("/mnt/onboard/.kobo/Kobo/Kobo eReader.conf", QSettings::IniFormat);
     const bool sideload = settings.value("ApplicationPreferences/SideloadedMode", false).toBool();
     diagnostic("reading-session-start",
@@ -221,7 +241,7 @@ void NativeReadingSession::page(const ReadingActivity &activity) {
         return;
     if (!api().open() || api().account() != account) {
         running = false;
-        secondsPerWord_ = -1;
+        pace_.clear();
         return;
     }
     auto volume = api().get(book, api().dbName(api().device()));
@@ -230,43 +250,25 @@ void NativeReadingSession::page(const ReadingActivity &activity) {
     // Nickel handles page activity and subscription accounting. Its event
     // engine intentionally ignores page events in sideload mode.
     api().fire(api().engine(), "pageTurned", volume, {{"wordsRead", words}});
-    paceDirty_ = true;
 }
 bool NativeReadingSession::estimates(const ReadingActivity &activity, ReadingEstimates *result) {
-    if (!api().pace || !api().open() || !workerReady() || (!running && secondsPerWord_ <= 0))
+    if (!api().pace) {
         return false;
-    if (running && paceDirty_) {
-        double pace = -1;
-        const bool queried = kobalt::qt::invoke(
-            api().engine(),
-            [&] {
-                const auto volume = api().get(book, api().dbName(api().device()));
-                if (api().values(&volume).value("ContentID").toString() == book)
-                    pace = api().pace(volume);
-            },
-            Qt::BlockingQueuedConnection);
-        if (!queried || !std::isfinite(pace) || pace <= 0) {
-            *result = ReadingEstimates{};
-            return true;
-        }
-        secondsPerWord_ = pace;
-        paceDirty_ = false;
     }
-    *result = nickel::readingEstimates(activity, secondsPerWord_);
+    *result = nickel::readingEstimates(activity, pace_.value());
     return true;
 }
 void NativeReadingSession::stop() {
+    pace_.stop();
 #ifndef KOBALT_READER_HARDWARE
     if (testActive == this)
         testActive = nullptr;
 #endif
     if (!running)
         return;
-    ReadingEstimates remaining;
-    estimates(activity_.current(), &remaining);
     running = false;
     if (!api().open() || !workerReady() || api().account() != account) {
-        secondsPerWord_ = -1;
+        pace_.clear();
         diagnostic("reading-session-discarded");
         return;
     }

@@ -81,6 +81,7 @@ void ReaderController::begin(const QString &path, QSize pixels) {
     const auto settings = appearance::readerPreferences(storage::readJson(paths.preferences()), saved);
     saved["dark_mode"] = settings.value("dark_mode").toBool(false);
     saved["bold_reading"] = settings.value("bold_reading").toString("off");
+    saved["avoid_wasteful_styling"] = settings.value("avoid_wasteful_styling").toBool(true);
     orientation.configure(settings);
     const auto viewport = readerInterface().readingViewport(pixels, settings);
     opening = std::make_unique<ReaderSession>(fonts, placeholder);

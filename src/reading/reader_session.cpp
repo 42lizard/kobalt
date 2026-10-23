@@ -210,12 +210,14 @@ std::unique_ptr<ReaderSession> ReaderSession::retained() {
     return retained;
 }
 void ReaderSession::cancelSource() {
+    cancelPagePreview();
     cancelPendingTurn();
     if (lease_)
         lease_->cancel();
     clearRenderProgress();
 }
 void ReaderSession::revokeSource() {
+    cancelPagePreview();
     cancelPendingTurn();
     if (lease_)
         lease_->revoke();
@@ -395,11 +397,13 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                 const auto bionic = saved.value("bold_reading");
                 const auto dark = saved.value("dark_mode");
                 const auto hideNonlinear = saved.value("hide_nonlinear_fragments");
+                const auto avoidWastefulStyling = saved.value("avoid_wasteful_styling");
                 if (!savedMatches)
                     saved = {};
                 saved["bold_reading"] = bionic;
                 saved["dark_mode"] = dark;
                 saved["hide_nonlinear_fragments"] = hideNonlinear;
+                saved["avoid_wasteful_styling"] = avoidWastefulStyling;
                 appearance::migrateLineSpacing(saved);
                 if (!appearanceDefaults.isEmpty()) {
                     appearance::applyBookDefaults(saved, appearanceDefaults);
@@ -973,6 +977,40 @@ void ReaderSession::pageSummary(int page, std::function<void(QString, QString)> 
         },
         Qt::QueuedConnection);
 }
+void ReaderSession::cancelPagePreview() {
+    newestPreview->fetch_add(1);
+}
+void ReaderSession::previewPage(int page, QSize bounds, std::function<void(QImage)> finished) {
+    cancelPagePreview();
+    if (running || retiring || !lease_ || lease_->revoked() || page < 0 || page >= pages() || bounds.isEmpty() ||
+        qint64(bounds.width()) * bounds.height() > 1024 * 1024)
+        return;
+    const auto request = newestPreview->load();
+    const auto token = newestPreview;
+    const auto latest = newest;
+    const auto job = revision;
+    const auto lease = lease_;
+    const auto engine = model;
+    QPointer<ReaderSession> guard(this);
+    kobalt::qt::invoke(
+        engineWorker(),
+        [engine, guard, page, bounds, finished, request, token, latest, job, lease] {
+            if (token->load() != request || latest->load() != job || lease->revoked())
+                return;
+            EngineJob activity;
+            const auto image = engine->image(page).scaled(bounds, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            if (token->load() != request || latest->load() != job || lease->revoked())
+                return;
+            kobalt::qt::invoke(
+                qApp,
+                [guard, image, finished, token, latest, job, request, lease] {
+                    if (guard && token->load() == request && latest->load() == job && !lease->revoked())
+                        finished(image);
+                },
+                Qt::QueuedConnection);
+        },
+        Qt::QueuedConnection);
+}
 void ReaderSession::nativePosition(std::function<void(QString, QString)> finished) {
     auto engine = model;
     const auto positions = positions_;
@@ -1039,6 +1077,7 @@ void ReaderSession::linkDetails(const QString &source, std::function<void(LinkDe
         Qt::QueuedConnection);
 }
 ReaderSession::~ReaderSession() {
+    cancelPagePreview();
     renderProgressChanged = {};
     if (ownsLease_)
         cancelSource();

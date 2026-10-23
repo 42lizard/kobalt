@@ -4,6 +4,7 @@
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/options.h"
 #include "interfaces/reader/ui/controls/sliders.h"
+#include "interfaces/reader/ui/controls/page_scrubber.h"
 #include "interfaces/reader/ui/controls/panels.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/theme.h"
@@ -142,16 +143,16 @@ private:
     ChapterHeader *header;
     AppearanceSheet *menu;
     QFrame *bottomControls;
-    kobalt::ui::Panel *topControls;
+    kobalt::ui::Panel *topControls = nullptr;
     kobalt::ToolbarComposition toolbarComposition;
     std::unique_ptr<kobalt::reader::Navigation> navigation;
     QVector<QWidget *> topActions;
-    kobalt::ui::Panel *general;
+    kobalt::ui::Panel *general = nullptr;
     std::unique_ptr<kobalt::LightControls> light;
     kobalt::LightPanel *lightPopup = nullptr;
     QCheckBox *darkOption, *inheritTextLayoutOption, *animationOption, *edgeLightOption, *denseGraphOption,
         *pinStatsOption, *inheritHeaderFooterOption;
-    QCheckBox *automaticOpeningOption = nullptr;
+    QCheckBox *automaticOpeningOption = nullptr, *navigationBarOption = nullptr;
     QPushButton *autoRotateOption;
     QCheckBox *hideStatusOption = nullptr, *hideDeviceOptionsOption = nullptr;
     bool hideNativeStatus() const;
@@ -167,13 +168,14 @@ private:
     bool gestureWarmth = false, warmthAutomatic = false, warmthSupported = false;
     int pendingDarkMode = -1;
     bool applyingText = false, closing = false;
-    kobalt::ChoiceScreen *choices;
+    kobalt::ChoiceScreen *choices = nullptr;
     kobalt::ChapterGraph *chapterGraph = nullptr;
     bool pinStats = false, pinnedStatsOpen = false;
     kobalt::Acknowledgments *acknowledgments;
     QStackedWidget *panels;
-    QLabel *progressLabel, *previewLabel;
-    QPushButton *previousPage, *nextPage, *resetDefaults, *chapterButton;
+    QLabel *previewLabel;
+    kobalt::ui::PageScrubber *pageScrubber = nullptr;
+    QPushButton *resetDefaults, *chapterButton;
     QStackedWidget *settingsPages;
     QVector<QPushButton *> rotationButtons;
     bool restoringDefaults = false, themeReady = false, darkTheme = false;
@@ -251,7 +253,7 @@ private:
     QLabel *linkDiscoveryIcon = nullptr, *linkDiscoveryHint = nullptr;
     QPushButton *linkDiscoveryToggle = nullptr;
     QLabel *linkDiscoveryExit = nullptr;
-    QCheckBox *linkIndicatorOption = nullptr, *hideNonlinearOption = nullptr;
+    QCheckBox *linkIndicatorOption = nullptr, *hideNonlinearOption = nullptr, *avoidWastefulStylingOption = nullptr;
     bool revealingLinks = false;
     QString revealedPosition;
     void syncLinkDiscovery();
@@ -304,6 +306,9 @@ private:
     void showPageNavigation();
     void openPageNavigation();
     void closePageNavigation();
+    void showNavigationBarButtons();
+    void openNavigationBarButtons();
+    void closeNavigationBarButtons();
     void applyAutomaticOpening(bool enabled);
     void applySettings();
     bool writePreferences(const QJsonObject &next);
@@ -343,8 +348,9 @@ private:
     QPointer<kobalt::ui::ModalOverlay> refreshPopup;
     kobalt::ui::CaptionButton *sleepScreenButton = nullptr;
     QPointer<kobalt::ui::ModalOverlay> sleepPopup;
-    kobalt::ui::CaptionButton *pageNavigationButton = nullptr, *tapZonesButton = nullptr;
-    QPointer<kobalt::ui::ModalOverlay> pageNavigationPopup, tapZonesPopup;
+    kobalt::ui::CaptionButton *pageNavigationButton = nullptr, *tapZonesButton = nullptr,
+                              *navigationBarButton = nullptr;
+    QPointer<kobalt::ui::ModalOverlay> pageNavigationPopup, tapZonesPopup, navigationBarPopup;
     static QString refreshExplanation(kobalt::ScreenRefresh mode);
     static QString refreshLabel(kobalt::ScreenRefresh mode);
     void showScreenRefresh();
@@ -365,7 +371,7 @@ private:
     void toggleBookmark();
     void showBookmarkError();
     void showFormattingWarning();
-    bool flashAfterMenu = false;
+    bool flashAfterMenu = false, flashAfterPagePreview = false;
     void requestFlash(const char *reason);
     QTimer *saveTimer = nullptr;
     bool turnPainted = false;

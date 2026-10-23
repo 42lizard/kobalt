@@ -43,6 +43,11 @@ void ReaderModel::markKoboLinkDecorations() {
     }
 }
 namespace {
+constexpr int noteNodeLimit = 8192;
+constexpr int noteDepthLimit = 64;
+constexpr int noteHtmlLimit = 128 * 1024;
+constexpr int inferredNoteTextLimit = 10000;
+
 QString text(const lString32 &value) {
     return QString::fromUtf8(UnicodeToUtf8(value).c_str());
 }
@@ -61,36 +66,353 @@ bool token(ldomNode *node, const char *name, const char *value, bool anyNamespac
 }
 bool noteElement(ldomNode *node) {
     return token(node, "type", "footnote", true) || token(node, "type", "endnote", true) ||
+           token(node, "type", "note", true) || token(node, "type", "rearnote", true) ||
            token(node, "role", "doc-footnote") || token(node, "role", "doc-endnote") ||
-           token(node, "class", "footnote") || token(node, "class", "endnote");
+           token(node, "role", "doc-note") || token(node, "role", "doc-rearnote") || token(node, "class", "footnote") ||
+           token(node, "class", "endnote");
 }
-// A block that starts another note or a new section.
-bool endsNote(ldomNode *node) {
-    const auto tag = text(node->getNodeName()).toLower();
-    if (tag == "section" || tag == "aside" || tag == "hr" ||
-        (tag.size() == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6') ||
-        !node->getAttributeValue("id").empty() || noteElement(node))
+
+enum class NoteMatch { Unmarked, Explicit, Passage };
+
+NoteMatch noteReference(ldomNode *node) {
+    const auto style = node->getStyle();
+    if (!style.isNull()) {
+        if (STYLE_HAS_CR_HINT(style, NOTEREF)) {
+            return NoteMatch::Explicit;
+        }
+        if (STYLE_HAS_CR_HINT(style, NOTEREF_IGNORE)) {
+            return NoteMatch::Passage;
+        }
+    }
+    if (token(node, "type", "noteref", true) || token(node, "role", "doc-noteref") || token(node, "rel", "footnote") ||
+        token(node, "type", "note")) {
+        return NoteMatch::Explicit;
+    }
+    if (token(node, "type", "link", true) || token(node, "role", "doc-link")) {
+        return NoteMatch::Passage;
+    }
+    return NoteMatch::Unmarked;
+}
+
+bool heading(ldomNode *node) {
+    const auto name = node->getNodeName();
+    return name.length() == 2 && name[0] == 'h' && name[1] >= '1' && name[1] <= '6';
+}
+
+// The same reference shapes as KOReader's normal popup detector. This is an
+// independent implementation; the upstream rules and revision are in development.md.
+bool noteMarker(const lString32 &label) {
+    int digits = 0, letters = 0, romans = 0;
+    for (int i = 0; i < label.length(); ++i) {
+        const auto c = label[i];
+        if (lStr_isWordSeparator(c)) {
+            continue;
+        }
+        const auto properties = lGetCharProps(c);
+        if (properties & CH_PROP_DIGIT) {
+            ++digits;
+        } else if (properties & CH_PROP_ALPHA) {
+            ++letters;
+            if (c == 'i' || c == 'v' || c == 'x' || c == 'l' || c == 'c' || c == 'd' || c == 'm' || c == 'I' ||
+                c == 'V' || c == 'X' || c == 'L' || c == 'C' || c == 'D' || c == 'M') {
+                ++romans;
+            }
+        } else {
+            return false;
+        }
+    }
+    return (digits >= 1 && digits <= 3 && letters == 0) || (letters >= 1 && letters <= 2 && digits <= 2) ||
+           (romans >= 1 && romans <= 10 && romans == letters && digits == 0);
+}
+
+// Read only enough text to compare the link with its containing paragraph.
+// A traversal that reaches the node or depth limit cannot establish a match.
+bool plainText(ldomNode *node, lString32 &value, int limit, int &visited, int depth = 0, bool replaceImages = false) {
+    engineActivity().checkpoint();
+    if (++visited > noteNodeLimit || depth > noteDepthLimit) {
+        visited = noteNodeLimit + 1;
+        return false;
+    }
+    if (node->isText()) {
+        const auto part = node->getText();
+        if (part.length() > limit - value.length()) {
+            return false;
+        }
+        value += part;
         return true;
+    }
+    if (replaceImages && (node->isNodeName("img") || node->isNodeName("svg"))) {
+        if (value.length() == limit) {
+            return false;
+        }
+        value += U"Z";
+        return true;
+    }
     for (int i = 0; i < node->getChildCount(); ++i) {
-        auto *child = node->getChildNode(i);
-        if (child->isElement() && endsNote(child))
+        if (!plainText(node->getChildNode(i), value, limit, visited, depth + 1, replaceImages)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool shiftedReference(ldomNode *source, ldomNode *block) {
+    auto *parent = source->getParentNode();
+    for (int i = 0; parent && i < 2; ++i, parent = parent->getParentNode()) {
+        if (parent->isNodeName("sup") || parent->isNodeName("sub")) {
             return true;
+        }
+    }
+    bool onlySupSub = false;
+    for (int i = 0; i < source->getChildCount(); ++i) {
+        auto *child = source->getChildNode(i);
+        if (child->isText() && child->getText().trim().empty()) {
+            continue;
+        }
+        if (!child->isNodeName("sup") && !child->isNodeName("sub")) {
+            onlySupSub = false;
+            break;
+        }
+        onlySupSub = true;
+    }
+    if (onlySupSub) {
+        return true;
+    }
+    ldomXPointerEx current(source, 0), end(source, 0);
+    end.lastInnerTextNode(true);
+    int visited = 0;
+    bool seen = false;
+    while (current.nextText() && current.compare(end) <= 0) {
+        engineActivity().checkpoint();
+        if (++visited > noteNodeLimit) {
+            return false;
+        }
+        if (current.getNode()->getText().trim().empty()) {
+            continue;
+        }
+        seen = true;
+        bool shifted = false;
+        int ancestors = 0;
+        for (auto *node = current.getNode()->getParentNode(); node; node = node->getParentNode()) {
+            engineActivity().checkpoint();
+            if (++ancestors > noteDepthLimit) {
+                return false;
+            }
+            const auto style = node->getStyle();
+            if (!style.isNull()) {
+                const auto alignment = style->vertical_align;
+                shifted = alignment.type == css_val_unspecified
+                              ? alignment.value != css_va_inherit && alignment.value != css_va_baseline
+                              : alignment.value != 0;
+                if (shifted) {
+                    break;
+                }
+            }
+            if (node == block) {
+                break;
+            }
+        }
+        if (!shifted) {
+            return false;
+        }
+    }
+    return seen;
+}
+
+bool chapterTarget(LVTocItem *root, ldomNode *target) {
+    auto *item = root;
+    int visited = 0;
+    while (item) {
+        engineActivity().checkpoint();
+        if (++visited > noteNodeLimit || item->getXPointer().getNode() == target) {
+            return true;
+        }
+        if (item->getChildCount()) {
+            item = item->getChild(0);
+            continue;
+        }
+        while (item && item != root && item->getIndex() + 1 == item->getParent()->getChildCount()) {
+            item = item->getParent();
+        }
+        if (!item || item == root) {
+            break;
+        }
+        item = item->getParent()->getChild(item->getIndex() + 1);
     }
     return false;
 }
+
+bool inferredNote(ldomNode *source, ldomNode *target, LVTocItem *toc) {
+    const ldomXPointerEx reference(source, 0), destination(target, 0);
+    if (target->isNodeName("DocFragment") || target->isNodeName("body") || target->isNodeName("html") ||
+        reference.compare(destination) > 0) {
+        return false;
+    }
+    lString32 label, paragraph;
+    int visited = 0;
+    if (!plainText(source, label, inferredNoteTextLimit, visited)) {
+        return false;
+    }
+    const bool hasText = !text(label).trimmed().isEmpty();
+    if (!hasText) {
+        // Some books use an image for a reference. It supplies content for
+        // the paragraph check, but needs superscript/subscript evidence.
+        label.clear();
+        visited = 0;
+        if (!plainText(source, label, inferredNoteTextLimit, visited, 0, true) || text(label).trimmed().isEmpty()) {
+            return false;
+        }
+    }
+    auto *block = reference.getFinalNode();
+    if (block) {
+        visited = 0;
+        const bool complete = plainText(block, paragraph, label.length(), visited);
+        if (visited > noteNodeLimit || (complete && paragraph == label)) {
+            return false;
+        }
+    }
+    // Most internal links are words or chapter titles. Check the reference
+    // first so those links need no TOC or target-subtree scan.
+    if ((!(hasText && noteMarker(label)) && !shiftedReference(source, block)) || chapterTarget(toc, target)) {
+        return false;
+    }
+    int ancestors = 0;
+    for (auto *parent = target; parent; parent = parent->getParentNode()) {
+        engineActivity().checkpoint();
+        if (++ancestors > noteDepthLimit) {
+            return false;
+        }
+        if (heading(parent)) {
+            return false;
+        }
+    }
+    ldomXPointerEx current(target, 0), end(target, 0);
+    end.lastInnerNode();
+    visited = 0;
+    do {
+        engineActivity().checkpoint();
+        if (++visited > noteNodeLimit || heading(current.getNode())) {
+            return false;
+        }
+    } while (current.nextElement() && current.compare(end) <= 0);
+    return true;
+}
+
+bool pageBreak(css_page_break_t value) {
+    return value == css_pb_always || value == css_pb_left || value == css_pb_right;
+}
+
+// A block that starts another note or a new section.
+bool endsNote(ldomNode *node, int &visited, int depth = 0, bool descendants = true) {
+    engineActivity().checkpoint();
+    if (++visited > noteNodeLimit || depth > noteDepthLimit) {
+        visited = noteNodeLimit + 1;
+        return true;
+    }
+    const auto tag = text(node->getNodeName()).toLower();
+    if (tag == "section" || tag == "aside" || tag == "hr" ||
+        (tag.size() == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6') ||
+        !node->getAttributeValue("id").empty() || (node->isNodeName("a") && !node->getAttributeValue("name").empty()) ||
+        noteElement(node)) {
+        return true;
+    }
+    const auto style = node->getStyle();
+    if (!style.isNull() && pageBreak(style->page_break_before)) {
+        return true;
+    }
+    for (int i = 0; descendants && i < node->getChildCount(); ++i) {
+        auto *child = node->getChildNode(i);
+        if (child->isElement() && endsNote(child, visited, depth + 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QVector<ldomNode *> noteParts(ldomNode *target, bool contained) {
+    auto *note = target;
+    if (!contained) {
+        auto *block = ldomXPointerEx(target, 0).getFinalNode();
+        if (block) {
+            note = block;
+        }
+    }
+    QVector<ldomNode *> parts;
+    if (!note->isNodeName("body") && !note->isNodeName("DocFragment") && !note->isNodeName("html")) {
+        parts.append(note);
+    }
+    if (contained || (note->getChildCount() && !ldomXPointerEx(note, 0).isFinalNode())) {
+        return parts;
+    }
+    ldomXPointerEx current(note, 0);
+    const auto style = note->getStyle();
+    if ((!style.isNull() && pageBreak(style->page_break_after)) || !current.nextOuterElement()) {
+        return parts;
+    }
+    int visited = 0;
+    ldomXPointerEx stop;
+    do {
+        engineActivity().checkpoint();
+        auto *node = current.getNode();
+        if (++visited > noteNodeLimit) {
+            return {};
+        }
+        if ((!stop.isNull() && current.compare(stop) >= 0) || node->isNodeName("DocFragment") ||
+            node->isNodeName("body")) {
+            break;
+        }
+        // Inspect a block before adding it, so an ID inside it starts the next
+        // note. Plain wrappers can contain further paragraphs of this note.
+        if (endsNote(node, visited, 0, current.isFinalNode())) {
+            if (visited > noteNodeLimit) {
+                return {};
+            }
+            break;
+        }
+        if (current.isFinalNode()) {
+            parts.append(node);
+            const auto nextStyle = node->getStyle();
+            if ((!nextStyle.isNull() && pageBreak(nextStyle->page_break_after)) || !current.nextOuterElement()) {
+                break;
+            }
+        } else {
+            const auto wrapperStyle = node->getStyle();
+            if (!wrapperStyle.isNull() && pageBreak(wrapperStyle->page_break_after)) {
+                auto after = current;
+                if (after.nextOuterElement() && (stop.isNull() || after.compare(stop) < 0)) {
+                    stop = after;
+                }
+            }
+            if (!current.nextElement()) {
+                break;
+            }
+        }
+    } while (true);
+    return parts;
+}
+
+struct NoteBudget {
+    int nodes = 0, characters = 0;
+    int textLimit = noteHtmlLimit;
+    bool hasText = false;
+};
+
 // Copy note text and basic structure only. Publisher styles, scripts and
 // resources must not reach the popup's QTextDocument or start external I/O.
-bool noteHtml(ldomNode *node, QString &html, int &nodes, int depth = 0) {
-    constexpr int textLimit = 128 * 1024;
+bool noteHtml(ldomNode *node, QString &html, NoteBudget &budget, int depth = 0) {
     engineActivity().checkpoint();
-    if (!node || ++nodes > 8192 || depth > 64 || html.size() > textLimit)
+    if (!node || ++budget.nodes > noteNodeLimit || depth > noteDepthLimit || html.size() > noteHtmlLimit) {
         return false;
+    }
     if (node->isText()) {
         const auto value = node->getText();
-        if (value.length() > textLimit)
+        if (value.length() > budget.textLimit - budget.characters) {
             return false;
+        }
+        budget.characters += value.length();
+        budget.hasText |= !text(value).trimmed().isEmpty();
         html += text(value).toHtmlEscaped();
-        return html.size() <= textLimit;
+        return html.size() <= noteHtmlLimit;
     }
     const auto tag = text(node->getNodeName()).toLower();
     if (tag == "script" || tag == "style" || tag == "head")
@@ -98,7 +420,7 @@ bool noteHtml(ldomNode *node, QString &html, int &nodes, int depth = 0) {
     if (tag == "img" || tag == "svg") {
         const auto alt = text(node->getAttributeValue("alt")).left(1024);
         html += "[" + (alt.isEmpty() ? strings::get("common.image").toHtmlEscaped() : alt.toHtmlEscaped()) + "]";
-        return html.size() <= textLimit;
+        return html.size() <= noteHtmlLimit;
     }
     static const QSet<QString> allowed{"p",          "div",   "span", "b",     "strong", "i",  "em", "u",
                                        "s",          "sub",   "sup",  "br",    "hr",     "ul", "ol", "li",
@@ -112,11 +434,11 @@ bool noteHtml(ldomNode *node, QString &html, int &nodes, int depth = 0) {
     if (!output.isEmpty())
         html += "<" + output + ">";
     for (int i = 0; i < node->getChildCount(); ++i)
-        if (!noteHtml(node->getChildNode(i), html, nodes, depth + 1))
+        if (!noteHtml(node->getChildNode(i), html, budget, depth + 1))
             return false;
     if (!output.isEmpty() && output != "br" && output != "hr")
         html += "</" + output + ">";
-    return html.size() <= textLimit;
+    return html.size() <= noteHtmlLimit;
 }
 }
 QVector<PageLink> ReaderModel::pageLinks() {
@@ -131,7 +453,7 @@ QVector<PageLink> ReaderModel::pageLinks() {
         ldomXPointer source;
         if (range->getHRef(source).empty() || source.isNull())
             continue;
-        const auto rectangles = rangeRects(text(range->getStart().toString()), text(range->getEnd().toString()));
+        const auto rectangles = rangeRects(text(range->getStart().toString()), text(range->getEnd().toString()), true);
         if (!rectangles.isEmpty())
             result.append({text(source.toString()), rectangles});
     }
@@ -164,14 +486,28 @@ LinkDetails ReaderModel::linkDetails(const QString &source) {
     if (!target)
         return result;
     auto *note = target;
-    bool isNote = token(node, "type", "noteref", true) || token(node, "role", "doc-noteref") ||
-                  token(node, "rel", "footnote") || token(node, "type", "note");
+    auto match = noteReference(node);
+    const auto targetStyle = target->getStyle();
+    if (match == NoteMatch::Unmarked && !targetStyle.isNull()) {
+        if (STYLE_HAS_CR_HINT(targetStyle, FOOTNOTE)) {
+            match = NoteMatch::Explicit;
+        } else if (STYLE_HAS_CR_HINT(targetStyle, FOOTNOTE_IGNORE)) {
+            match = NoteMatch::Passage;
+        }
+    }
     bool contained = false;
-    for (auto *parent = target; parent && text(parent->getNodeName()) != "DocFragment";
+    int ancestors = 0;
+    for (auto *parent = target; match != NoteMatch::Passage && parent && !parent->isNodeName("DocFragment");
          parent = parent->getParentNode()) {
-        if (noteElement(parent)) {
+        engineActivity().checkpoint();
+        if (++ancestors > noteDepthLimit) {
+            break;
+        }
+        const auto style = parent->getStyle();
+        if (noteElement(parent) || (!style.isNull() && STYLE_HAS_CR_HINT(style, FOOTNOTE))) {
             note = parent;
-            isNote = contained = true;
+            match = NoteMatch::Explicit;
+            contained = true;
             break;
         }
     }
@@ -180,45 +516,36 @@ LinkDetails ReaderModel::linkDetails(const QString &source) {
         result.target = text(destination.toString());
         result.chapter = chapterTitle(result.target);
     }
-    if (!isNote) {
-        if (!result.target.isEmpty()) {
-            result.kind = LinkKind::Passage;
-            result.error.clear();
-        }
+    if (!result.target.isEmpty()) {
+        result.kind = LinkKind::Passage;
+        result.error.clear();
+    }
+    const bool inferred = match == NoteMatch::Unmarked && inferredNote(node, target, engine_->getToc());
+    if (match != NoteMatch::Explicit && !inferred) {
         return result;
     }
-    // Older EPUB notes put the ID on an empty anchor inside a paragraph.
-    // Include that paragraph without pulling in the whole chapter of notes.
-    while (note && (text(note->getNodeName()) == "a" || text(note->getNodeName()) == "span"))
-        note = note->getParentNode();
+    const auto parts = noteParts(note, contained);
+    NoteBudget budget;
+    budget.textLimit = inferred ? inferredNoteTextLimit : noteHtmlLimit;
+    bool complete = true;
+    QString html;
+    for (auto *part : parts) {
+        complete = complete && noteHtml(part, html, budget);
+    }
+    if (inferred && (!complete || parts.isEmpty() || !budget.hasText)) {
+        return result;
+    }
     result.kind = LinkKind::Footnote;
     result.error.clear();
-    if (!note || text(note->getNodeName()) == "body" || text(note->getNodeName()) == "DocFragment" ||
-        text(note->getNodeName()) == "html") {
+    if (parts.isEmpty()) {
         result.error = strings::get("error.this_note_has_no_separate_preview");
-        return result;
-    }
-    // Without a note container, a note can continue in the blocks after the
-    // one that holds its ID. Take them up to the next ID or heading.
-    QVector<ldomNode *> parts{note};
-    auto *parent = note->getParentNode();
-    for (int i = note->getNodeIndex() + 1; !contained && parent && i < parent->getChildCount(); ++i) {
-        auto *next = parent->getChildNode(i);
-        if (!next->isElement())
-            continue;
-        if (endsNote(next))
-            break;
-        parts.append(next);
-    }
-    int visited = 0;
-    bool complete = true;
-    for (auto *part : parts)
-        complete = complete && noteHtml(part, result.html, visited);
-    if (!complete) {
-        result.html.clear();
+    } else if (!complete) {
         result.error = strings::get("error.this_note_is_too_long_to_preview");
-    } else if (result.html.trimmed().isEmpty())
+    } else if (html.trimmed().isEmpty()) {
         result.error = strings::get("error.this_note_has_no_text_to_preview");
+    } else {
+        result.html = html;
+    }
     return result;
 }
 }

@@ -5,7 +5,23 @@ namespace kobalt::test {
 namespace {
 class Bridge final : public ReadingBridge {
 public:
-    explicit Bridge(std::shared_ptr<HostProgress> progress) : progress(std::move(progress)) {}
+    explicit Bridge(std::shared_ptr<HostProgress> progress) : progress(std::move(progress)) {
+        this->progress->notifyEstimates = [this] {
+            if (estimatesChanged) {
+                estimatesChanged();
+            }
+        };
+    }
+    ~Bridge() override {
+        progress->notifyEstimates = {};
+    }
+    bool estimates(const ReadingActivity &, ReadingEstimates *result) override {
+        if (!progress->hasEstimates) {
+            return false;
+        }
+        *result = progress->remaining;
+        return true;
+    }
     bool deviceTransition() const override {
         return false;
     }

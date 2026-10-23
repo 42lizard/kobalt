@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/page_scrubber.h"
 #include "interfaces/reader/ui/controls/icons.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/theme.h"
@@ -139,7 +140,8 @@ public:
             require(storage::writeJson(paths.preferences(),
                                        {{"dark_mode", theme == "dark"},
                                         {"dense_stats_chart", group == "stats-dense"},
-                                        {"page_navigation", group == "light" ? "buttons_only" : "taps_and_swipes"}}),
+                                        {"page_navigation", group == "light" ? "buttons_only" : "taps_and_swipes"},
+                                        {"show_navigation_bar", group != "links-legacy"}}),
                     "Cannot write fixture preferences");
             if (group == "layout-saved-field") {
                 auto preferences = storage::readJson(paths.preferences());
@@ -798,8 +800,8 @@ public:
             tap("rrLinkOpen");
             capture("passage");
             menu();
-            capture("return-row", "rrNavLinkReturn");
-            tap("rrNavLinkReturn");
+            capture("return-row", "rrScrubberReturn");
+            tap("rrScrubberReturn");
             waitFor(
                 [&] {
                     return !host.session()->busy() && host.session()->page() == originPage &&
@@ -898,14 +900,62 @@ public:
             capture("disabled", "rrBottomNavigation");
             return;
         }
-        if (group == "reading") {
+        if (group == "reading" || group == "reading-long") {
             capture("reading");
             menu();
             capture("menu", "rrBottomNavigation");
+            const int original = host.session()->page();
+            auto *scrubber = dynamic_cast<ui::PageScrubber *>(widget("rrPageScrubber"));
+            require(scrubber, "Missing page scrubber");
+            scrubber->slider()->committed(original + 1);
+            waitFor(
+                [&] {
+                    return scrubber->previewsReady();
+                },
+                "Page preview did not render");
+            require(host.session()->page() == original, "Preview moved the reading position");
+            capture("page-preview", "rrPageScrubber");
+            scrubber->cancel();
+            if (visible("rrScrubberOverviewToggle")) {
+                tap("rrScrubberOverviewToggle");
+                capture("map-expanded", "rrPageScrubber");
+                tap("rrScrubberZoomIn");
+                require(visible("rrScrubberOverview"), "Missing zoom overview");
+                capture("zoomed", "rrPageScrubber");
+                scrubber->slider()->committed(original + 1);
+                waitFor(
+                    [&] {
+                        return scrubber->previewsReady();
+                    },
+                    "Zoomed page preview did not render");
+                capture("zoomed-preview", "rrPageScrubber");
+                scrubber->cancel();
+                int zoomSteps = 0;
+                while (widget("rrScrubberZoomIn")->isEnabled()) {
+                    tap("rrScrubberZoomIn");
+                    ++zoomSteps;
+                }
+                capture("maximum-zoom", "rrPageScrubber");
+                while (zoomSteps-- > 0) {
+                    tap("rrScrubberZoomOut");
+                }
+                tap("rrScrubberZoomOut");
+                tap("rrScrubberOverviewToggle");
+            } else {
+                capture("zoom-unavailable", "rrPageScrubber");
+            }
+            tap("rrNavigationNext");
+            waitFor(
+                [&] {
+                    return scrubber->previewsReady();
+                },
+                "Chapter preview did not render");
+            capture("chapter-preview", "rrPageScrubber");
+            scrubber->cancel();
             supplementalFonts();
             return;
         }
-        if (group == "links") {
+        if (group == "links" || group == "links-legacy" || group == "links-long") {
             host.session()->go(0);
             settled();
             QPoint target;
@@ -932,12 +982,15 @@ public:
                     settled();
                 }
             }
-            require(!target.isNull(), "No internal link found in Alice front matter");
+            require(!target.isNull(), "No internal link found in book front matter");
             const int contentsPage = host.session()->page();
+            const bool standalone = group == "links-legacy";
+            const char *returnControl = "rrScrubberReturn";
+            const char *linksControl = "rrScrubberLinks";
             capture("contents");
             menu();
-            capture("links-controls", "rrLinkDiscovery");
-            tap("rrRevealLinks");
+            capture("links-controls", linksControl);
+            tap(linksControl);
             capture("links-revealed", "rrLinkDiscoveryExit");
             pageTap();
             menu();
@@ -960,15 +1013,42 @@ public:
             tap("rrLinkGo");
             capture("destination");
             menu();
-            capture("return-row", "rrNavLinkReturn");
+            capture("return-row", returnControl);
             // Back on the contents page by page turns, both rows share the menu.
             pageTap();
             host.session()->go(contentsPage);
             settled();
             menu();
-            require(visible("rrLinkDiscovery"), "Links row missing beside the return row");
-            capture("links-with-return", "rrNavLinkReturn");
-            tap("rrNavLinkReturn");
+            require(visible(linksControl), "Links action missing beside the return action");
+            capture("links-with-return", returnControl);
+            if (!standalone) {
+                tap("rrNavigationNext");
+                auto *scrubber = dynamic_cast<ui::PageScrubber *>(widget("rrPageScrubber"));
+                waitFor(
+                    [&] {
+                        return scrubber->previewsReady();
+                    },
+                    "Stacked preview did not render");
+                capture("links-with-return-preview", "rrScrubberActions");
+                if (visible("rrScrubberOverviewToggle")) {
+                    tap("rrScrubberOverviewToggle");
+                    tap("rrScrubberZoomIn");
+                    waitFor(
+                        [&] {
+                            return scrubber->previewsReady();
+                        },
+                        "Zoomed action preview did not render");
+                    capture("links-with-return-zoomed-preview", "rrPageScrubber");
+                    scrubber->cancel();
+                    capture("links-with-return-zoomed", "rrPageScrubber");
+                    tap("rrScrubberZoomOut");
+                    scrubber->cancel();
+                } else {
+                    scrubber->cancel();
+                    capture("links-with-return-zoom-unavailable", "rrPageScrubber");
+                }
+            }
+            tap(returnControl);
             capture("returned");
             host.session()->go(0);
             settled();
@@ -991,6 +1071,12 @@ public:
             for (const auto &tab : {"Display", "Controls", "Advanced", "Stats", "System", "About"}) {
                 tap("rrSettings" + QString(tab));
                 capture(QString(tab).toLower(), "rrGeneralSettings");
+                if (QString(tab) == "Advanced") {
+                    auto *scroll = host.window()->findChild<QScrollArea *>("rrSettingsScroll");
+                    require(scroll, "Settings scroll area missing");
+                    scroll->ensureWidgetVisible(widget("rrAvoidWastefulStyling"));
+                    capture("advanced-content", "rrAvoidWastefulStyling");
+                }
             }
             tap("rrSettingsDictionaries");
             auto *dictionaries = dynamic_cast<reader::DictionariesPage *>(widget("rrDictionaries"));
@@ -1014,6 +1100,12 @@ public:
             capture("dictionaries-other", "rrDictionaries");
             dictionaryManagementFixture = false;
             tap("rrSettingsControls");
+            tap("rrNavigationBarButtons");
+            capture("navigation-bar-buttons", "rrNavigationBarPopup");
+            tap("rrNavigationBar_chapters");
+            capture("navigation-bar-chapters-selected", "rrNavigationBarButtons");
+            tap("rrNavigationBarButtons");
+            tap("rrNavigationBar_pages");
             tap("rrPageNavigation");
             capture("page-navigation", "rrPageNavigationPopup");
             tap("rrNavigation_swipes_only");

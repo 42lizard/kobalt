@@ -1,6 +1,7 @@
 #include "reader_inputs.h"
 #include "support/qt_compat.h"
 #include "engine/crengine/reader_model.h"
+#include <QBuffer>
 #include <QFile>
 #include <QGuiApplication>
 #include <QMap>
@@ -67,6 +68,230 @@ void linkDecoration() {
                 "Partially wrapped link lost the underline on its ordinary text");
     }
 }
+
+struct NoteCase {
+    const char *name;
+    QByteArray reference, target;
+    kobalt::LinkKind kind = kobalt::LinkKind::Footnote;
+    QByteArray css = {}, toc = {}, before = {};
+    QString included = {}, excluded = {};
+};
+
+kobalt::LinkDetails inspectNote(const NoteCase &test, bool dark) {
+    static const QByteArray pixel = [] {
+        QImage image(12, 12, QImage::Format_RGB32);
+        image.fill(Qt::black);
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        require(buffer.open(QIODevice::WriteOnly) && image.save(&buffer, "PNG"), "Cannot encode reference image");
+        return bytes;
+    }();
+    const QMap<QString, QByteArray> files{
+        {"mimetype", "application/epub+zip"},
+        {"pixel.png", pixel},
+        {"META-INF/container.xml",
+         "<container xmlns='urn:oasis:names:tc:opendocument:xmlns:container' version='1.0'><rootfiles><rootfile full-path='book.opf' media-type='application/oebps-package+xml'/></rootfiles></container>"},
+        {"book.opf",
+         "<package xmlns='http://www.idpf.org/2007/opf' version='3.0'><metadata><title>Note matching</title></metadata><manifest><item id='c' href='c.xhtml' media-type='application/xhtml+xml'/><item id='nav' href='nav.xhtml' media-type='application/xhtml+xml' properties='nav'/><item id='pixel' href='pixel.png' media-type='image/png'/></manifest><spine><itemref idref='c'/></spine></package>"},
+        {"nav.xhtml",
+         "<html xmlns='http://www.w3.org/1999/xhtml' xmlns:epub='http://www.idpf.org/2007/ops'><body><nav epub:type='toc'><ol><li><a href='c.xhtml'>Chapter</a></li>" +
+             test.toc + "</ol></nav></body></html>"},
+        {"c.xhtml",
+         "<html xmlns='http://www.w3.org/1999/xhtml' xmlns:epub='http://www.idpf.org/2007/ops' xmlns:ops='http://www.idpf.org/2007/ops'><head><style>p{margin:0;text-indent:0}" +
+             test.css + "</style></head><body>" + test.before + test.reference + test.target + "</body></html>"}};
+    QMap<QString, qint64> sizes;
+    for (auto it = files.cbegin(); it != files.cend(); ++it) {
+        sizes[it.key()] = it.value().size();
+    }
+    auto resources = std::make_shared<kobalt::ResourceCache>(
+        files.keys(),
+        [files](const QString &name, const kobalt::ResourceCache::Sink &sink, QString *) {
+            const auto bytes = files.value(name);
+            return sink(bytes.constData(), bytes.size());
+        },
+        std::make_shared<std::atomic_bool>(false));
+    kobalt::ReaderModel model(kobalt::test::readerFonts());
+    QString error;
+    require(model.openResources(resources, sizes, QSize(1072, 1300),
+                                kobalt::qt::object({{"font_pixels", 24}, {"dark_mode", dark}}), &error),
+            qPrintable(QString(test.name) + ": " + error));
+    const auto origin = model.position();
+    const auto links = model.pageLinks();
+    require(links.size() == 1, qPrintable(QString(test.name) + ": expected one reference"));
+    const auto details = model.linkDetails(links.first().source);
+    require(model.position() == origin, "Note matching changed the reading position");
+    require(
+        details.kind == test.kind,
+        qPrintable(QString("%1: expected kind %2, got %3").arg(test.name).arg(int(test.kind)).arg(int(details.kind))));
+    if (test.kind == kobalt::LinkKind::Footnote) {
+        require(details.error.isEmpty() && !details.html.isEmpty(), qPrintable(QString(test.name) + ": no preview"));
+    }
+    if (!test.included.isEmpty()) {
+        require(details.html.contains(test.included), qPrintable(QString(test.name) + ": missing note continuation"));
+    }
+    if (!test.excluded.isEmpty()) {
+        require(!details.html.contains(test.excluded),
+                qPrintable(QString(test.name) + ": preview crossed its boundary"));
+    }
+    return details;
+}
+
+void noteMatching() {
+    using kobalt::LinkKind;
+    const auto reference = [](const QByteArray &label, const QByteArray &attributes = {}) {
+        return "<p>A passage with a reference <a " + attributes + " href='#note'>" + label + "</a>.</p>";
+    };
+    const QByteArray note = "<p id='note'>The note text.</p>";
+    const QVector<NoteCase> cases{
+        {"numeric reference", reference("[1]"), note},
+        {"three-digit reference", reference("999"), note},
+        {"letter reference", reference("a"), note},
+        {"letters and digits", reference("Ab12"), note},
+        {"roman reference", reference("MCMXIV"), note},
+        {"unicode numeric reference", reference("&#x661;"), note},
+        {"four-digit reference", reference("2026"), note, LinkKind::Passage},
+        {"long word", reference("notes"), note, LinkKind::Passage},
+        {"punctuation only", reference("*"), note, LinkKind::Passage},
+        {"superscript parent", "<p>A passage <sup><a href='#note'>annotation</a></sup>.</p>", note},
+        {"subscript grandparent", "<p>A passage <sub><span><a href='#note'>annotation</a></span></sub>.</p>", note},
+        {"superscript child", reference("<sup>annotation</sup>"), note},
+        {"superscript image", reference("<sup><img src='pixel.png' width='12' height='12'/></sup>"), note},
+        {"ordinary image", reference("<img src='pixel.png' width='12' height='12'/>"), note, LinkKind::Passage},
+        {"vertical alignment", reference("annotation", "style='vertical-align:super'"), note},
+        {"mixed vertical alignment", reference("<sup>annotation</sup> text"), note, LinkKind::Passage},
+        {"paragraph link", "<p><a href='#note'>1</a></p>", note, LinkKind::Passage},
+        {"heading target", reference("1"), "<h2 id='note'>Chapter two</h2>", LinkKind::Passage},
+        {"target inside heading", reference("1"), "<h2><span id='note'>Chapter two</span></h2>", LinkKind::Passage},
+        {"target contains heading", reference("1"), "<div id='note'><h2>Chapter two</h2><p>Text.</p></div>",
+         LinkKind::Passage},
+        {"toc target",
+         reference("1"),
+         note,
+         LinkKind::Passage,
+         {},
+         "<li><a href='c.xhtml#note'>A nested chapter</a></li>"},
+        {"nested toc target",
+         reference("1"),
+         note,
+         LinkKind::Passage,
+         {},
+         "<li><a href='c.xhtml'>Part</a><ol><li><a href='c.xhtml#note'>Chapter</a></li></ol></li>"},
+        {"file link", "<p>A passage <a href='c.xhtml'>1</a>.</p>", note, LinkKind::Passage},
+        {"backlink", reference("1"), {}, LinkKind::Passage, {}, {}, note},
+        {"explicit backward note",
+         reference("annotation", "epub:type='noteref'"),
+         {},
+         LinkKind::Footnote,
+         {},
+         {},
+         note},
+        {"generic note", reference("annotation"), "<aside id='note' epub:type='note'><p>The note text.</p></aside>"},
+        {"rear note", reference("annotation"), "<aside id='note' epub:type='rearnote'><p>The note text.</p></aside>"},
+        {"endnote", reference("annotation"), "<aside id='note' epub:type='endnote'><p>The note text.</p></aside>"},
+        {"generic note role", reference("annotation"),
+         "<aside id='note' role='doc-note'><p>The note text.</p></aside>"},
+        {"rear note role", reference("annotation"),
+         "<aside id='note' role='doc-rearnote'><p>The note text.</p></aside>"},
+        {"endnote role", reference("annotation"), "<aside id='note' role='doc-endnote'><p>The note text.</p></aside>"},
+        {"alternate namespace", reference("annotation"),
+         "<aside id='note' ops:type='sidebar ENDNOTE'><p>The note text.</p></aside>"},
+        {"ancestor container",
+         reference("annotation"),
+         "<aside epub:type='endnote'><p id='note'>The note text.</p><p>Continuation.</p></aside>",
+         LinkKind::Footnote,
+         {},
+         {},
+         {},
+         "Continuation."},
+        {"explicit passage", reference("1", "epub:type='link'"),
+         "<aside id='note' epub:type='footnote'><p>Text.</p></aside>", LinkKind::Passage},
+        {"explicit passage role", reference("1", "role='doc-link'"), note, LinkKind::Passage},
+        {"source css hint", reference("annotation", "style='-cr-hint:noteref'"), note},
+        {"source css exclusion", reference("1", "epub:type='noteref' style='-cr-hint:noteref-ignore'"), note,
+         LinkKind::Passage},
+        {"target css hint", reference("annotation"), "<div id='note' style='-cr-hint:footnote'><p>Text.</p></div>"},
+        {"target css exclusion", reference("1"),
+         "<p id='note' epub:type='footnote' style='-cr-hint:footnote-ignore'>Text.</p>", LinkKind::Passage},
+        {"source hint precedence", reference("annotation", "style='-cr-hint:noteref'"),
+         "<p id='note' style='-cr-hint:footnote-ignore'>Text.</p>"},
+        {"long inferred note", reference("1"), "<p id='note'>" + QByteArray(10001, 'x') + "</p>", LinkKind::Passage},
+        {"inferred text limit", reference("1"), "<p id='note'>" + QByteArray(10000, 'x') + "</p>"},
+        {"whitespace target", reference("1"), "<p id='note'>&#160;</p><p id='next'>Another note.</p>",
+         LinkKind::Passage},
+        {"inferred node limit", reference("1"), "<p id='note'>" + QByteArray("<span>x</span>").repeated(4096) + "</p>",
+         LinkKind::Passage},
+        {"long explicit note", reference("annotation", "epub:type='noteref'"),
+         "<p id='note'>" + QByteArray(10001, 'x') + "</p>"},
+        {"inferred continuation",
+         reference("1"),
+         note + "<div><p>Continuation.</p></div><p id='next'>Another note.</p>",
+         LinkKind::Footnote,
+         {},
+         {},
+         {},
+         "Continuation.",
+         "Another note."},
+        {"wrapped note boundary",
+         reference("1"),
+         note + "<div><p>Continuation.</p><p id='next'>Another note.</p></div>",
+         LinkKind::Footnote,
+         {},
+         {},
+         {},
+         "Continuation.",
+         "Another note."},
+        {"legacy name boundary",
+         reference("1"),
+         note + "<p>Continuation.</p><p><a name='next'></a>Another note.</p>",
+         LinkKind::Footnote,
+         {},
+         {},
+         {},
+         "Continuation.",
+         "Another note."},
+        {"page break before",
+         reference("1"),
+         note + "<p style='page-break-before:always'>Another note.</p>",
+         LinkKind::Footnote,
+         {},
+         {},
+         {},
+         "The note text.",
+         "Another note."},
+        {"page break after",
+         reference("1"),
+         "<p id='note' style='page-break-after:always'>The note text.</p><p>Another note.</p>",
+         LinkKind::Footnote,
+         {},
+         {},
+         {},
+         "The note text.",
+         "Another note."},
+        {"wrapper page break after",
+         reference("1"),
+         note + "<div style='page-break-after:always'><p>Continuation.</p></div><p>Another note.</p>",
+         LinkKind::Footnote,
+         {},
+         {},
+         {},
+         "Continuation.",
+         "Another note."},
+        {"empty anchor before note",
+         reference("1"),
+         "<a id='note'></a><p>The note text.</p><p id='next'>Another note.</p>",
+         LinkKind::Footnote,
+         {},
+         {},
+         {},
+         "The note text.",
+         "Another note."},
+    };
+    for (const bool dark : {false, true}) {
+        for (const auto &test : cases) {
+            inspectNote(test, dark);
+        }
+    }
+}
 }
 
 int main(int argc, char **argv) {
@@ -79,6 +304,7 @@ int main(int argc, char **argv) {
     require(model.open(file.readAll(), QSize(1072, 1300), kobalt::qt::object({{"font_pixels", 32}}), &error),
             qPrintable(error));
     linkDecoration();
+    noteMatching();
     const auto origin = model.position();
     for (const bool dark : {false, true}) {
         model.setDarkMode(dark);

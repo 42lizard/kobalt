@@ -24,8 +24,15 @@ ReadingBook::ReadingBook(std::unique_ptr<ReaderSession> session, QString statePa
     // isValid() is not reliable until the timer is invalidated or started.
     progressPoll.invalidate();
     activeReading.invalidate();
+    speedSaved.invalidate();
+    if (!this->bridge) {
+        speed = std::make_unique<ReadingSpeed>();
+        speed->restore(storage::readJson(paths_.readingSpeed()));
+    }
 }
-ReadingBook::~ReadingBook() = default;
+ReadingBook::~ReadingBook() {
+    saveSpeed(true);
+}
 bool ReadingBook::deviceTransition() const {
     return bridge && bridge->deviceTransition();
 }
@@ -37,10 +44,13 @@ void ReadingBook::releaseNative() {
     bridge.reset();
     released = true;
 }
-void ReadingBook::observeReading() {
+void ReadingBook::observeReading(bool learnPace) {
     if (released || (bridge && !bridge->writable())) {
         stopReading();
         return;
+    }
+    if (model->renderProgress().active) {
+        pauseLocalPace();
     }
     if (model->busy())
         return;
@@ -50,6 +60,13 @@ void ReadingBook::observeReading() {
     }
     if (!activeReading.isValid())
         activeReading.start();
+    if (speed) {
+        if (learnPace) {
+            speed->observe(readingActivity(), readingMilliseconds());
+        } else {
+            speed->pause();
+        }
+    }
     if (bridge)
         bridge->observeReading(readingActivity());
 }
@@ -64,6 +81,9 @@ ReadingActivity ReadingBook::readingActivity() const {
             model->graphSelection()};
 }
 ReadingEstimates ReadingBook::estimates() const {
+    if (speed) {
+        return speed->estimates(readingActivity());
+    }
     if (bridge && !released && bridge->writable()) {
         ReadingEstimates result;
         if (bridge->estimates(readingActivity(), &result))
@@ -81,6 +101,21 @@ void ReadingBook::stopReading() {
     }
     if (bridge)
         bridge->stopReading();
+    if (speed) {
+        speed->pause();
+        saveSpeed(true);
+    }
+}
+void ReadingBook::saveSpeed(bool force) {
+    if (!speed || !speed->dirty() || (!force && speedSaved.isValid() && speedSaved.elapsed() < 60000)) {
+        return;
+    }
+    speedSaved.start();
+    if (storage::writeJson(paths_.readingSpeed(), speed->state())) {
+        speed->saved();
+    } else {
+        diagnostic("reading-speed-unsaved", {}, false);
+    }
 }
 qint64 ReadingBook::readingMilliseconds() const {
     return completedReadingMilliseconds + (activeReading.isValid() ? activeReading.elapsed() : 0);
@@ -193,6 +228,7 @@ bool ReadingBook::saveLayoutPreferences(const QJsonObject &preferences) {
     return false;
 }
 bool ReadingBook::checkpoint(QJsonObject *snapshot) {
+    saveSpeed();
     auto state = model->state();
     state["book"] = identity_;
     state["fingerprint"] = QString::fromLatin1(digest);

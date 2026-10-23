@@ -179,6 +179,9 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
         refresh();
     };
     this->model->renderProgressChanged = [this] {
+        if (model->renderProgress().active) {
+            book->pauseLocalPace();
+        }
         refreshRenderNotice();
     };
     this->model->turnBoundary = [this](int direction) {
@@ -288,6 +291,24 @@ void Reader::buildReadingPage() {
 }
 
 void Reader::startClockTimer() {
+    book->onEstimatesChanged([this] {
+        // A pending page already picks up the new pace in its normal paint.
+        if (closing || lifecycleHidden || model->busy() || turnPainted || !isVisible() || services.suspended()) {
+            return;
+        }
+        if (chapterGraph->isVisible()) {
+            updateReadingStats();
+        }
+        if (!chromeTicks() || topControls->isVisible() || general->isVisible() || dictionaryPanel->isVisible() ||
+            searchPanel->isVisible() || linksActive()) {
+            return;
+        }
+        const auto before = page->slotContents;
+        showChapterText();
+        if (page->slotContents != before) {
+            page->refreshContent(true);
+        }
+    });
     // The clock and menu status change once a minute. Wake just after each
     // change instead of every second.
     clockTimer = new QTimer(this);
@@ -449,34 +470,43 @@ void Reader::buildBottomControls() {
     bottom->setContentsMargins(m::panel::footerMargins);
     bottom->setSpacing(m::panel::footerGap);
     bottom->addWidget(linkReturn, 0, Qt::AlignLeft);
-    progressLabel = new QLabel(bottomControls);
-    progressLabel->setObjectName("rrControlsProgress");
-    readerStyle(progressLabel, styles::font(m::text::secondary));
-    progressLabel->setAlignment(Qt::AlignCenter);
-    bottom->addWidget(progressLabel);
-    auto *pageNavigationRow = new QHBoxLayout;
-    pageNavigationRow->setSpacing(m::panel::footerGap);
-    bottom->addLayout(pageNavigationRow);
-    previousPage = iconButton(bottomControls, pageNavigationRow, "rrPreviousPage", strings::get("common.previous_page"),
-                              ControlIcon::Previous, [this] {
-                                  turnPage(-1);
-                              });
-    bookSlider = new SettingSlider(bottomControls, 0, 0);
-    bookSlider->setObjectName("rrBookPosition");
-    bookSlider->setAccessibleName(strings::get("reader.book_position"));
-    pageNavigationRow->addWidget(bookSlider, 1);
-    connect(bookSlider, &QSlider::valueChanged, this, [this](int value) {
-        progressLabel->setText(strings::get("reader.menu_page_of").arg(value + 1).arg(this->model->pages()));
-    });
-    bookSlider->committed = [this](int value) {
-        if (!this->model->busy())
-            this->model->go(value);
+    pageScrubber = new kobalt::ui::PageScrubber(this);
+    bookSlider = pageScrubber->slider();
+    pageScrubber->linksRequested = [this] {
+        showRevealedLinks();
+    };
+    pageScrubber->returnRequested = [this] {
+        linkReturn->click();
+    };
+    pageScrubber->stayRequested = [this] {
+        if (navigation && navigation->stayRequested) {
+            navigation->stayRequested();
+        }
+    };
+    pageScrubber->previewRequested = [this](int target, QSize bounds) {
+        if (closing || lifecycleHidden || services.suspended())
+            return;
+        QPointer<kobalt::ui::PageScrubber> scrubber(pageScrubber);
+        model->previewPage(target, bounds, [scrubber, target](QImage image) {
+            if (scrubber)
+                scrubber->setPreview(target, std::move(image));
+        });
+    };
+    pageScrubber->cancelled = [this] {
+        model->cancelPagePreview();
+    };
+    pageScrubber->accepted = [this](int target) {
+        if (model->busy() || closing || lifecycleHidden || services.suspended())
+            return;
+        const LinkVisit origin{model->state().value("position").toString(), model->page(),
+                               model->chapterTitle().toUpper()};
+        if (!model->go(target))
+            return;
+        pendingPassage = origin;
+        flashAfterPagePreview = true;
+        pageScrubber->cancel();
         refresh();
     };
-    nextPage = iconButton(bottomControls, pageNavigationRow, "rrNextPage", strings::get("common.next_page"),
-                          ControlIcon::Next, [this] {
-                              turnPage(1);
-                          });
     auto *footer = new QHBoxLayout;
     bottom->addLayout(footer);
     auto *chapters = new kobalt::ui::ElidingButton(strings::get("reader.contents"), bottomControls);
@@ -857,6 +887,7 @@ void Reader::buildSettings() {
     general = settings;
     settings->showDictionaries(services.downloadableDictionaries &&
                                !(services.devicePreview && services.devicePreview()));
+    settings->showNativeUi(services.desktopUi && !(services.devicePreview && services.devicePreview()));
     if (services.downloadableDictionaries) {
         auto *manager = static_cast<kobalt::DictionaryManager *>(dictionary.get());
         auto *dictionarySettings = settings->dictionaries;
@@ -920,9 +951,12 @@ void Reader::buildSettings() {
     sleepScreenButton = settings->sleepScreenButton;
     pageNavigationButton = settings->pageNavigationButton;
     tapZonesButton = settings->tapZonesButton;
+    navigationBarButton = settings->navigationBarButton;
+    navigationBarOption = settings->navigationBarOption;
     automaticOpeningOption = settings->automaticOpeningOption;
     linkIndicatorOption = settings->linkIndicatorOption;
     hideNonlinearOption = settings->hideNonlinearOption;
+    avoidWastefulStylingOption = settings->avoidWastefulStylingOption;
     bionicOption = settings->bionicOption;
     refreshButton = settings->refreshButton;
     resetDefaults = settings->resetDefaults;
@@ -938,6 +972,9 @@ void Reader::buildSettings() {
     });
     connect(tapZonesButton, &QPushButton::clicked, this, [this] {
         openTapZones();
+    });
+    connect(navigationBarButton, &QPushButton::clicked, this, [this] {
+        openNavigationBarButtons();
     });
     connect(pageNavigationButton, &QPushButton::clicked, this, [this] {
         openPageNavigation();

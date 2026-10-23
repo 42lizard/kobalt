@@ -1,6 +1,7 @@
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/icons.h"
 #include "interfaces/reader/ui/controls/panels.h"
+#include "interfaces/reader/ui/controls/page_scrubber.h"
 #include "interfaces/reader/ui/style/theme.h"
 #include "navigation.h"
 #include "interfaces/reader/ui/controls/text.h"
@@ -37,7 +38,7 @@ protected:
         if (property("formatting_warning").toBool()) {
             painter.fillRect(width() - 3 * c::cellWidth - border, status, border, height() - status, ink);
         }
-        painter.fillRect(0, height() - toolbarBorder, width(), toolbarBorder, palette().color(QPalette::WindowText));
+        ui::paintEdges(painter, rect(), Qt::BottomEdge, palette().color(QPalette::WindowText), toolbarBorder);
     }
 };
 class ReadingRule final : public QWidget {
@@ -51,7 +52,7 @@ public:
 protected:
     void paintEvent(QPaintEvent *) override {
         QPainter painter(this);
-        painter.fillRect(rect(), palette().color(QPalette::WindowText));
+        ui::paintEdges(painter, rect(), Qt::TopEdge, palette().color(QPalette::WindowText), height());
     }
 };
 class Tab final : public ui::Button {
@@ -173,7 +174,7 @@ void BottomNavigation::paintEvent(QPaintEvent *event) {
     ui::Panel::paintEvent(event);
     QPainter painter(this);
     if (!panelOpen) {
-        painter.fillRect(0, 0, width(), toolbarBorder, palette().color(QPalette::WindowText));
+        ui::paintEdges(painter, rect(), Qt::TopEdge, palette().color(QPalette::WindowText), toolbarBorder);
         return;
     }
     // An open panel draws the rule above the bar and leaves this band empty.
@@ -349,10 +350,20 @@ void Navigation::update(QSize size, const NavigationState &state) {
     pageCount->show();
     for (auto *action : state.topActions)
         action->hide();
-    bar->setReturnLabel(state.returnLabel, state.returnNote);
+    const bool scrubberShown = scrubber && (state.scrubberVisible || scrubber->hasActions()) && state.visible &&
+                               state.active < 0 && !state.chaptersOpen && !state.settings->isVisible() &&
+                               !state.appearance->isVisible() && !state.stats->isVisible() && !state.light->isVisible();
+    bar->setReturnLabel(scrubber ? QString() : state.returnLabel, state.returnNote);
     const int height = bar->navigationHeight();
     bar->setGeometry(0, size.height() - height, size.width(), height);
     bar->setVisible(state.visible);
+    if (scrubber) {
+        scrubber->setBarVisible(state.scrubberVisible);
+        scrubber->setGeometry(0, toolbarHeight(), size.width(), qMax(1, bar->y() - toolbarHeight()));
+        scrubber->setVisible(scrubberShown);
+        if (scrubberShown)
+            scrubber->stackUnder(upperEdge);
+    }
     if (!state.visible) {
         upperEdge->hide();
         lowerEdge->hide();
@@ -374,11 +385,13 @@ void Navigation::update(QSize size, const NavigationState &state) {
     for (auto *panel : {state.appearance, state.stats, state.light})
         if (panel->isVisible())
             bottom = qMin(bottom, panel->y());
-    bar->setPanelOpen(bottom < bar->y());
+    const bool attachedScrubber = scrubberShown && state.scrubberVisible;
+    bar->setPanelOpen(bottom < bar->y() || attachedScrubber);
     if (!state.chaptersOpen) {
         upperEdge->setGeometry(0, top - ui::px(2), size.width(), ui::px(2));
         upperEdge->show();
-        lowerEdge->setGeometry(0, bottom, size.width(), toolbarBorder);
+        lowerEdge->setGeometry(0, bottom, size.width(),
+                               attachedScrubber ? int(ui::metrics::control::border) : int(toolbarBorder));
         lowerEdge->show();
     } else {
         upperEdge->hide();

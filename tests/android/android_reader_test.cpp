@@ -112,7 +112,8 @@ private slots:
             auto *detail = window->findChild<QLabel *>("rrGraphBookDetail");
             QVERIFY(detail);
             QTRY_VERIFY(detail->isVisible());
-            QCOMPARE(detail->text(), strings::get("stats.words").arg("40"));
+            QCOMPARE(detail->text(),
+                     strings::get("stats.time_left").arg(strings::get("stats.duration_minutes").arg(1)));
             QVERIFY(window->findChild<QWidget *>("rrChapterBars")->isVisible());
             reader->close();
             QTRY_VERIFY_WITH_TIMEOUT(reader->idle(), 15000);

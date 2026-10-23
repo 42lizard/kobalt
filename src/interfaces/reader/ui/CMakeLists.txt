@@ -15,6 +15,8 @@ add_library(reader-widgets STATIC
     controls/rows.cpp
     controls/options.cpp
     controls/sliders.cpp
+    controls/page_scrubber.cpp
+    controls/loading.cpp
     controls/paging.cpp
     controls/panels.cpp
     controls/paged_text.cpp

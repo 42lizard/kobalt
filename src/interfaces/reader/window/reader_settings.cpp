@@ -7,6 +7,7 @@
 #include "interfaces/reader/ui/style/private_text.h"
 #include "platform/api/kobo_refresh.h"
 #include "reading/appearance_settings.h"
+#include "reading/page_navigation.h"
 #include "support/diagnostics.h"
 #include "interfaces/reader/ui/style/metrics.h"
 #include "storage/reader_storage.h"
@@ -191,8 +192,10 @@ void Reader::closeFieldChooser() {
 }
 
 void Reader::refreshHostPresentation() {
-    static_cast<reader::SettingsPanel *>(general)->showDictionaries(
-        services.downloadableDictionaries && !(services.devicePreview && services.devicePreview()));
+    auto *settings = static_cast<reader::SettingsPanel *>(general);
+    const bool devicePreview = services.devicePreview && services.devicePreview();
+    settings->showDictionaries(services.downloadableDictionaries && !devicePreview);
+    settings->showNativeUi(services.desktopUi && !devicePreview);
     updateMenuStatus();
     resizeEvent(nullptr);
     refresh();
@@ -236,6 +239,7 @@ void Reader::openSettings() {
     darkOption->setChecked(model->state().value("dark_mode").toBool(false));
     inheritTextLayoutOption->setChecked(preferences.value(appearance::inheritTextLayoutKey).toBool(true));
     hideNonlinearOption->setChecked(model->state().value("hide_nonlinear_fragments").toBool(false));
+    avoidWastefulStylingOption->setChecked(model->state().value("avoid_wasteful_styling").toBool(true));
     animationOption->setChecked(preferences.value("page_animations").toBool(false));
     bionicOption->setChecked(model->state().value("bold_reading").toString("off") == "bold");
     linkIndicatorOption->setChecked(preferences.value("show_link_indicator").toBool(false));
@@ -246,6 +250,8 @@ void Reader::openSettings() {
     showSleepScreen();
     showPageNavigation();
     showTapZones();
+    navigationBarOption->setChecked(preferences.value(pageNavigation::barVisibleKey).toBool(true));
+    showNavigationBarButtons();
     if (services.automaticBookOpening)
         automaticOpeningOption->setChecked(services.automaticBookOpening());
     screenRefreshMode = kobalt::screenRefresh(preferences.value("screen_refresh").toString());
@@ -301,11 +307,13 @@ void Reader::applySettings() {
     next["dark_mode"] = darkOption->isChecked();
     next[appearance::inheritTextLayoutKey] = inheritTextLayoutOption->isChecked();
     next["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
+    next["avoid_wasteful_styling"] = avoidWastefulStylingOption->isChecked();
     next["page_animations"] = animationOption->isChecked();
     next["show_link_indicator"] = linkIndicatorOption->isChecked();
     next["edge_light_gestures"] = edgeLightOption->isChecked();
     next["dense_stats_chart"] = denseGraphOption->isChecked();
     next["pin_stats"] = pinStatsOption->isChecked();
+    next[pageNavigation::barVisibleKey] = navigationBarOption->isChecked();
     next[appearance::inheritHeaderFooterKey] = inheritHeaderFooterOption->isChecked();
     next["screen_refresh"] = kobalt::screenRefreshValue(screenRefreshMode);
     if (services.desktopUi) {
@@ -339,6 +347,7 @@ void Reader::applySettings() {
         appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview()->requestedState() : model->state();
     settings["dark_mode"] = darkOption->isChecked();
     settings["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
+    settings["avoid_wasteful_styling"] = avoidWastefulStylingOption->isChecked();
     settings["bold_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
     if (restoringDefaults) {
         const auto defaults = kobalt::appearance::typographyDefaults();

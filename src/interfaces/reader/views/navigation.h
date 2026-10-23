@@ -20,6 +20,7 @@ namespace ui {
 class Panel;
 class DescribedOption;
 class CaptionButton;
+class PageScrubber;
 }
 struct ToolbarComposition {
     ui::Panel *panel = nullptr;
@@ -41,6 +42,7 @@ struct NavigationState {
     // Stats stays open above the tabs whenever the controls are, and has no tab.
     bool statsPinned = false;
     QString returnNote;
+    bool scrubberVisible = true;
 };
 }
 
@@ -100,6 +102,9 @@ public:
     }
     QRect panelBounds(QSize size, int height) const;
     void stackPanel(QWidget *panel) const;
+    void setScrubber(ui::PageScrubber *widget) {
+        scrubber = widget;
+    }
     void update(QSize size, const NavigationState &state);
     int navigationTop() const {
         return bar->y();
@@ -110,6 +115,7 @@ public:
     bool contains(QPoint global) const;
 
 private:
+    ui::PageScrubber *scrubber = nullptr;
     bool statusVisible = true;
     BottomNavigation *bar;
     QLabel *pageCount;

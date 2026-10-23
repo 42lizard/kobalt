@@ -156,6 +156,9 @@ int main() {
     require(content(Field::BookTimeLeft, values, false).text ==
                 strings::get("header_footer.time_left").arg(strings::get("stats.duration_hours").arg(4).arg(5)),
             "Time left in book is wrong");
+    values.learningPace = true;
+    require(content(Field::BookTimeLeft, values, false).text.startsWith(QStringLiteral("≈ ")),
+            "A rough estimate was shown as a learned pace");
     values.deviceStatus = false;
     require(content(Field::Battery, values, false).empty(), "The battery showed on a host without device status");
     require(content(Field::Time, values, false).text == values.time, "The time hid with device status");

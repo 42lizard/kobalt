@@ -2,7 +2,7 @@
 import zipfile
 
 
-def book(path):
+def book(path, *, unmarked=False):
     references = [
         '<p>Read a <a id="short-ref" ops:type="noteref" href="Notes/foot%20notes.xhtml#short">short note</a>.</p>',
         '<p>Read a <a role="doc-noteref" href="Notes/foot%20notes.xhtml#long">long note</a>.</p>',
@@ -24,6 +24,9 @@ def book(path):
              '<p class="footnote"><a id="legacy"></a>A legacy note inside one paragraph.</p>'
              '<aside id="oversize" epub:type="footnote" style="display:none"><p>' + 'Long note text. ' * 10000 + '</p></aside>'
              '<aside id="hidden" epub:type="footnote" style="display:none"><p>A hidden note remains available in its popup.</p></aside>')
+    if unmarked:
+        references[0] = '<p>Read an unmarked reference <a id="short-ref" href="Notes/foot%20notes.xhtml#short">[1]</a>.</p>'
+        notes = notes.replace('<aside id="short" epub:type="footnote">', '<aside id="short">')
     pages = {"first.xhtml": ''.join(references), "second.xhtml": '<p id="destination">The destination passage. <a style="color:#cc3300" href="first.xhtml#short-ref">Return through a link</a>.</p>' + '<p>More destination text.</p>' * 40,
              "Notes/foot notes.xhtml": notes}
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:

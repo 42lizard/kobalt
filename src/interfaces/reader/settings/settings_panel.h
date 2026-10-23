@@ -38,6 +38,7 @@ public:
     void dismissRestore();
     void hideDeviceOptions(bool hidden);
     void showDictionaries(bool visible);
+    void showNativeUi(bool visible);
     int fitContent(QSize availableSize);
     ui::DescribedOption *hideStatusOption = nullptr, *hideDeviceOptionsOption = nullptr;
     QStackedWidget *settingsPages = nullptr;
@@ -45,10 +46,11 @@ public:
     ui::DescribedOption *darkOption = nullptr, *inheritTextLayoutOption = nullptr, *animationOption = nullptr;
     ui::DescribedOption *edgeLightOption = nullptr, *denseGraphOption = nullptr, *pinStatsOption = nullptr,
                         *inheritHeaderFooterOption = nullptr;
-    ui::DescribedOption *linkIndicatorOption = nullptr, *hideNonlinearOption = nullptr;
-    ui::DescribedOption *automaticOpeningOption = nullptr;
+    ui::DescribedOption *linkIndicatorOption = nullptr, *hideNonlinearOption = nullptr,
+                        *avoidWastefulStylingOption = nullptr;
+    ui::DescribedOption *automaticOpeningOption = nullptr, *navigationBarOption = nullptr;
     ui::CaptionButton *sleepScreenButton = nullptr;
-    ui::CaptionButton *pageNavigationButton = nullptr, *tapZonesButton = nullptr;
+    ui::CaptionButton *pageNavigationButton = nullptr, *tapZonesButton = nullptr, *navigationBarButton = nullptr;
     ui::DescribedOption *bionicOption = nullptr;
     ui::CaptionButton *refreshButton = nullptr, *resetDefaults = nullptr;
     QPushButton *keepDefaults = nullptr, *confirmDefaults = nullptr;

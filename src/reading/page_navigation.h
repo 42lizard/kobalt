@@ -4,6 +4,16 @@
 #include <QJsonObject>
 
 namespace kobalt::pageNavigation {
+enum class BarButtons { Pages, Chapters };
+inline constexpr BarButtons barButtonsModes[] = {BarButtons::Chapters, BarButtons::Pages};
+inline constexpr auto barButtonsKey = "navigation_bar_buttons";
+inline constexpr auto barVisibleKey = "show_navigation_bar";
+inline QString value(BarButtons mode) {
+    return mode == BarButtons::Chapters ? QStringLiteral("chapters") : QStringLiteral("pages");
+}
+inline BarButtons barButtons(const QJsonObject &preferences) {
+    return preferences.value(barButtonsKey) == value(BarButtons::Pages) ? BarButtons::Pages : BarButtons::Chapters;
+}
 enum class Mode { TapsAndSwipes, TapsOnly, SwipesOnly, ButtonsOnly };
 inline constexpr Mode modes[] = {Mode::TapsAndSwipes, Mode::TapsOnly, Mode::SwipesOnly, Mode::ButtonsOnly};
 inline constexpr auto preferenceKey = "page_navigation";
