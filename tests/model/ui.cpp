@@ -7,6 +7,7 @@
 #include "interfaces/reader/ui/controls/paging.h"
 #include "interfaces/reader/ui/controls/panels.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
+#include "interfaces/reader/ui/dialogs/action_menu.h"
 #include "interfaces/reader/ui/style/theme.h"
 #include "assets/assets.h"
 #include "assets/font_catalog.h"
@@ -781,12 +782,25 @@ int main(int argc, char **argv) {
                             }
                         }
                     require(ink > 20, "Action rendition has no visible ink");
-                    const int extent = qRound(128. *
+                    int extent = qRound(128. *
                                               int(glyph == ControlIcon::Close ? metrics::control::closeInkSize
                                                                               : metrics::control::actionInkSize) /
                                               int(metrics::control::iconCanvas));
+                    if (glyph == ControlIcon::Search || glyph == ControlIcon::Download) {
+                        // Regular Phosphor icons keep a shared scale rather than
+                        // stretching each silhouette to the same visible extent.
+                        const auto original = controlIcon(glyph).pixmap(256, 256).toImage();
+                        QRect originalBounds;
+                        for (int y = 0; y < original.height(); ++y)
+                            for (int x = 0; x < original.width(); ++x)
+                                if (qAlpha(original.pixel(x, y)) > 128)
+                                    originalBounds = originalBounds.united(QRect(x, y, 1, 1));
+                        extent = qRound(128. * int(metrics::control::actionInkSize) /
+                                        int(metrics::control::iconCanvas) *
+                                        qMax(originalBounds.width(), originalBounds.height()) / 224.);
+                    }
                     require(qAbs(qMax(bounds.width(), bounds.height()) - extent) <= 2,
-                            "Action icon does not fit its configured vector ink extent");
+                            "Action icon does not fit its configured vector scale");
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
                     const auto highDpi = action.icon().pixmap(QSize(38, 38), 2., QIcon::Normal, state);
                     QImage direct(76, 76, QImage::Format_ARGB32_Premultiplied);
@@ -3268,6 +3282,37 @@ int main(int argc, char **argv) {
         host.setPalette(colors);
         readerStyle(&host, styles::reader());
         host.show();
+        {
+            // An action menu: header parts are optional, and a choice closes the menu first.
+            QStringList calls;
+            QImage cover(60, 90, QImage::Format_RGB32);
+            cover.fill(Qt::darkBlue);
+            ActionMenu menu(&host, {cover, "A book", "An author", "42% · 1 MB"},
+                            {actionItem("Open", "open", ControlIcon::Dictionary,
+                                        [&calls] {
+                                            calls.append("open");
+                                        }),
+                             {"Without icon", "plain", false, ControlIcon::More, {}}});
+            menu.dismissed = [&calls] {
+                calls.append("dismissed");
+            };
+            menu.show();
+            app.processEvents();
+            require(menu.actions().size() == 2 && menu.action("open") && menu.action("plain") && !menu.action("x"),
+                    "Action menu rows are missing");
+            auto *header = menu.findChild<QWidget *>("rrActionMenuHeader");
+            require(header && header->accessibleName() == "A book An author 42% · 1 MB",
+                    "Action menu header is incomplete");
+            // The header is as tall as its thumbnail plus margins, without spare space.
+            const auto margins = QMargins(metrics::notice::cardMargins);
+            require(header->height() == margins.top() + metrics::actionMenu::thumbnailHeight + margins.bottom(),
+                    "Action menu header has spare height");
+            require(menu.action("open")->width() >= menu.card()->width() - 4, "Action menu rows do not span the card");
+            menu.action("open")->click();
+            require(calls == QStringList({"dismissed", "open"}), "Choosing an action did not close the menu first");
+            ActionMenu plain(&host, {}, {{"Only", "only", false, ControlIcon::More, {}}});
+            require(!plain.findChild<QWidget *>("rrActionMenuHeader"), "An empty header was shown");
+        }
         ChoiceModal choice(&host, {"A required description", "A title", {}}, {"Cancel", "cancel"},
                            {"Continue", "continue"});
         choice.card()->fitToWidth(760);

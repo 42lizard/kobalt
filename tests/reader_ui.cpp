@@ -1,8 +1,10 @@
 #include "support/paint_regions.h"
 #include "assets/bundled_fonts.h"
+#include "interfaces/library/library_view.h"
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/loading.h"
 #include "interfaces/reader/ui/controls/sliders.h"
+#include "interfaces/reader/ui/controls/rows.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/metrics.h"
@@ -22,12 +24,17 @@
 #include <QFontDatabase>
 #include <QLocale>
 #include <QDir>
+#include <QDialog>
+#include <QTimer>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
 #include <QSignalSpy>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QLabel>
 #include <QTest>
 
 using namespace kobalt;
@@ -308,6 +315,342 @@ private slots:
             const auto suffix = QString("-%1-%2.png").arg(dark ? "dark" : "light").arg(ppi);
             QVERIFY(enabled.save(captures + "/mode-on" + suffix));
             QVERIFY(disabled.save(captures + "/mode-off" + suffix));
+        }
+    }
+    void regularIconWeight_data() { variants(); }
+    void regularIconWeight() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        const auto bounds = [](const QImage &image) {
+            QRect result;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    if (qAlpha(image.pixel(x, y)) > 128)
+                        result = result.united(QRect(x, y, 1, 1));
+            return result;
+        };
+        for (qreal dpr : {1., 1.5, 2.}) {
+            qreal firstScale = 0;
+            for (auto glyph : {ui::ControlIcon::Search, ui::ControlIcon::Settings, ui::ControlIcon::Annotate,
+                               ui::ControlIcon::Bookmark, ui::ControlIcon::FolderPlus, ui::ControlIcon::Folders,
+                               ui::ControlIcon::Dictionary}) {
+                ui::Button button;
+                button.setProperty("reader_dark", dark);
+                button.setIconConfiguration({glyph, ui::IconRendition::Action});
+                const int side = 256;
+                ui::Button source;
+                source.setProperty("reader_dark", dark);
+                source.setIconConfiguration({glyph, ui::IconRendition::OriginalAsset});
+                const auto original = source.icon().pixmap(QSize(side, side), dpr).toImage();
+                const auto action = button.icon().pixmap(QSize(side, side), dpr).toImage();
+                ui::ListRow row(nullptr);
+                row.setProperty("reader_dark", dark);
+                row.setLeadingIcon(glyph);
+                QCOMPARE(row.icon().pixmap(QSize(side, side), dpr).toImage(), action);
+                const auto originalBounds = bounds(original), actionBounds = bounds(action);
+                QVERIFY(!originalBounds.isEmpty() && !actionBounds.isEmpty());
+                const qreal scale = qreal(qMax(actionBounds.width(), actionBounds.height())) /
+                                    qMax(originalBounds.width(), originalBounds.height());
+                if (firstScale == 0)
+                    firstScale = scale;
+                QVERIFY2(qAbs(scale - firstScale) < .015,
+                         "Regular icons were resized by different factors, changing their stroke weight");
+            }
+        }
+    }
+    void libraryFolderPicker_data() { variants(); }
+    void libraryFolderPicker() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        library::Index index;
+        auto *view = new library::LibraryView(index, {});
+        view->setDark(dark);
+        Canvas canvas(view, QSize(ui::px(1072), ui::px(1448)));
+        canvas.resize(view->size());
+        canvas.show();
+        QCoreApplication::processEvents();
+        for (const auto &name : {"libraryChooseFolder", "libraryOpenBook", "libraryFoldersAdd",
+                                 "libraryMoreAddFolder", "libraryMoreOpenBook"}) {
+            if (QString::fromLatin1(name).startsWith("libraryMore") || QString::fromLatin1(name) == "libraryFoldersAdd") {
+                view->findChild<QPushButton *>("libraryMore")->click();
+                if (QString::fromLatin1(name) == "libraryFoldersAdd")
+                    view->findChild<QPushButton *>("libraryMoreFolders")->click();
+            }
+            auto *button = view->findChild<QPushButton *>(name);
+            QVERIFY(button && button->isVisible());
+            QCoreApplication::processEvents();
+            const QRect area(button->mapTo(view, QPoint()), button->size());
+            const auto before = view->grab().toImage().copy(area);
+            const bool remainsVisible = !QString::fromLatin1(name).startsWith("libraryMore");
+            bool entered = false, updatesEnabled = false;
+            QImage during;
+            const auto pickerAction = [&] {
+                // File pickers run a nested event loop inside the host callback.
+                // Use a plain dialog so this check remains fully headless.
+                QDialog picker(&canvas);
+                QTimer::singleShot(0, &picker, [&] {
+                    entered = true;
+                    updatesEnabled = button->updatesEnabled();
+                    if (remainsVisible)
+                        during = view->grab().toImage().copy(area);
+                    picker.reject();
+                });
+                picker.exec();
+            };
+            view->addFolder = pickerAction;
+            view->openFile = pickerAction;
+            QVERIFY(click(canvas, button));
+            QTRY_VERIFY(entered);
+            QVERIFY2(updatesEnabled, "The folder button cannot paint while the native picker is open");
+            if (remainsVisible) {
+                QCOMPARE(during, before);
+                QVERIFY(button->isVisible());
+                QCOMPARE(view->grab().toImage().copy(area), before);
+            }
+            if (QString::fromLatin1(name) == "libraryFoldersAdd")
+                view->findChild<QPushButton *>("libraryFoldersBack")->click();
+        }
+    }
+    void libraryActionButtons_data() { variants(); }
+    void libraryActionButtons() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        library::Index index;
+        library::LibraryView view(index, {});
+        view.resize(ui::px(1072), ui::px(1448));
+        view.setDark(dark);
+        view.show();
+        int added = 0, opened = 0, rescanned = 0;
+        view.addFolder = [&] { ++added; };
+        view.openFile = [&] { ++opened; };
+        view.rescan = [&] { ++rescanned; };
+        const QColor ink = dark ? Qt::white : Qt::black;
+        const QColor paper = dark ? Qt::black : Qt::white;
+        const auto checkButton = [&](const char *name, bool primary) {
+            auto *button = view.findChild<QPushButton *>(name);
+            QVERIFY(button);
+            QVERIFY(button->isVisible());
+            QCoreApplication::processEvents();
+            const auto image = button->grab().toImage();
+            // Standalone actions have a complete frame, unlike footer cells.
+            const QColor border(dark ? ui::metrics::control::darkOutline : ui::metrics::control::lightOutline);
+            QCOMPARE(image.pixelColor(0, image.height() / 2), border);
+            QCOMPARE(image.pixelColor(image.width() - 1, image.height() / 2), border);
+            QCOMPARE(image.pixelColor(image.width() / 2, image.height() - 1), border);
+            QCOMPARE(image.pixelColor(image.width() / 2, ui::px(8)), primary ? ink : paper);
+            QVERIFY(button->height() >= QFontMetrics(button->font()).height() + ui::px(16));
+            button->click();
+        };
+        const auto capture = [&](const QString &scene) {
+            const auto directory = qEnvironmentVariable("KOBALT_CAPTURE_MODALS");
+            if (directory.isEmpty())
+                return;
+            QVERIFY(QDir().mkpath(directory));
+            QVERIFY(view.grab().save(directory + QString("/library-%1-%2-%3.png")
+                                                    .arg(scene, dark ? "dark" : "light").arg(ppi)));
+        };
+        QCoreApplication::processEvents();
+        capture("empty");
+        checkButton("libraryChooseFolder", false);
+        checkButton("libraryOpenBook", true);
+        QVERIFY(!view.findChild<QPushButton *>("libraryLeave"));
+        QTRY_COMPARE(added, 1);
+        QTRY_COMPARE(opened, 1);
+        view.findChild<QPushButton *>("libraryMore")->click();
+        for (const auto &item : {qMakePair("libraryMoreAddFolder", ui::ControlIcon::FolderPlus),
+                                  qMakePair("libraryMoreOpenBook", ui::ControlIcon::Dictionary),
+                                  qMakePair("libraryMoreFolders", ui::ControlIcon::Folders)}) {
+            auto *row = dynamic_cast<ui::ListRow *>(view.findChild<QPushButton *>(item.first));
+            QVERIFY(row && row->isVisible());
+            const int side = ui::metrics::control::iconSize;
+            const QRect iconArea(ui::metrics::list::inset, (row->height() - side) / 2, side, side);
+            QImage expected(side, side, QImage::Format_ARGB32);
+            expected.fill(paper);
+            {
+                QPainter painter(&expected);
+                ui::Button reference(&view);
+                reference.setIconConfiguration({item.second, ui::IconRendition::Action});
+                reference.icon().paint(&painter, expected.rect());
+            }
+            QImage empty(side, side, QImage::Format_ARGB32);
+            empty.fill(paper);
+            QVERIFY(expected != empty);
+            QCOMPARE(row->grab().toImage().copy(iconArea).convertToFormat(QImage::Format_ARGB32), expected);
+            QVERIFY(row->titleLabel()->x() >= iconArea.right() + ui::metrics::chrome::selectorGap);
+            QCOMPARE(row->titleLabel()->text(), row->text());
+        }
+        capture("more");
+        view.findChild<QPushButton *>("libraryMoreFolders")->click();
+        capture("folders");
+        checkButton("libraryFoldersAdd", true);
+        checkButton("libraryFoldersRescan", false);
+        QTRY_COMPARE(added, 2);
+        QCOMPARE(rescanned, 1);
+    }
+    void libraryListFillsPage_data() { variants(); }
+    void libraryListFillsPage() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        library::Index index;
+        index.settings.view = library::View::List;
+        for (int i = 0; i < 40; ++i) {
+            library::Book book;
+            book.key = QString("book-%1").arg(i);
+            book.title = QString("An invented book %1").arg(i);
+            book.author = "Aven Teral";
+            book.series = "The Neralis Cycle";
+            index.books.insert(book.key, book);
+        }
+        library::LibraryView view(index, {});
+        view.setDark(dark);
+        view.show();
+        auto *pages = view.findChild<QWidget *>("libraryPages");
+        auto *counter = view.findChild<QLabel *>("libraryPage");
+        QVERIFY(pages && counter);
+        auto *pager = counter->parentWidget();
+        QString opened;
+        view.openBook = [&](const QString &key) { opened = key; };
+        for (const auto size : {QSize(1072, 1448), QSize(1448, 1072), QSize(1072, 1451)}) {
+            view.resize(ui::px(size.width()), ui::px(size.height()));
+            QCoreApplication::processEvents();
+            QCOMPARE(pages->y(), int(ui::metrics::chrome::actionHeight) + ui::px(88));
+            QVERIFY(pager->isVisible());
+            QCOMPARE(pages->geometry().bottom() + 1, pager->y());
+            const auto image = pages->grab().toImage();
+            const auto divider = ui::dividerColor(pages);
+            QVector<int> boundaries{0};
+            for (int y = 0; y < image.height(); ++y)
+                if (image.pixelColor(0, y) == divider &&
+                    (y + 1 == image.height() || image.pixelColor(0, y + 1) != divider))
+                    boundaries.append(y + 1);
+            QVERIFY(boundaries.size() > 2);
+            QCOMPARE(boundaries.last(), image.height());
+            int shortest = image.height(), tallest = 0;
+            for (int i = 1; i < boundaries.size(); ++i) {
+                const int height = boundaries[i] - boundaries[i - 1];
+                shortest = qMin(shortest, height);
+                tallest = qMax(tallest, height);
+                opened.clear();
+                // Even the final pixel of each row belongs to that row.
+                QTest::mouseClick(pages, Qt::LeftButton, Qt::NoModifier, QPoint(1, boundaries[i] - 1));
+                QVERIFY(!opened.isEmpty());
+            }
+            QVERIFY(tallest - shortest <= 1);
+            const auto directory = qEnvironmentVariable("KOBALT_CAPTURE_MODALS");
+            if (!directory.isEmpty()) {
+                QVERIFY(QDir().mkpath(directory));
+                QVERIFY(view.grab().save(directory + QString("/library-list-%1-%2-%3x%4.png")
+                    .arg(dark ? "dark" : "light").arg(ppi).arg(size.width()).arg(size.height())));
+            }
+        }
+        // Five rows fit without a pager here, but not with its old space
+        // still reserved. Removing books must reclaim that space immediately.
+        view.resize(ui::px(1072), ui::px(1400));
+        while (index.books.size() > 5) {
+            auto last = index.books.end();
+            index.books.erase(--last);
+        }
+        view.refresh();
+        QTRY_VERIFY(!pager->isVisible());
+        QCOMPARE(pages->geometry().bottom(), view.height() - 1);
+        library::Book sixth;
+        sixth.key = "another-book";
+        sixth.title = "Another invented book";
+        index.books.insert(sixth.key, sixth);
+        view.refresh();
+        QTRY_VERIFY(pager->isVisible());
+        QCOMPARE(counter->text(), QString("1 of 2"));
+        QCOMPARE(pages->geometry().bottom() + 1, pager->y());
+    }
+    void libraryOnboardingLayout_data() { variants(); }
+    void libraryOnboardingLayout() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        library::Index index;
+        library::LibraryView view(index, {});
+        view.setDark(dark);
+        view.show();
+        auto *empty = view.findChild<QScrollArea *>("libraryEmpty");
+        QVERIFY(empty);
+        for (const auto size : {QSize(1072, 1448), QSize(1448, 1072), QSize(600, 400)}) {
+            view.resize(ui::px(size.width()), ui::px(size.height()));
+            QCoreApplication::processEvents();
+            if (size.height() >= 1072)
+                QTRY_COMPARE(empty->verticalScrollBar()->maximum(), 0);
+            else
+                QTRY_VERIFY(empty->verticalScrollBar()->maximum() > 0);
+            QCOMPARE(empty->horizontalScrollBar()->maximum(), 0);
+            auto *heading = view.findChild<QLabel *>("libraryEmptyTitle");
+            QVERIFY(heading);
+            const auto headingImage = heading->grab().toImage().convertToFormat(QImage::Format_RGB32);
+            const QColor paper = dark ? Qt::black : Qt::white;
+            // Italic ink can extend past its advance and line metrics. Keep
+            // a clear edge around the label so its glyphs cannot be clipped.
+            const int guard = qMax(1, ui::px(2));
+            for (int y = 0; y < headingImage.height(); ++y)
+                for (int x = 0; x < headingImage.width(); ++x)
+                    if (x < guard || x >= headingImage.width() - guard ||
+                        y < guard || y >= headingImage.height() - guard)
+                        QCOMPARE(headingImage.pixelColor(x, y), paper);
+            for (const auto *name : {"libraryOpenBook", "libraryChooseFolder"}) {
+                auto *button = view.findChild<QPushButton *>(name);
+                QVERIFY(button && button->isVisible());
+                QVERIFY(button->width() >= QFontMetrics(button->font()).horizontalAdvance(button->text()) + ui::px(24));
+                QVERIFY(button->parentWidget()->rect().contains(button->geometry()));
+            }
+            const auto directory = qEnvironmentVariable("KOBALT_CAPTURE_MODALS");
+            if (!directory.isEmpty()) {
+                QVERIFY(QDir().mkpath(directory));
+                QVERIFY(view.grab().save(directory + QString("/library-onboarding-%1-%2-%3x%4.png")
+                    .arg(dark ? "dark" : "light").arg(ppi).arg(size.width()).arg(size.height())));
+            }
+        }
+    }
+    void libraryScanCaption_data() { variants(); }
+    void libraryScanCaption() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        library::Index index;
+        library::LibraryView view(index, {});
+        view.resize(ui::px(1072), ui::px(1448));
+        view.setDark(dark);
+        view.show();
+        view.setScanning(true, 4);
+        QCoreApplication::processEvents();
+        auto *progress = dynamic_cast<ui::LoadingIndicator *>(view.findChild<QWidget *>("libraryScanProgress"));
+        auto *sort = view.findChild<QPushButton *>("librarySort");
+        QVERIFY(progress && sort);
+        QTRY_VERIFY(progress->isVisible() && sort->isVisible());
+        const auto image = sort->grab().toImage();
+        const QColor paper = dark ? Qt::black : Qt::white;
+        // Render the caption without its sibling indicator. The indicator and
+        // the padding after it must contain no caption pixels in any frame.
+        const int right = progress->geometry().right() + ui::px(24);
+        int inkAfter = 0;
+        for (int y = ui::px(8); y < image.height() - ui::px(8); ++y)
+            for (int x = 0; x < image.width(); ++x) {
+                if (x <= right)
+                    QCOMPARE(image.pixelColor(x, y), paper);
+                else
+                    inkAfter += image.pixelColor(x, y) != paper;
+            }
+        QVERIFY(inkAfter > 20);
+        view.setScanning(false, 99);
+        QVERIFY(!progress->isVisible());
+        const auto directory = qEnvironmentVariable("KOBALT_CAPTURE_MODALS");
+        if (!directory.isEmpty()) {
+            view.setScanning(true, 99);
+            QTRY_VERIFY(progress->isVisible());
+            QTest::qWait(50);
+            QVERIFY(QDir().mkpath(directory));
+            QVERIFY(view.grab().save(directory + QString("/library-scan-%1-%2.png")
+                                                    .arg(dark ? "dark" : "light").arg(ppi)));
         }
     }
     void connectedModalFooter_data() { variants(); }

@@ -17,18 +17,72 @@
 "app.wordmark" = "Kobalt";
 
 /* android */
-"android.start_title" = "Better reading starts now.";
-"android.previous_book" = "Previously opened book";
-"android.reopen_last_book" = "Reopen last book";
-"android.start_hint" = "Open a book to get started.";
-"android.open_epub" = "Choose book";
-"android.choose_another_epub" = "Choose another EPUB";
-"android.exit" = "Exit Kobalt";
 "android.return" = "Kobalt";
-"android.remove_last_title" = "Remove from recents?";
-"android.remove_last_description" = "Remove this book from recents? The book file and reading progress will stay on your device.";
-"android.remove_last_action" = "Remove";
-"android.remove_last_error" = "The recent book could not be removed. Please try again. The book file and reading progress have not been changed.";
+
+/* library */
+"library.title" = "Library";
+/* Arguments: %1 */
+"library.count" = "%1 books";
+"library.count_one" = "1 book";
+"library.search" = "Search library";
+"library.search_placeholder" = "Title, author or series";
+"library.close_search" = "Close search";
+"library.add_folder" = "Add folder";
+"library.more" = "More";
+"library.view_home" = "Home";
+"library.view_list" = "List";
+"library.view_grid" = "Cover grid";
+"library.sort_opened" = "Recently opened";
+"library.sort_added" = "Recently added";
+"library.sort_title" = "Title";
+"library.sort_author" = "Author";
+"library.sort_series" = "Series";
+"library.sort_heading" = "Sort by";
+"library.show_heading" = "Show";
+"library.show_all" = "All books";
+"library.hide_finished" = "Hide finished";
+"library.cover_heading" = "Cover size";
+"library.cover_small" = "Small";
+"library.cover_medium" = "Medium";
+"library.cover_large" = "Large";
+/* Arguments: %1, %2 */
+"library.series_number" = "%1 #%2";
+"library.progress_heading" = "Progress";
+"library.title_heading" = "Title";
+"library.status_new" = "New";
+"library.status_done" = "Done";
+/* Arguments: %1 */
+"library.scanning" = "Scanning · %1 found";
+"library.no_matches" = "No books match your search.";
+"library.nothing_shown" = "Every book here is finished.";
+"library.home_empty" = "Books you are reading appear here.";
+"library.now_reading" = "Now reading";
+"library.empty_title" = "Add your first book";
+"library.empty_body" = "Open a book to add it to your library and start reading. Or choose a folder to discover EPUBs in it and its subfolders.";
+"library.empty_folders" = "No books were found in your folders yet.";
+"library.choose_folder" = "Choose folder";
+"library.open_book" = "Open a single book";
+"library.folders" = "Library folders";
+/* Arguments: %1 */
+"library.folders_summary" = "Folders · %1";
+"library.books_heading" = "Books";
+"library.remove_folder" = "Remove folder";
+"library.check_at_start" = "Check for new books at start";
+"library.check_at_start_description" = "Looks for added, changed and removed files.";
+"library.rescan" = "Rescan all folders";
+"library.folders_description" = "Removing a folder removes its books from the library. The files and reading progress stay on your device.";
+"library.continue_reading" = "Continue reading";
+"library.start_reading" = "Start reading";
+"library.mark_finished" = "Mark as finished";
+"library.mark_unread" = "Mark as unread";
+"library.remove_book" = "Remove from library";
+"library.remove_book_title" = "Remove from library?";
+"library.remove_book_description" = "The book file and reading progress stay on your device. A book in a library folder comes back when the folder is scanned again.";
+"library.remove_copy_description" = "Kobalt's copy of this book is deleted. Reading progress stays on your device.";
+"library.remove" = "Remove";
+"library.back" = "Back to library";
+"library.open_failed" = "The book could not be opened.";
+"library.folder_unavailable" = "This folder cannot be read. Add it again to give Kobalt access.";
 
 /* about */
 "about.description" = "An experimental alternative EPUB reader.";

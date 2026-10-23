@@ -1,11 +1,15 @@
 package org.kobalt.android;
 
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
 import android.os.BatteryManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
+import android.provider.DocumentsContract;
+import android.database.Cursor;
 import android.os.Build;
 import android.view.View;
 import android.view.KeyEvent;
@@ -18,6 +22,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -26,6 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class KobaltActivity extends QtActivity {
     private static final int PICK_BOOK = 41;
+    private static final int PICK_FOLDER = 42;
     private static final long MAX_BOOK_BYTES = 128L * 1024 * 1024;
     private final ExecutorService importer = Executors.newSingleThreadExecutor();
     private final AtomicLong request = new AtomicLong();
@@ -38,6 +45,7 @@ public class KobaltActivity extends QtActivity {
     private String pendingPath;
     private native void openBook(String path);
     private native boolean turnPage(int direction);
+    private native void folderChosen(String uri, String label);
     private final HashSet<Integer> pageKeys = new HashSet<>();
 
     @Override public void setRequestedOrientation(int orientation) {
@@ -187,9 +195,130 @@ public class KobaltActivity extends QtActivity {
         try { startActivityForResult(intent, PICK_BOOK); }
         catch (android.content.ActivityNotFoundException error) { toast("No document picker is installed."); }
     }
+    public void chooseFolder() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        try { startActivityForResult(intent, PICK_FOLDER); }
+        catch (android.content.ActivityNotFoundException error) { toast("No folder picker is installed."); }
+    }
     @Override protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
         if (code == PICK_BOOK && result == RESULT_OK && data != null) importBook(data.getData());
+        if (code == PICK_FOLDER && result == RESULT_OK && data != null && data.getData() != null) {
+            Uri tree = data.getData();
+            try {
+                // Keep read access after restarts. The library reads books in place.
+                getContentResolver().takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException error) {
+                toast("Kobalt could not keep access to this folder.");
+                return;
+            }
+            String label = tree.getLastPathSegment();
+            try (Cursor cursor = getContentResolver().query(DocumentsContract.buildDocumentUriUsingTree(tree,
+                    DocumentsContract.getTreeDocumentId(tree)), new String[] {DocumentsContract.Document.COLUMN_DISPLAY_NAME},
+                    null, null, null)) {
+                if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) label = cursor.getString(0);
+            } catch (Exception ignored) {
+                // The URI's last segment is a usable label.
+            }
+            if (ready) folderChosen(tree.toString(), label == null ? "" : label);
+        }
+    }
+    public void releaseFolder(String uri) {
+        try {
+            getContentResolver().releasePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException ignored) {
+            // The grant is already gone.
+        }
+    }
+    // Called from the library's scan thread. Returns name, document URI, size
+    // and modification time for every EPUB below the folder, or null when the
+    // folder cannot be read. Hidden folders are skipped.
+    public String[] listLibraryFolder(String treeUri) {
+        try {
+            Uri tree = Uri.parse(treeUri);
+            ContentResolver resolver = getContentResolver();
+            ArrayList<String> found = new ArrayList<>();
+            ArrayDeque<String> folders = new ArrayDeque<>();
+            folders.add(DocumentsContract.getTreeDocumentId(tree));
+            String[] columns = {DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED};
+            int visited = 0;
+            while (!folders.isEmpty() && visited++ < 20000) {
+                Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, folders.poll());
+                try (Cursor cursor = resolver.query(children, columns, null, null, null)) {
+                    if (cursor == null) continue;
+                    while (cursor.moveToNext()) {
+                        String id = cursor.getString(0), name = cursor.getString(1), type = cursor.getString(2);
+                        if (id == null || name == null || name.startsWith(".")) continue;
+                        if (DocumentsContract.Document.MIME_TYPE_DIR.equals(type)) { folders.add(id); continue; }
+                        if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(".epub")) continue;
+                        found.add(DocumentsContract.buildDocumentUriUsingTree(tree, id).toString());
+                        found.add(name);
+                        found.add(Long.toString(cursor.isNull(3) ? 0 : cursor.getLong(3)));
+                        found.add(Long.toString(cursor.isNull(4) ? 0 : cursor.getLong(4)));
+                    }
+                }
+            }
+            return found.toArray(new String[0]);
+        } catch (Exception error) {
+            return null;
+        }
+    }
+    // Called from the scan thread. The caller owns and closes the descriptor.
+    public int openLibraryDocument(String uri) {
+        try {
+            ParcelFileDescriptor descriptor = getContentResolver().openFileDescriptor(Uri.parse(uri), "r");
+            return descriptor == null ? -1 : descriptor.detachFd();
+        } catch (Exception error) {
+            return -1;
+        }
+    }
+    // Copies a library book to the reader's cache path, unless the copy there
+    // is current, then opens it. Only the open book is kept in the cache.
+    public void openLibraryBook(String uri, String destination, long size, long modified) {
+        final long generation = request.incrementAndGet();
+        importer.execute(() -> {
+            File target = new File(destination);
+            File temporary = null;
+            try {
+                File folder = target.getParentFile();
+                if (folder == null || (!folder.isDirectory() && !folder.mkdirs())) throw new java.io.IOException("Cannot create the book cache");
+                if (!target.isFile() || target.length() != size || target.lastModified() < modified) {
+                    temporary = File.createTempFile("library-", ".part", folder);
+                    try (InputStream input = getContentResolver().openInputStream(Uri.parse(uri));
+                         FileOutputStream output = new FileOutputStream(temporary)) {
+                        if (input == null) throw new java.io.IOException("Cannot read this book");
+                        byte[] buffer = new byte[65536];
+                        int count;
+                        while ((count = input.read(buffer)) != -1) {
+                            if (request.get() != generation) return;
+                            output.write(buffer, 0, count);
+                        }
+                        output.getFD().sync();
+                    }
+                    if (!temporary.renameTo(target)) throw new java.io.IOException("Cannot save this book");
+                }
+                File[] others = folder.listFiles();
+                if (others != null)
+                    for (File other : others)
+                        if (!other.equals(target) && other.getName().endsWith(".epub")) other.delete();
+                runOnUiThread(() -> {
+                    if (request.get() != generation || isFinishing() || isDestroyed()) return;
+                    if (ready) openBook(destination); else pendingPath = destination;
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (request.get() != generation || isDestroyed()) return;
+                    toast("Could not open EPUB: " + error.getMessage());
+                    // An empty path returns the library from its loading view.
+                    if (ready) openBook("");
+                });
+            } finally {
+                if (temporary != null) temporary.delete();
+            }
+        });
     }
     private void receive(Intent intent) {
         if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) importBook(intent.getData());

@@ -12,14 +12,26 @@ namespace {
 QPointer<QObject> owner;
 std::function<void(QString)> openExternal;
 std::function<void(int)> volumeButton;
+std::function<void(QString, QString)> chosenFolder;
 std::atomic<bool> pageButtonsAvailable{false};
 }
 namespace kobalt::android {
-void setCallbacks(QObject *receiver, std::function<void(QString)> openBook, std::function<void(int)> turnPage) {
+void setCallbacks(QObject *receiver, std::function<void(QString)> openBook, std::function<void(int)> turnPage,
+                  std::function<void(QString, QString)> folderChosen) {
     pageButtonsAvailable.store(false);
     owner = receiver;
     openExternal = std::move(openBook);
     volumeButton = std::move(turnPage);
+    chosenFolder = std::move(folderChosen);
+}
+void releaseFolder(const QString &uri) {
+    QNativeInterface::QAndroidApplication::context().callMethod<void>("releaseFolder",
+                                                                      QJniObject::fromString(uri).object<jstring>());
+}
+void openLibraryBook(const QString &uri, const QString &destination, qint64 size, qint64 modified) {
+    QNativeInterface::QAndroidApplication::context().callMethod<void>(
+        "openLibraryBook", QJniObject::fromString(uri).object<jstring>(),
+        QJniObject::fromString(destination).object<jstring>(), jlong(size), jlong(modified));
 }
 void setPageButtonsAvailable(bool available) {
     pageButtonsAvailable.store(available);
@@ -97,4 +109,22 @@ extern "C" JNIEXPORT jboolean JNICALL Java_org_kobalt_android_KobaltActivity_tur
             volumeButton(direction);
     });
     return true;
+}
+extern "C" JNIEXPORT void JNICALL Java_org_kobalt_android_KobaltActivity_folderChosen(JNIEnv *env, jobject, jstring uri,
+                                                                                      jstring label) {
+    const auto text = [env](jstring value) {
+        const auto chars = env->GetStringUTFChars(value, nullptr);
+        if (!chars)
+            return QString();
+        const auto result = QString::fromUtf8(chars);
+        env->ReleaseStringUTFChars(value, chars);
+        return result;
+    };
+    const auto key = text(uri), name = text(label);
+    if (key.isEmpty())
+        return;
+    QMetaObject::invokeMethod(qApp, [key, name] {
+        if (owner && chosenFolder)
+            chosenFolder(key, name);
+    });
 }

@@ -495,29 +495,10 @@ void Reader::applyTheme(bool dark) {
         return;
     themeReady = true;
     darkTheme = dark;
-    const QColor paper = dark ? Qt::black : Qt::white;
-    const QColor ink = dark ? Qt::white : Qt::black;
-    QPalette colors = palette();
-    for (const auto role : {QPalette::Window, QPalette::Base, QPalette::Button, QPalette::HighlightedText})
-        colors.setColor(role, paper);
-    for (const auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText, QPalette::Highlight})
-        colors.setColor(role, ink);
-    colors.setColor(QPalette::Mid, QColor("#999999"));
-    colors.setColor(QPalette::Midlight, dark ? QColor("#333333") : QColor("#dddddd"));
     // Theme this window only. Nickel keeps its own palette when we close.
-    // Set the palette, then the style sheet, so the sheet's own background
-    // and text colors reach widgets that paint from their palette. Setting a
-    // style sheet takes the gray roles from the platform; no sheet sets them,
-    // so restore the theme's rule and pressed grays afterwards.
+    const auto colors = ui::readerPalette(palette(), dark);
     const auto applyColors = [&colors](QWidget *widget) {
-        widget->setPalette(colors);
-        if (widget->property("reader_style").isValid())
-            readerStyle(widget, widget->property("reader_style").toString());
-        auto styled = widget->palette();
-        for (const auto role : {QPalette::Mid, QPalette::Midlight})
-            for (const auto group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled})
-                styled.setColor(group, role, colors.color(group, role));
-        widget->setPalette(styled);
+        ui::applyReaderPalette(widget, colors);
     };
     setProperty("reader_dark", dark);
     applyColors(this);

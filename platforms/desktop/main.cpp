@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
 #endif
     FontCopies copies;
     Application app(argc, argv);
-    app.setApplicationName("Kobalt");
+    app.setApplicationName(QStringLiteral(KOBALT_PROFILE_NAME));
     app.setOrganizationName("Kobalt");
     app.setStyle("Fusion");
     AssetBundle assets(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../Resources/assets"),

@@ -7,6 +7,9 @@
 #include "boox_frame_queue.h"
 #include "boox_refresh.h"
 #include "assets.h"
+#include "library_source.h"
+#include "interfaces/library/library_view.h"
+#include "library/library_store.h"
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
 #include "interfaces/reader/views/reading_page.h"
@@ -15,6 +18,8 @@
 #include "support/strings.h"
 #include "reading/reading_density.h"
 #include <QApplication>
+#include <QCryptographicHash>
+#include <QFile>
 #include <QCloseEvent>
 #include <QDebug>
 #include <QDir>
@@ -35,7 +40,9 @@ public:
     Window(EngineFontInputs fonts, QString placeholder)
         : controller(storage::Paths{QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/config"},
                      std::move(fonts), std::move(placeholder), android::readerServices,
-                     [](Qt::ScreenOrientation) { /* Android owns display rotation. */ }) {
+                     [](Qt::ScreenOrientation) { /* Android owns display rotation. */ }),
+          store(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/config",
+                std::make_shared<android::LibrarySource>()) {
         setWindowTitle("Kobalt");
         setAttribute(Qt::WA_ContentsMarginsRespectsSafeArea);
         QPalette colors;
@@ -47,31 +54,30 @@ public:
         setAutoFillBackground(true);
         layout = new QStackedLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
-        start = new android::StartScreen(android::readerServices().presentation);
-        connect(start, &android::StartScreen::openRequested, this, [] {
+        start = new android::StartScreen(android::readerServices().presentation, store);
+        // A book picked while the library is shown joins it; see openBook.
+        connect(start, &android::StartScreen::libraryOpenRequested, this, [] {
             android::activity("chooseBook");
         });
+        connect(start, &android::StartScreen::addFolderRequested, this, [] {
+            android::activity("chooseFolder");
+        });
         connect(start, &android::StartScreen::exitRequested, this, &QWidget::close);
-        auto last = controller.lastBook();
-        if (last.isEmpty()) {
-            const auto legacy = QSettings().value("lastBook").toString();
-            if (QFileInfo(legacy).isFile() && QFileInfo(legacy).isReadable())
-                last = {{"path", legacy}, {"title", strings::get("android.previous_book")}};
-        }
-        start->setLastBook(last);
-        connect(start, &android::StartScreen::reopenRequested, this, [this](const QString &path) {
-            openBook(path);
+        connect(start, &android::StartScreen::bookRequested, this, &Window::openLibraryBook);
+        connect(start, &android::StartScreen::removeFolderRequested, this, [this](const QString &key) {
+            store.removeFolder(key);
+            android::releaseFolder(key);
         });
-        connect(start, &android::StartScreen::forgetRequested, this, [this] {
-            if (!controller.forgetLastBook()) {
-                start->showForgetError();
-                return;
-            }
-            QSettings settings;
-            settings.remove("lastBook");
-            settings.sync();
-            start->setLastBook({});
+        connect(start, &android::StartScreen::removeBookRequested, this, [this](const QString &key) {
+            const auto book = store.index().books.value(key);
+            // A book opened on its own is Kobalt's copy; delete it with the entry.
+            if (book.folder.isEmpty() &&
+                QFileInfo(QFileInfo(key).absolutePath()).canonicalFilePath() == importedBooks())
+                QFile::remove(key);
+            store.removeBook(key);
         });
+        start->setSingleBooksAreCopies(true);
+        start->setDark(controller.preferences().value("dark_mode").toBool(false));
         layout->addWidget(start);
         canvas = new android::WidgetCanvas(this);
         layout->addWidget(canvas);
@@ -147,6 +153,9 @@ public:
                 if (!pageButtonsReady())
                     return;
                 controller.window()->pageButton(direction);
+            },
+            [this](const QString &uri, const QString &label) {
+                store.addFolder({uri, label});
             });
         canvas->cancelGesture = [this] {
             if (auto *reader = controller.window())
@@ -177,7 +186,6 @@ public:
             reader->show();
             setUpdatesEnabled(true);
             openingHandoff.start();
-            start->setLastBook(controller.lastBook());
             QSettings settings;
             settings.remove("lastBook");
             settings.sync();
@@ -189,7 +197,7 @@ public:
             layout->setStackingMode(QStackedLayout::StackOne);
             setPalette(start->palette());
             android::activity("showStartup");
-            start->showError(error);
+            start->showLibraryError(error);
             layout->setCurrentWidget(start);
             qWarning() << "Kobalt reader error:" << error;
         });
@@ -205,13 +213,16 @@ public:
             layout->setStackingMode(QStackedLayout::StackOne);
             setPalette(start->palette());
             android::activity("showStartup");
-            start->setLastBook(controller.lastBook());
+            recordProgress();
+            start->setDark(controller.preferences().value("dark_mode").toBool(false));
             if (!failedOpening)
-                start->showReady();
+                start->showLibrary();
             layout->setCurrentWidget(start);
         });
         QTimer::singleShot(0, this, [this] {
             android::activity("readerReady");
+            if (store.index().settings.checkAtStart)
+                store.scan();
         });
     }
     ~Window() override {
@@ -220,8 +231,11 @@ public:
 
 private:
     android::ReaderController controller;
+    library::Store store;
     QStackedLayout *layout;
     android::StartScreen *start;
+    // The library entry of the book being read, and the local file it opened.
+    QString openedKey, openedPath;
     android::WidgetCanvas *canvas;
     android::BooxRefreshPolicy booxRefresh;
     android::BooxFrameQueue refreshQueue;
@@ -260,9 +274,63 @@ private:
     void syncPageButtons() {
         android::setPageButtonsAvailable(pageButtonsReady());
     }
+    static QString appData() {
+        return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    }
+    // The activity copies picked and shared files to getFilesDir()/books,
+    // which is Qt's application data folder on Android.
+    static QString importedBooks() {
+        return QFileInfo(appData() + "/books").canonicalFilePath();
+    }
+    QString cachePath(const QString &uri) const {
+        return appData() + "/library-cache/" +
+               QString::fromLatin1(QCryptographicHash::hash(uri.toUtf8(), QCryptographicHash::Sha1).toHex()) + ".epub";
+    }
+    void openLibraryBook(const QString &key) {
+        const auto book = store.index().books.value(key);
+        if (book.key.isEmpty() || closing)
+            return;
+        if (book.folder.isEmpty()) {
+            openBook(key);
+            return;
+        }
+        // Library books are read in place; the reader opens a cached copy.
+        pendingKey = key;
+        pendingPath = cachePath(key);
+        start->showOpening();
+        android::openLibraryBook(key, pendingPath, book.size, book.modified);
+    }
+    void recordProgress() {
+        if (openedKey.isEmpty())
+            return;
+        const auto progress = library::savedProgress(controller.savedState(openedPath));
+        store.setProgress(std::exchange(openedKey, {}), progress.percent, progress.finished);
+    }
+    QString pendingKey, pendingPath;
     void openBook(const QString &path) {
         if (closing)
             return;
+        recordProgress();
+        if (path.isEmpty()) {
+            // The activity could not copy a library book; it said why.
+            pendingKey.clear();
+            pendingPath.clear();
+            start->showLibrary();
+            return;
+        }
+        if (path == pendingPath && !pendingKey.isEmpty()) {
+            openedKey = std::exchange(pendingKey, {});
+        } else {
+            // Document picking and Android Open With use the same library path.
+            const auto key = QFileInfo(path).absoluteFilePath();
+            if (!store.index().books.contains(key))
+                store.addBook(path);
+            openedKey = store.index().books.contains(key) ? key : QString();
+        }
+        pendingPath.clear();
+        openedPath = path;
+        if (!openedKey.isEmpty())
+            store.setOpened(openedKey);
         if (controller.window() && controller.path() == path)
             return;
         failedOpening = false;

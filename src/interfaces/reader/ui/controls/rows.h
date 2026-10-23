@@ -4,6 +4,7 @@
 #include <QButtonGroup>
 #include <QFrame>
 #include <QPointer>
+#include <optional>
 
 namespace kobalt::ui {
 // Plain-text lists share line spacing, dividers and accessory geometry.
@@ -52,6 +53,7 @@ public:
     void setDetailHighlight(const QString &style, QColor color, int lineSpacing);
     void setCaption(const QString &text);
     void setLeading(const QString &text, int indent = 0);
+    void setLeadingIcon(ControlIcon icon);
     void setAccessory(Accessory value);
     const Accessory &accessoryValue() const {
         return accessory;
@@ -99,6 +101,7 @@ private:
     QString titleText, detailText, captionText, leadingText;
     QString labelStyles[5];
     Accessory accessory = None{};
+    std::optional<ControlIcon> leadingIcon;
     QPointer<QWidget> observedParent;
     int detailLines = 1;
     int titleGap = 0;

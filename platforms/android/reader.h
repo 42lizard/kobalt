@@ -21,6 +21,10 @@ public:
     void close();
     QJsonObject lastBook() const;
     bool forgetLastBook();
+    // The state the reader saved for the book at this path.
+    QJsonObject savedState(const QString &path) const;
+    // Reader preferences such as dark mode, shared by every book.
+    QJsonObject preferences() const;
     ReaderWindow *window() const {
         return window_;
     }

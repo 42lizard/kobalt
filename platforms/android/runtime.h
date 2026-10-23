@@ -6,7 +6,8 @@
 
 namespace kobalt::android {
 // Install on Qt's GUI thread. Delivery stops when owner is destroyed.
-void setCallbacks(QObject *owner, std::function<void(QString)> openBook, std::function<void(int)> turnPage);
+void setCallbacks(QObject *owner, std::function<void(QString)> openBook, std::function<void(int)> turnPage,
+                  std::function<void(QString, QString)> folderChosen = {});
 void setPageButtonsAvailable(bool available);
 void activity(const char *method);
 bool readingGeometryReady();
@@ -21,5 +22,8 @@ struct Battery {
 };
 Battery battery();
 void showKeyboard();
+// Library folders are granted document trees, read through the activity.
+void releaseFolder(const QString &uri);
+void openLibraryBook(const QString &uri, const QString &destination, qint64 size, qint64 modified);
 void hideKeyboard();
 }

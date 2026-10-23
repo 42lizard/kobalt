@@ -64,7 +64,15 @@ enum class ControlIcon {
     OneColumn,
     TwoColumns,
     Sort,
-    ArrowDownRight
+    ArrowDownRight,
+    // The library's views, and menu actions.
+    Rows,
+    Grid,
+    Home,
+    Check,
+    Trash,
+    FolderPlus,
+    Folders
 };
 // Paint vectors at the target resolution without an intermediate icon bitmap.
 void paintOpeningIcon(QPainter &painter, ControlIcon icon, const QRectF &bounds, QColor color);

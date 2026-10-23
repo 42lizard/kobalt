@@ -1,0 +1,195 @@
+#include "action_menu.h"
+#include "../controls/buttons.h"
+#include "../style/fonts.h"
+#include "../style/metrics.h"
+#include "../style/styles.h"
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPainter>
+#include <QTextLayout>
+#include <QVBoxLayout>
+
+namespace kobalt::ui {
+namespace m = metrics;
+namespace {
+// One action: an optional icon and a label across the card's full width,
+// with a divider above. A held row turns the list's pressed gray.
+class ActionRow final : public Button {
+public:
+    ActionRow(const ActionMenuItem &item, bool divider, QWidget *parent)
+        : Button(item.text, parent), item(item), divider(divider) {
+        setObjectName(item.name);
+        setAccessibleName(item.text);
+        setFocusPolicy(Qt::StrongFocus);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setFixedHeight(m::list::oneLine);
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        const auto paper = palette().color(QPalette::Window), ink = palette().color(QPalette::WindowText);
+        painter.fillRect(rect(), isDown() ? palette().color(QPalette::Midlight) : paper);
+        if (divider)
+            painter.fillRect(0, 0, width(), m::control::border, dividerColor(this));
+        const int iconSize = m::control::iconSize, left = m::chrome::inset;
+        if (item.hasIcon)
+            controlIcon(item.icon, ink).paint(&painter, QRect(left, (height() - iconSize) / 2, iconSize, iconSize));
+        const int textLeft = left + iconSize + m::chrome::selectorGap;
+        painter.setFont(interfaceFont(m::chrome::labelText));
+        painter.setPen(isEnabled() ? ink : palette().color(QPalette::Mid));
+        const int available = qMax(1, width() - textLeft - m::chrome::inset);
+        painter.drawText(QRect(textLeft, 0, available, height()), Qt::AlignLeft | Qt::AlignVCenter,
+                         painter.fontMetrics().elidedText(text(), Qt::ElideRight, available));
+    }
+
+private:
+    ActionMenuItem item;
+    bool divider;
+};
+// The header measures its own text, so it is exactly as tall as the
+// thumbnail or the text, whichever is taller. Wrapped labels in nested layouts
+// report more height than they use.
+class MenuHeader final : public QWidget {
+public:
+    MenuHeader(const ActionMenuHeader &content, QWidget *parent) : QWidget(parent), content(content) {
+        setObjectName("rrActionMenuHeader");
+        setAccessibleName(QStringList({content.title, content.detail, content.caption}).join(' ').simplified());
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        if (!content.image.isNull())
+            thumbnail = content.image.scaled(QSize(m::actionMenu::thumbnailWidth, m::actionMenu::thumbnailHeight),
+                                             Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+    bool hasHeightForWidth() const override {
+        return true;
+    }
+    int heightForWidth(int width) const override {
+        const auto margins = QMargins(m::notice::cardMargins);
+        return margins.top() + qMax(thumbnail.height(), textHeight(textWidth(width))) + margins.bottom();
+    }
+    QSize sizeHint() const override {
+        return {m::notice::cardWidth, heightForWidth(m::notice::cardWidth)};
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *) override {
+        const int height = heightForWidth(width());
+        if (this->height() != height)
+            setFixedHeight(height);
+    }
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        const auto margins = QMargins(m::notice::cardMargins);
+        const int body = height() - margins.top() - margins.bottom();
+        if (!thumbnail.isNull()) {
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.drawImage(QPoint(margins.left(), margins.top() + (body - thumbnail.height()) / 2), thumbnail);
+        }
+        const int left = textLeft(), width = textWidth(this->width());
+        int y = margins.top() + (body - textHeight(width)) / 2;
+        for (const auto &part : parts())
+            y += draw(&painter, part, left, y, width) + m::chrome::textGap;
+    }
+
+private:
+    struct Part {
+        QString text;
+        QFont font;
+        QColor color;
+        int lines;
+    };
+    ActionMenuHeader content;
+    QImage thumbnail;
+    int textLeft() const {
+        return QMargins(m::notice::cardMargins).left() +
+               (thumbnail.isNull() ? 0 : thumbnail.width() + m::notice::cardGap);
+    }
+    int textWidth(int width) const {
+        return qMax(1, width - textLeft() - QMargins(m::notice::cardMargins).right());
+    }
+    QVector<Part> parts() const {
+        QVector<Part> result;
+        auto title = interfaceFont(m::chrome::labelText);
+        title.setBold(true);
+        const auto ink = palette().color(QPalette::WindowText);
+        if (!content.title.isEmpty())
+            result.append({content.title, title, ink, 3});
+        if (!content.detail.isEmpty())
+            result.append({content.detail, interfaceFont(m::chrome::descriptionText), noteColor(this), 2});
+        if (!content.caption.isEmpty())
+            result.append({content.caption.toUpper(), captionFont(), noteColor(this), 1});
+        return result;
+    }
+    // Draws or, without a painter, measures one part in up to `lines` lines,
+    // eliding the last. Returns its height.
+    static int draw(QPainter *painter, const Part &part, int left, int top, int width) {
+        QTextLayout layout(part.text, part.font);
+        QTextOption option;
+        option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        layout.setTextOption(option);
+        layout.beginLayout();
+        QVector<QTextLine> lines;
+        for (int row = 0; row < part.lines; ++row) {
+            auto line = layout.createLine();
+            if (!line.isValid())
+                break;
+            line.setLineWidth(width);
+            lines.append(line);
+        }
+        layout.endLayout();
+        const QFontMetrics metrics(part.font);
+        if (painter) {
+            painter->setFont(part.font);
+            painter->setPen(part.color);
+            for (int row = 0; row < lines.size(); ++row) {
+                const auto &line = lines[row];
+                const bool cut = row == lines.size() - 1 && line.textStart() + line.textLength() < part.text.size();
+                const auto shown = cut ? metrics.elidedText(part.text.mid(line.textStart()), Qt::ElideRight, width)
+                                       : part.text.mid(line.textStart(), line.textLength()).trimmed();
+                painter->drawText(QRect(left, top + row * metrics.height(), width, metrics.height()),
+                                  Qt::AlignLeft | Qt::AlignVCenter, shown);
+            }
+        }
+        return lines.size() * metrics.height();
+    }
+    int textHeight(int width) const {
+        int height = 0;
+        for (const auto &part : parts())
+            height += (height ? int(m::chrome::textGap) : 0) + draw(nullptr, part, 0, 0, width);
+        return height;
+    }
+};
+}
+ActionMenu::ActionMenu(QWidget *parent, const ActionMenuHeader &header, const QVector<ActionMenuItem> &items)
+    : ModalOverlay(parent) {
+    setProperty("reader_standard_modal", true);
+    auto *rowsLayout = card()->rows();
+    // The rows reach the card's two-pixel border; only the header keeps the card's margins.
+    rowsLayout->setContentsMargins(2, 2, 2, 2);
+    rowsLayout->setSpacing(0);
+    const bool hasHeader =
+        !header.image.isNull() || !header.title.isEmpty() || !header.detail.isEmpty() || !header.caption.isEmpty();
+    if (hasHeader)
+        rowsLayout->addWidget(new MenuHeader(header, card()));
+    for (const auto &item : items) {
+        // Without a header, the first row's divider would double the card's border.
+        auto *row = new ActionRow(item, hasHeader || !rows.isEmpty(), card());
+        rows.append(row);
+        rowsLayout->addWidget(row);
+        const auto triggered = item.triggered;
+        connect(row, &QPushButton::clicked, this, [this, triggered] {
+            if (dismissed)
+                dismissed();
+            if (triggered)
+                triggered();
+        });
+    }
+    fitCard();
+}
+QPushButton *ActionMenu::action(const QString &name) const {
+    for (auto *row : rows)
+        if (row->objectName() == name)
+            return row;
+    return nullptr;
+}
+}

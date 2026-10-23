@@ -88,6 +88,14 @@ void ListRow::setLeading(const QString &text, int indent) {
     indentation = indent;
     arrange();
 }
+void ListRow::setLeadingIcon(ControlIcon icon) {
+    if (leadingIcon == icon)
+        return;
+    leadingIcon = icon;
+    setIconConfiguration({icon, IconRendition::Action});
+    arrange();
+    update();
+}
 void ListRow::setAccessory(Accessory value) {
     if (accessory == value)
         return;
@@ -241,7 +249,8 @@ void ListRow::arrange() {
         return;
     arranging = true;
     const int end = width() - (action ? int(m::chrome::cellWidth) : 0) - m::list::inset;
-    const int lead = leadingText.isEmpty() ? 0 : int(m::list::leadingWidth);
+    const int lead = leadingIcon ? int(m::control::iconSize + m::chrome::selectorGap)
+                     : leadingText.isEmpty() ? 0 : int(m::list::leadingWidth);
     const auto *trailingCaption = accessory.caption();
     const int trail = trailingCaption ? qMax(trailingCaption->reservedWidth, trailing->textWidth(trailingCaption->text))
                       : accessory.kind() == Accessory::Kind::None ? 0
@@ -264,7 +273,7 @@ void ListRow::arrange() {
         line += count;
         item.first->setText(count > 1 ? item.second : item.first->elidedText(item.second, item.first->width()));
     }
-    leading->setVisible(!leadingText.isEmpty());
+    leading->setVisible(!leadingIcon && !leadingText.isEmpty());
     leading->setText(leadingText);
     leading->setGeometry(m::list::inset, 0, lead, height() - m::control::border);
     trailing->setVisible(trailingCaption != nullptr);
@@ -287,6 +296,15 @@ void ListRow::paintEvent(QPaintEvent *) {
     if (!current && isEnabled() && isDown())
         paper = darkTheme(this) ? QColor("#333333") : QColor("#dddddd");
     painter.fillRect(rect(), paper);
+    if (leadingIcon) {
+        const int side = m::control::iconSize;
+        painter.save();
+        if (!isEnabled())
+            painter.setOpacity(.4);
+        icon().paint(&painter, QRect(m::list::inset, (height() - side) / 2, side, side),
+                     Qt::AlignCenter, QIcon::Normal, current ? QIcon::On : QIcon::Off);
+        painter.restore();
+    }
     const int end = width() - (action ? int(m::chrome::cellWidth) : 0) - m::list::inset;
     if (accessory.kind() == Accessory::Kind::Chevron || accessory.kind() == Accessory::Kind::Check) {
         painter.setRenderHint(QPainter::Antialiasing);

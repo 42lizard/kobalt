@@ -21,4 +21,10 @@ QColor noteColor(const QWidget *widget);
 // The status rule and the heavy lower rule of a view that uses the header geometry.
 void paintHeaderRules(QPainter &painter, const QWidget *view);
 void readerStyle(QWidget *widget, const QString &source);
+// The reader's paper, ink and gray roles in light or dark mode.
+QPalette readerPalette(QPalette base, bool dark);
+// Sets the palette, then replays the widget's reader style sheet. Setting a
+// style sheet takes the gray roles from the platform; no sheet sets them, so
+// the palette's rule and pressed grays are restored afterwards.
+void applyReaderPalette(QWidget *widget, const QPalette &colors);
 }

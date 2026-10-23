@@ -6,7 +6,11 @@
 #include "interfaces/reader/ui/style/theme.h"
 #include "interfaces/reader/views/reading_page.h"
 #include "platforms/desktop/window.h"
+#include "platforms/desktop/services.h"
 #include "platforms/android/start_screen.h"
+#include "platforms/android/canvas.h"
+#include "interfaces/library/library_view.h"
+#include "library/library_store.h"
 #include "reading/reading_density.h"
 #include "storage/reader_storage.h"
 #include "build_info.h"
@@ -15,6 +19,7 @@
 #include "support/strings.h"
 #include "engine/crengine/reader_model.h"
 #include "interfaces/reader/ui/controls/page_scrubber.h"
+#include "interfaces/reader/ui/controls/loading.h"
 #include "interfaces/reader/settings/dictionaries_page.h"
 #include <lvtinydom.h>
 
@@ -151,9 +156,10 @@ struct Fixture {
     const EngineFontInputs fontInputs;
     desktop::Window window;
 
-    explicit Fixture(bool dark = false, bool variableFont = false)
+    // `library` fills the profile with a synthetic library; `reading` marks one book in progress.
+    explicit Fixture(bool dark = false, bool variableFont = false, bool library = false, bool reading = true)
         : fontInputs(engineFontInputs(*assets, {}, variableFont ? directory.path() + "/fonts" : QString(), {})),
-          window(prepare(dark, variableFont), fontInputs, placeholderFontFamily(*assets, *copies),
+          window(prepare(dark, variableFont, library, reading), fontInputs, placeholderFontFamily(*assets, *copies),
                  [this] {
                      ++clockReads;
                      return QStringLiteral("09:00");
@@ -161,13 +167,89 @@ struct Fixture {
         window.resize(920, 800);
         window.show();
     }
-    storage::Paths prepare(bool dark, bool variableFont) {
+    storage::Paths prepare(bool dark, bool variableFont, bool library, bool reading) {
         paths.stateReport = directory.path() + "/state.json";
+        if (library)
+            prepareLibrary(reading);
         prepared = directory.isValid() && storage::writeJson(paths.preferences(), {{"dark_mode", dark}, {"highlight_help_seen", true}});
         if (variableFont)
             prepared = prepared && QDir().mkpath(directory.path() + "/fonts") &&
                        QFile::copy(QStringLiteral(KOBALT_TEST_VARIABLE_FONT), directory.path() + "/fonts/Amstelvar.ttf");
         return paths;
+    }
+    // Invented books and authors exercise series, sorting and cover layouts.
+    // The folder does not exist, so
+    // the start-up check keeps these books instead of rescanning them.
+    void prepareLibrary(bool reading) {
+        struct Run {
+            const char *series, *author;
+            QStringList titles;
+            QColor colour;
+            double megabytes;
+        };
+        const QVector<Run> runs{
+            {"The Neralis Cycle", "Aven Teral",
+             {"Lanterns over Neralis", "The Glass Orchard", "A Map of Quiet Rivers", "The Seventh Weather",
+              "When the Copper Moons Return"}, QColor("#1e3a5a"), 9},
+            {"The Clockwork Marsh", "Mira Vennik",
+             {"The Clockwork Marsh", "The Brass Heron", "An Invitation from the Tides", "The Silent Ferry",
+              "Twelve Keys for Winter", "The Cartographer's Bell", "Where the Moss Remembers", "A Door beneath the Rain"},
+             QColor("#c04a6a"), 1.2},
+            {"The Amber Compass", "Oren Kelwick",
+             {"North of the Amber Compass", "A Crown of Paper Birds", "The Travelling Harbour",
+              "The Last Bridge to Velora", "The Compass Comes Home"}, QColor("#2a3a8a"), 0.8},
+            {"Postcards from Tessel", "Sela Dornet",
+             {"A Small Trouble in Tessel", "The Mayor's Missing Tuesday", "Tea with the Weather Bureau",
+              "The Unlicensed Comet", "A Parcel for Yesterday", "The Museum of Almost Everything",
+              "Three Unreasonable Umbrellas", "The Midnight Queue", "The Borrowed Lighthouse", "A Very Local Eclipse",
+              "The Committee for Lost Socks", "Tessel at Closing Time"}, QColor("#3a6a2a"), 0.6},
+            {"The Veylan Routes", "Jorin Astrel",
+             {"Departure from Veylan", "The Empty Transit", "Signals through the Salt", "The Long Way to Oravel",
+              "All Routes Lead to Morning"}, QColor("#5a3a1a"), 3},
+            {"", "Aven Teral", {"The Orchard beyond the Weather", "A House for Unwritten Letters"}, QColor("#6a2a2a"), 2},
+        };
+        QDir().mkpath(directory.path() + "/library-covers");
+        QJsonArray books;
+        int number = 0;
+        for (const auto &run : runs)
+            for (int i = 0; i < run.titles.size(); ++i, ++number) {
+                const auto key = QString("/kobalt-fixture-library/%1.epub").arg(number);
+                const auto cover = QString("cover-%1.png").arg(number);
+                QImage image(240, 360, QImage::Format_RGB32);
+                image.fill(run.colour.lighter(100 + 12 * (i % 4)));
+                QPainter painter(&image);
+                painter.setPen(Qt::white);
+                painter.setFont(QFont(ui::interfaceFont().family(), 22));
+                painter.drawText(image.rect().adjusted(16, 16, -16, -16), Qt::AlignTop | Qt::TextWordWrap,
+                                 run.titles[i]);
+                painter.end();
+                image.save(directory.path() + "/library-covers/" + cover);
+                QJsonObject book{{"key", key},
+                                 {"folder", "/kobalt-fixture-library"},
+                                 {"name", run.titles[i] + ".epub"},
+                                 {"title", run.titles[i]},
+                                 {"author", run.author},
+                                 {"cover", cover},
+                                 {"size", run.megabytes * (1 + i % 3) * 1024 * 1024},
+                                 {"added", double(1700000000000LL + number * 1000)},
+                                 {"metadata", 1}};
+                if (*run.series) {
+                    book["series"] = run.series;
+                    book["series_index"] = i + 1;
+                }
+                // Reading the first series: two finished, the third in progress.
+                if (reading && number < 3) {
+                    book["opened"] = double(1710000000000LL + number * 1000);
+                    book["percent"] = number < 2 ? 100 : 38;
+                    book["finished"] = number < 2;
+                }
+                books.append(book);
+            }
+        storage::writeJson(directory.path() + "/library.json",
+                           QJsonObject{{"schema", 1},
+                                       {"folders", QJsonArray{QJsonObject{{"key", "/kobalt-fixture-library"},
+                                                                          {"label", "Books"}}}},
+                                       {"books", books}});
     }
     ~Fixture() {
         window.close();
@@ -669,7 +751,7 @@ private slots:
         // libpng errors or CREngine's direct printf diagnostics.
         QProcess child;
         child.setProcessChannelMode(QProcess::MergedChannels);
-        child.start(QCoreApplication::applicationFilePath(), {"startup", "covers", "reading:0-light", "errors", "features"});
+        child.start(QCoreApplication::applicationFilePath(), {"startup", "libraryOnboarding", "reading:0-light", "errors", "features"});
         // Leave time to kill and reap the child before the CMake parent's limit.
         const bool finished = child.waitForFinished(20000);
         if (!finished) {
@@ -717,41 +799,165 @@ private slots:
         QCOMPARE(fixture.window.findChild<QComboBox *>("desktopScreenPicker")->currentIndex(), 1);
         QCOMPARE(fixture.window.findChild<QComboBox *>("desktopResolutionPicker")->currentData().toInt(), 0);
         QVERIFY(!fixture.window.readerWindow());
-        QVERIFY(fixture.window.findChild<QPushButton *>("androidOpenBook"));
+        auto *start = fixture.window.findChild<android::StartScreen *>();
+        QVERIFY(start && start->libraryShown());
+        QVERIFY(start->library()->findChild<QPushButton *>("libraryOpenBook")->isVisible());
+        QVERIFY(!start->findChild<QWidget *>("androidIntro"));
     }
-    void covers() {
+    void libraryOnboarding() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        library::Store store(directory.path(), std::make_shared<library::LocalSource>());
+        android::StartScreen start(desktop::readerServices().presentation, store);
+        start.resize(640, 800);
+        start.show();
+        QVERIFY(start.libraryShown());
+        QVERIFY(!start.dismissModal());
+        auto *view = start.library();
+        QVERIFY(!view->findChild<QPushButton *>("libraryBack"));
+        QVERIFY(!view->findChild<QWidget *>("librarySort")->isVisible());
+        QVERIFY(!view->findChild<QPushButton *>("libraryViewGrid")->isVisible());
+        QVERIFY(!view->findChild<QPushButton *>("libraryLeave"));
+        QSignalSpy open(&start, &android::StartScreen::libraryOpenRequested);
+        view->findChild<QPushButton *>("libraryOpenBook")->click();
+        QTRY_COMPARE(open.count(), 1);
+        QVERIFY(start.libraryShown());
+        QVERIFY(QDir().mkpath(directory.path() + "/books"));
+        QVERIFY(QFile::copy(book, directory.path() + "/books/first.epub"));
+        connect(&start, &android::StartScreen::addFolderRequested, &start, [&] {
+            store.addFolder({directory.path() + "/books", "Books"});
+        });
+        view->findChild<QPushButton *>("libraryChooseFolder")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(!store.index().folders.isEmpty() && !store.scanning(), 10000);
+        QCOMPARE(store.index().visibleCount(), 1);
+        QVERIFY(!view->findChild<QWidget *>("libraryEmpty")->isVisible());
+        QVERIFY(view->findChild<QPushButton *>("librarySort")->isVisible());
+        QVERIFY(start.libraryShown());
+    }
+    void library() {
         Fixture fixture;
         QVERIFY(fixture.prepared);
         auto *start = fixture.window.findChild<android::StartScreen *>();
         QVERIFY(start);
-        auto *card = start->findChild<QPushButton *>("androidLastBook");
-        QVERIFY(card);
-        const auto hasCover = [card] {
-            const auto image = card->grab().toImage().convertToFormat(QImage::Format_RGB32);
-            int colored = 0;
-            for (int y = 0; y < image.height(); ++y) {
-                const auto *row = reinterpret_cast<const QRgb *>(image.constScanLine(y));
-                for (int x = 0; x < image.width(); ++x)
-                    colored += row[x] == qRgb(255, 0, 255);
-            }
-            return colored > 100;
+        const auto libraryBooks = [&fixture] {
+            return storage::readJsonFile(fixture.directory.path() + "/library.json", 1 << 20)
+                .object.value("books")
+                .toArray();
         };
-        QJsonObject recent{{"path", book}, {"title", "A book without a cover"}};
-        start->setLastBook(recent);
-        QTRY_VERIFY(card->isVisible());
-        QVERIFY(!hasCover());
-        QImage cover(20, 30, QImage::Format_RGB32);
-        cover.fill(Qt::magenta);
-        QByteArray bytes;
-        QBuffer buffer(&bytes);
-        QVERIFY(buffer.open(QIODevice::WriteOnly));
-        QVERIFY(cover.save(&buffer, "PNG"));
-        recent["cover"] = QString::fromLatin1(bytes.toBase64());
-        start->setLastBook(recent);
-        QTRY_VERIFY(hasCover());
-        recent.remove("cover");
-        start->setLastBook(recent);
-        QVERIFY(!hasCover());
+        QVERIFY(start->libraryShown());
+        QTRY_COMPARE(start->library()->size(), QSize(1072, 1448));
+        QVERIFY(start->library()->findChild<QWidget *>("libraryEmpty")->isVisible());
+        // Menu, Finder and dropped paths use this same entry point.
+        QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
+        fixture.window.openBook(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        fixture.window.readerWindow()->close();
+        QTRY_VERIFY_WITH_TIMEOUT(fixture.window.idle(), 30000);
+        QVERIFY(start->libraryShown());
+        QTRY_VERIFY_WITH_TIMEOUT(libraryBooks().size() == 1, 5000);
+        QVERIFY(libraryBooks().first().toObject().value("opened").toDouble() > 0);
+        fixture.window.openBook(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
+        fixture.window.readerWindow()->close();
+        QTRY_VERIFY_WITH_TIMEOUT(fixture.window.idle(), 30000);
+        QCOMPARE(libraryBooks().size(), 1);
+        // Its cover is saved and the cover grid draws it. The library itself and
+        // the drawing for a missing cover are gray; the fixture's cover is tan.
+        const auto cover = libraryBooks().first().toObject().value("cover").toString();
+        QVERIFY(!cover.isEmpty());
+        QVERIFY(!QImage(fixture.directory.path() + "/library-covers/" + cover).isNull());
+        const auto pages = start->library()->findChild<QWidget *>("libraryPages")->grab().toImage().convertToFormat(
+            QImage::Format_RGB32);
+        int coloured = 0;
+        for (int y = 0; y < pages.height(); y += 4)
+            for (int x = 0; x < pages.width(); x += 4) {
+                const QRgb pixel = pages.pixel(x, y);
+                coloured += qAbs(qRed(pixel) - qBlue(pixel)) > 12;
+            }
+        QVERIFY2(coloured > 200, "The cover grid did not draw the book's cover");
+
+        // Library is the root, not a page above an intro screen.
+        QVERIFY(!start->dismissModal());
+        QVERIFY(start->libraryShown());
+    }
+    void libraryGridRows() {
+        // 37 books. Medium covers make 4 by 3 on both previews, four pages.
+        // On the 7-inch, Small makes 5 by 4 (two pages) and Large 3 by 2 (seven).
+        Fixture fixture(false, false, true, true);
+        QVERIFY(fixture.prepared);
+        auto *start = fixture.window.findChild<android::StartScreen *>();
+        auto *picker = fixture.window.findChild<QComboBox *>("desktopScreenPicker");
+        QVERIFY(start && picker);
+        start->showLibrary();
+        auto *view = start->library();
+        auto *canvas = start->libraryCanvas();
+        auto *counter = view->findChild<QLabel *>("libraryPage");
+        QVERIFY(counter);
+        const auto pages = [](int count) {
+            return strings::get("navigation.page_count").arg(1).arg(count);
+        };
+        for (const int preset : {1, 2}) {
+            picker->setCurrentIndex(preset);
+            QTRY_VERIFY(view->isVisible() && view->size() == canvas->sceneRect().size().toSize() &&
+                        view->width() == (preset == 1 ? 1072 : 1264));
+            QTRY_COMPARE(counter->text(), pages(4));
+        }
+        const auto chooseCover = [view](const char *name) {
+            view->findChild<QPushButton *>("librarySort")->click();
+            auto *choice = view->findChild<QAbstractButton *>(name);
+            QVERIFY(choice && choice->isVisible());
+            choice->click();
+        };
+        chooseCover("libraryCoverSmall");
+        QTRY_COMPARE(counter->text(), pages(2));
+        chooseCover("libraryCoverLarge");
+        QTRY_COMPARE(counter->text(), pages(7));
+    }
+    void libraryHold() {
+        // Holding a book opens its menu in every view, through the canvas as
+        // the Mac app delivers the press.
+        Fixture fixture(false, false, true, true);
+        QVERIFY(fixture.prepared);
+        auto *start = fixture.window.findChild<android::StartScreen *>();
+        QVERIFY(start);
+        start->showLibrary();
+        auto *view = start->library();
+        auto *canvas = start->libraryCanvas();
+        QTRY_VERIFY(view->isVisible() && view->size() == canvas->sceneRect().size().toSize() && view->width() > 600);
+        auto *pages = view->findChild<QWidget *>("libraryPages");
+        QVERIFY(pages);
+        for (const char *mode : {"libraryViewGrid", "libraryViewList", "libraryViewHome"}) {
+            view->findChild<QPushButton *>(mode)->click();
+            // The first book: the top left of the pages, inside its cover or row.
+            const QPoint inPages(pages->width() / 8, pages->height() / 8);
+            const QPoint point = canvas->mapFromScene(QPointF(pages->mapTo(view, inPages)));
+            QTest::mousePress(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+            // A resting finger drifts a few points; the hold must survive that.
+            const QPoint drift = point + QPoint(4, 3);
+            QMouseEvent move(QEvent::MouseMove, drift, canvas->viewport()->mapToGlobal(drift), Qt::NoButton,
+                             Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(canvas->viewport(), &move);
+            QTRY_VERIFY_WITH_TIMEOUT(view->findChild<QWidget *>("libraryBookMenu"), 2000);
+            QTest::mouseRelease(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, drift);
+            QVERIFY(view->dismiss());
+            QTRY_VERIFY(!view->findChild<QWidget *>("libraryBookMenu"));
+        }
+        // Switching views closes the sort choices.
+        view->findChild<QPushButton *>("libraryViewGrid")->click();
+        view->findChild<QPushButton *>("librarySort")->click();
+        auto *sheet = view->findChild<QWidget *>("librarySortSheet");
+        QVERIFY(sheet && sheet->isVisible());
+        view->findChild<QPushButton *>("libraryViewList")->click();
+        QVERIFY(!sheet->isVisible());
+    }
+    void libraryAtStart() {
+        // Once there is a library, a fresh start opens on it.
+        Fixture fixture(false, false, true, false);
+        QVERIFY(fixture.prepared);
+        auto *start = fixture.window.findChild<android::StartScreen *>();
+        QVERIFY(start && start->libraryShown());
+        QVERIFY(!start->dismissModal());
+        QVERIFY(start->libraryShown());
     }
     void reading_data() { variants(); }
     void reading() {
@@ -909,25 +1115,73 @@ private slots:
         QMouseEvent hoverEvent(QEvent::MouseMove, point, canvas->viewport()->mapToGlobal(point), Qt::NoButton,
                                Qt::NoButton, Qt::NoModifier);
         QApplication::sendEvent(canvas->viewport(), &hoverEvent);
-        QVERIFY(!canvas->cursor().pixmap().isNull());
-        const auto hover = canvas->cursor().pixmap().toImage();
+        QVERIFY(QApplication::overrideCursor());
+        const auto hover = QApplication::overrideCursor()->pixmap().toImage();
         QVERIFY(!hover.isNull());
-        QCOMPARE(canvas->cursor().hotSpot(), QPoint(14, 14));
+        QCOMPARE(QApplication::overrideCursor()->hotSpot(), QPoint(14, 14));
         QCOMPARE(hover.pixelColor(0, 0).alpha(), 0);
         QCOMPARE(hover.pixelColor(hover.width() / 2, hover.height() / 2).alpha(), 128);
         QTest::mousePress(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, point);
-        const auto pressed = canvas->cursor().pixmap().toImage();
+        const auto pressed = QApplication::overrideCursor()->pixmap().toImage();
         QVERIFY(pressed.pixelColor(pressed.width() / 2, pressed.height() / 2).alpha() >
                 hover.pixelColor(hover.width() / 2, hover.height() / 2).alpha());
         QTest::mouseRelease(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, point);
-        QCOMPARE(canvas->cursor().pixmap().toImage(), hover);
+        QCOMPARE(QApplication::overrideCursor()->pixmap().toImage(), hover);
         QEvent leave(QEvent::Leave);
-        QApplication::sendEvent(canvas->viewport(), &leave);
-        QVERIFY(canvas->cursor().pixmap().isNull());
+        QApplication::sendEvent(&fixture.window, &leave);
+        QVERIFY(!QApplication::overrideCursor());
         auto *screens = fixture.window.findChild<QComboBox *>("desktopScreenPicker");
         screens->setCurrentIndex(0);
         QTest::mouseMove(canvas->viewport(), point + QPoint(1, 0));
-        QVERIFY(canvas->cursor().pixmap().isNull());
+        QVERIFY(!QApplication::overrideCursor());
+    }
+    void touchCursorOutsideReader() {
+        // E-reader presets use the touch pointer across the whole window,
+        // including the preview toolbar and the space around the device.
+        Fixture fixture(false);
+        QVERIFY(fixture.prepared);
+        auto *start = fixture.window.findChild<android::StartScreen *>();
+        auto *picker = fixture.window.findChild<QComboBox *>("desktopScreenPicker");
+        QVERIFY(start && picker);
+        const auto hover = [](QWidget *target) {
+            const QPoint point = target->rect().center();
+            QMouseEvent move(QEvent::MouseMove, point, target->mapToGlobal(point), Qt::NoButton, Qt::NoButton,
+                             Qt::NoModifier);
+            QApplication::sendEvent(target, &move);
+        };
+        const auto touchPointer = [] {
+            const auto *cursor = QApplication::overrideCursor();
+            return cursor && !cursor->pixmap().isNull() && cursor->hotSpot() == QPoint(14, 14);
+        };
+        hover(start);
+        QVERIFY(touchPointer());
+        hover(picker);
+        QVERIFY(touchPointer());
+        start->showLibrary();
+        auto *library = start->libraryCanvas();
+        QTRY_VERIFY(library->isVisible());
+        hover(library->viewport());
+        QVERIFY(touchPointer());
+        hover(picker);
+        QVERIFY(touchPointer());
+        hover(&fixture.window);
+        QVERIFY(touchPointer());
+        // The seven-inch preset follows the same rule.
+        picker->setCurrentIndex(2);
+        hover(picker);
+        QVERIFY(touchPointer());
+        QEvent leave(QEvent::Leave);
+        QApplication::sendEvent(&fixture.window, &leave);
+        QVERIFY(!touchPointer());
+        hover(picker);
+        QVERIFY(touchPointer());
+        QEvent deactivate(QEvent::WindowDeactivate);
+        QApplication::sendEvent(&fixture.window, &deactivate);
+        QVERIFY(!touchPointer());
+        // Fill window keeps the normal pointer.
+        picker->setCurrentIndex(0);
+        hover(library->viewport());
+        QVERIFY(!touchPointer());
     }
     void wordSelection_data() { annotationSelection_data(); }
     void wordSelection() {
@@ -3027,9 +3281,10 @@ private slots:
         fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
         const auto device = QStringList{"fill", "six-inch", "seven-inch"}.at(preset);
         const auto name = device + (dark ? "-dark" : "-light");
-        if (!dark) {
-            QVERIFY(capture(fixture, device + "-startup"));
-        }
+        // Onboarding is part of the Library and follows both themes.
+        auto *start = fixture.window.findChild<android::StartScreen *>();
+        QTRY_VERIFY(start && start->width() > 300);
+        QVERIFY(capture(fixture, name + "-library-empty"));
         QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
         fixture.window.openBook(book);
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
@@ -3042,6 +3297,135 @@ private slots:
         openPrologueBody(fixture);
         QVERIFY(capture(fixture, name + "-reading"));
         tour(fixture, name, true);
+    }
+    void library_data() { variants(); }
+    void library() {
+        QFETCH(int, preset);
+        QFETCH(bool, dark);
+        const auto device = QStringList{"fill", "six-inch", "seven-inch"}.at(preset);
+        const auto name = device + (dark ? "-dark" : "-light") + "-library";
+        {
+            Fixture fixture(dark);
+            QVERIFY(fixture.prepared);
+            fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
+            auto *start = fixture.window.findChild<android::StartScreen *>();
+            auto *view = start->library();
+            auto *canvas = start->libraryCanvas();
+            QTRY_VERIFY(view->isVisible() && view->size() == canvas->sceneRect().size().toSize() &&
+                        view->width() > 600);
+            view->findChild<QPushButton *>("libraryMore")->click();
+            view->findChild<QPushButton *>("libraryMoreFolders")->click();
+            QTRY_VERIFY(view->findChild<QWidget *>("libraryFolders")->isVisible());
+            QVERIFY(capture(fixture, name + "-folders-empty"));
+        }
+        for (const bool reading : {true, false}) {
+            Fixture fixture(dark, false, true, reading);
+            QVERIFY(fixture.prepared);
+            fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(preset);
+            auto *start = fixture.window.findChild<android::StartScreen *>();
+            QVERIFY(start);
+            start->showLibrary();
+            auto *view = start->library();
+            // The preset applies on a short timer; wait until the library has the reader's size.
+            auto *canvas = start->libraryCanvas();
+            QTRY_VERIFY(view->isVisible() && view->size() == canvas->sceneRect().size().toSize() &&
+                        view->width() > 600);
+            // The library opens as a cover grid.
+            QVERIFY(capture(fixture, name + (reading ? "-grid" : "-grid-new")));
+            const auto press = [view](const char *control) {
+                auto *button = view->findChild<QAbstractButton *>(control);
+                QVERIFY2(button && button->isVisible() && button->isEnabled(), control);
+                button->click();
+            };
+            const auto bookMenu = [view] {
+                auto *pages = view->findChild<QWidget *>("libraryPages");
+                const QPoint point(pages->width() / 8, pages->height() / 8);
+                QContextMenuEvent menu(QContextMenuEvent::Mouse, point, pages->mapToGlobal(point));
+                QApplication::sendEvent(pages, &menu);
+                QVERIFY(view->findChild<QWidget *>("libraryBookMenu"));
+            };
+            if (reading) {
+                // A pressed cover gets its frame. Releasing on paper opens nothing.
+                auto *pages = view->findChild<QWidget *>("libraryPages");
+                QVERIFY(pages);
+                const QPoint book(pages->width() / 8, pages->height() / 8);
+                QTest::mousePress(pages, Qt::LeftButton, Qt::NoModifier, book);
+                QVERIFY(capture(fixture, name + "-pressed"));
+                QTest::mouseRelease(pages, Qt::LeftButton, Qt::NoModifier, QPoint(pages->width() - 2, pages->height() - 2));
+                // The book's menu, opened at once with a secondary click rather than a timed hold.
+                QContextMenuEvent menu(QContextMenuEvent::Mouse, book, pages->mapToGlobal(book));
+                QApplication::sendEvent(pages, &menu);
+                QVERIFY(view->findChild<QWidget *>("libraryBookMenu"));
+                QVERIFY(capture(fixture, name + "-book-menu"));
+                press("libraryBookMenuRemove");
+                QTRY_VERIFY(view->findChild<QPushButton *>("libraryRemoveCancel")->isVisible());
+                QVERIFY(capture(fixture, name + "-remove-confirmation"));
+                press("libraryRemoveCancel");
+            } else {
+                bookMenu();
+                QVERIFY(capture(fixture, name + "-new-book-menu"));
+                QVERIFY(view->dismiss());
+            }
+            // Home shows only the books in progress, or a note when there are none.
+            press("libraryViewHome");
+            QVERIFY(capture(fixture, name + (reading ? "-home" : "-home-empty")));
+            if (!reading)
+                continue;
+            bookMenu();
+            QVERIFY(capture(fixture, name + "-reading-book-menu"));
+            QVERIFY(view->dismiss());
+            press("libraryViewList");
+            QVERIFY(capture(fixture, name + "-list"));
+            press("libraryNext");
+            QVERIFY(capture(fixture, name + "-list-next"));
+            press("libraryPrevious");
+            press("librarySearch");
+            auto *query = view->findChild<QLineEdit *>("librarySearchQuery");
+            QVERIFY(query && query->isVisible());
+            query->setText("Neralis");
+            QVERIFY(capture(fixture, name + "-search-results"));
+            query->setText("No matching invented book");
+            QVERIFY(capture(fixture, name + "-search-empty"));
+            press("libraryCloseSearch");
+            press("librarySort");
+            QVERIFY(capture(fixture, name + "-sort"));
+            auto *bySeries = view->findChild<QAbstractButton *>("librarySortSeries");
+            QVERIFY(bySeries);
+            bySeries->click();
+            QVERIFY(capture(fixture, name + "-list-series"));
+            press("libraryViewGrid");
+            press("librarySort");
+            QVERIFY(capture(fixture, name + "-grid-sort"));
+            press("libraryCoverSmall");
+            QVERIFY(capture(fixture, name + "-grid-small"));
+            press("librarySort");
+            press("libraryCoverLarge");
+            QVERIFY(capture(fixture, name + "-grid-large"));
+            press("libraryPrevious"); // The pager wraps from the first page to the last.
+            QVERIFY(capture(fixture, name + "-grid-last"));
+            press("libraryMore");
+            QVERIFY(capture(fixture, name + "-more"));
+            press("libraryMoreFolders");
+            QTRY_VERIFY(view->findChild<QWidget *>("libraryFolders")->isVisible());
+            QVERIFY(capture(fixture, name + "-folders"));
+            press("libraryFoldersBack");
+            view->setScanning(true, 17);
+            auto *progress = dynamic_cast<ui::LoadingIndicator *>(view->findChild<QWidget *>("libraryScanProgress"));
+            QVERIFY(progress);
+            QTRY_VERIFY(progress->isVisible() && progress->isRunning());
+            // Capture the same revealed animation frame on every run.
+            auto *timer = progress->findChild<QTimer *>();
+            QVERIFY(timer);
+            progress->start(0);
+            timer->stop();
+            QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+            timer->stop();
+            QVERIFY(capture(fixture, name + "-scanning"));
+            view->setScanning(false, 17);
+            start->showLibraryError("This EPUB could not be opened. Choose another book or try again.");
+            QTRY_VERIFY(view->findChild<QPushButton *>("libraryNoticeOk")->isVisible());
+            QVERIFY(capture(fixture, name + "-opening-error"));
+        }
     }
 };
 
@@ -3164,7 +3548,10 @@ int main(int argc, char **argv) {
         return result;
     }
     QFile fixture(book);
-    if (!fixture.open(QIODevice::ReadOnly) || captures.size() != 133) {
+    constexpr int expectedScreenshots = 280;
+    if (captures.size() != expectedScreenshots)
+        qCritical() << "Expected" << expectedScreenshots << "screenshots, captured" << captures.size();
+    if (!fixture.open(QIODevice::ReadOnly) || captures.size() != expectedScreenshots) {
         return 2;
     }
     const QJsonObject manifest{{"schema", 1}, {"generator", "kobalt-desktop"}, {"qt", qVersion()}, {"version", KOBALT_VERSION},

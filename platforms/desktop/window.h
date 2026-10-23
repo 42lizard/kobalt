@@ -1,5 +1,6 @@
 #pragma once
 #include "platforms/android/reader.h"
+#include "library/library_store.h"
 #include <QMainWindow>
 #include <QTimer>
 
@@ -49,6 +50,9 @@ private:
     // This controller and canvas contain no Android API calls. Reuse their
     // publication lifetime and physical-pixel rendering on the desktop.
     android::ReaderController controller;
+    library::Store store;
+    // The library entry of the book being read.
+    QString openedKey;
     QStackedWidget *stack;
     DeviceFrame *deviceFrame;
     android::StartScreen *start;
@@ -68,6 +72,8 @@ private:
     void selectScreen(int index);
     void setPreviewControlsEnabled(bool enabled);
     void chooseBook();
+    void chooseFolder();
+    void recordProgress();
     void turnPage(int direction);
 };
 }

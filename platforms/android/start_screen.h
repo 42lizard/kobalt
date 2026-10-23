@@ -1,51 +1,66 @@
 #pragma once
-#include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader_interface.h"
 #include <QStackedWidget>
-#include <QJsonObject>
 
-class QScrollArea;
-
-class QLabel;
-class QPushButton;
-
-namespace kobalt::ui {
-class ChoiceModal;
+namespace kobalt::library {
+class LibraryView;
+class Store;
 }
 
 namespace kobalt::android {
 class WidgetCanvas;
-// Qt-only launch UI. The Android host supplies document picking and exit.
+// Qt-only library and book-opening UI. The host supplies document and folder
+// picking, file access and exit.
 class StartScreen final : public QStackedWidget {
     Q_OBJECT
 public:
-    explicit StartScreen(PresentationFactory presentation, QWidget *parent = nullptr);
+    StartScreen(PresentationFactory presentation, library::Store &store, QWidget *parent = nullptr);
     ~StartScreen() override;
-    void showReady();
-    void setLastBook(const QJsonObject &book);
     void showOpening();
     void setProgress(int percent);
-    void showError(const QString &error);
-    void showForgetError();
+    // Closes the library's topmost layer. False at the root library.
     bool dismissModal();
+    void showLibrary();
+    bool libraryShown() const;
+    // Follows the reader's dark mode setting.
+    void setDark(bool dark);
+    library::LibraryView *library();
+    WidgetCanvas *libraryCanvas();
+    // By default the library fills its canvas at the display's pixel ratio,
+    // as on Android. A host that scales the reader itself, like the desktop
+    // app, gives the library the same reader size and scale.
+    void setLibraryScale(QSize pixels, qreal scale, bool nativePixels, qreal rasterScale);
+    // An opening error for a book chosen in the library, shown over the library.
+    void showLibraryError(const QString &error);
+    // On Android a book opened from the library on its own is Kobalt's copy,
+    // which removal deletes. The confirmation says so.
+    void setSingleBooksAreCopies(bool value);
 signals:
-    void openRequested();
-    void reopenRequested(QString path);
     void exitRequested();
-    void forgetRequested();
+    // From the library: open one of its books, add a folder, or open and add
+    // a single book.
+    void bookRequested(QString key);
+    void addFolderRequested();
+    void libraryOpenRequested();
+    void removeBookRequested(QString key);
+    void removeFolderRequested(QString key);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
 
 private:
-    QScrollArea *intro;
     std::unique_ptr<ReaderOpeningView> opening;
     PresentationFactory presentation;
-    QLabel *message, *detail;
-    QPushButton *open, *reopen;
-    QString lastPath;
-    ui::ChoiceModal *forgetModal = nullptr;
-    WidgetCanvas *modalCanvas = nullptr;
-    void askToForget();
+    library::Store &store;
+    WidgetCanvas *canvas = nullptr;
+    library::LibraryView *view = nullptr;
+    bool dark = false, hostScaled = false, singleBooksAreCopies = false;
+    struct Scale {
+        QSize pixels;
+        qreal scale = 1, rasterScale = 1;
+        bool nativePixels = false;
+    } scale;
+    void buildLibrary();
+    void fitLibrary();
 };
 }

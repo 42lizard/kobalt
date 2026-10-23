@@ -238,6 +238,10 @@ inline const QRectF handoffLabel{28, 429, 346, 28};
 inline const QRectF handoffDetail{28, 463, 346, 24};
 inline const QRectF handoffHint{28, 499, 346, 18};
 }
+namespace actionMenu {
+// A cover thumbnail in the menu header, 2:3 like a book cover.
+inline constexpr Px thumbnailWidth{112}, thumbnailHeight{168};
+}
 namespace notice {
 inline constexpr int backdropFadeAlpha = 90, backdropLineAlpha = 150, backdropLineGray = 85;
 inline constexpr Px backdropPitch{18};

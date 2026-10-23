@@ -53,6 +53,10 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
         phosphorGeometry(icon == ControlIcon::Sort ? QStringLiteral("sort-ascending")
                          : icon == ControlIcon::OneColumn ? QStringLiteral("text-align-justify")
                                                          : QStringLiteral("text-columns"), path);
+    } else if (icon == ControlIcon::FolderPlus || icon == ControlIcon::Folders) {
+        result.canvas = 256;
+        result.filled = true;
+        phosphorGeometry(icon == ControlIcon::FolderPlus ? QStringLiteral("folder-plus") : QStringLiteral("folders"), path);
     } else if (icon == ControlIcon::SelectionStart || icon == ControlIcon::SelectionEnd) {
         const bool start = icon == ControlIcon::SelectionStart;
         const int caret = start ? 12 : 52;
@@ -63,7 +67,7 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
         line(left, 20, right, 20);
         line(left, 32, right, 32);
         line(left, 44, right - 8, 44);
-    } else if (icon == ControlIcon::Annotate ||
+    } else if (icon == ControlIcon::Annotate || icon == ControlIcon::Trash ||
                (icon >= ControlIcon::SaveHighlight && icon <= ControlIcon::RemoveHighlight)) {
         const char *name = "highlighter";
         switch (icon) {
@@ -80,6 +84,7 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
             name = "pencil-simple";
             break;
         case ControlIcon::RemoveHighlight:
+        case ControlIcon::Trash:
             name = "trash";
             break;
         default:
@@ -116,6 +121,39 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
         path.cubicTo(21, 13, 22, 15, 21, 18);
         path.lineTo(20, 21);
         path.closeSubpath();
+    } else if (icon >= ControlIcon::Rows && icon <= ControlIcon::Check) {
+        // Kobalt's own drawings, on Phosphor's 24-unit grid with its stroke.
+        result.canvas = 24;
+        result.stroke = 1.5;
+        if (icon == ControlIcon::Rows) {
+            path.addRect(QRectF(3, 4, 4, 6));
+            path.addRect(QRectF(3, 14, 4, 6));
+            line(10, 5.5, 21, 5.5);
+            line(10, 8.5, 17, 8.5);
+            line(10, 15.5, 21, 15.5);
+            line(10, 18.5, 17, 18.5);
+        } else if (icon == ControlIcon::Grid) {
+            path.addRect(QRectF(4, 3, 6.5, 8));
+            path.addRect(QRectF(13.5, 3, 6.5, 8));
+            path.addRect(QRectF(4, 13, 6.5, 8));
+            path.addRect(QRectF(13.5, 13, 6.5, 8));
+        } else if (icon == ControlIcon::Home) {
+            path.moveTo(3, 11);
+            path.lineTo(12, 3.5);
+            path.lineTo(21, 11);
+            path.moveTo(5.5, 9.5);
+            path.lineTo(5.5, 20.5);
+            path.lineTo(18.5, 20.5);
+            path.lineTo(18.5, 9.5);
+            path.moveTo(10, 20.5);
+            path.lineTo(10, 14.5);
+            path.lineTo(14, 14.5);
+            path.lineTo(14, 20.5);
+        } else {
+            path.moveTo(4, 12.5);
+            path.lineTo(9.5, 18);
+            path.lineTo(20, 6.5);
+        }
     } else if (icon == ControlIcon::RotationBoth) {
         path.addRoundedRect(QRectF(6, 10, 20, 36), 2, 2);
         path.addRoundedRect(QRectF(32, 24, 28, 22), 2, 2);
@@ -201,7 +239,12 @@ void paintGeometry(QPainter &painter, const Geometry &shape, ControlIcon glyph, 
         const qreal fraction =
             qreal(glyph == ControlIcon::Close ? int(m::control::closeInkSize) : int(m::control::actionInkSize)) /
             int(m::control::iconCanvas);
-        const qreal factor = side * fraction / qMax(bounds.width(), bounds.height());
+        // Phosphor regular assets share a 256-unit canvas and 16-unit strokes.
+        // Fitting each silhouette separately changes that stroke weight. Use
+        // the same scale, anchored to the Settings icon's 224-unit extent.
+        const qreal extent = shape.canvas == 256 && glyph != ControlIcon::Close
+                                 ? 224.0 : qMax(bounds.width(), bounds.height());
+        const qreal factor = side * fraction / extent;
         painter.translate(side / 2, side / 2);
         painter.scale(factor, factor);
         painter.translate(-bounds.center());
@@ -316,9 +359,10 @@ void paintOpeningIcon(QPainter &painter, ControlIcon icon, const QRectF &bounds,
     paintGeometry(painter, geometry(icon, false), icon, bounds, color, IconRendition::OriginalAsset);
 }
 QIcon controlIcon(ControlIcon icon, QColor color, bool sideButtons) {
-    if (int(icon) < 0 || (int(icon) > int(ControlIcon::System) && icon != ControlIcon::PreviousChapter &&
-                          icon != ControlIcon::NextChapter && icon != ControlIcon::Sort &&
-                          icon != ControlIcon::ArrowDownRight))
+    if (int(icon) < 0 ||
+        (int(icon) > int(ControlIcon::System) && icon != ControlIcon::PreviousChapter &&
+         icon != ControlIcon::NextChapter && icon != ControlIcon::Sort && icon != ControlIcon::ArrowDownRight &&
+         (icon < ControlIcon::Rows || icon > ControlIcon::Folders)))
         return {};
     return QIcon(new VectorIconEngine(icon, color, sideButtons));
 }

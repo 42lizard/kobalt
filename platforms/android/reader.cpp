@@ -44,6 +44,14 @@ bool ReaderController::forgetLastBook() {
     const auto file = paths.directory + "/last-book.json";
     return !QFile::exists(file) || QFile::remove(file);
 }
+QJsonObject ReaderController::savedState(const QString &path) const {
+    const auto identity = QUrl::fromLocalFile(QFileInfo(path).absoluteFilePath()).toString();
+    const auto saved = storage::readJson(paths.bookState(identity));
+    return saved.value("book").toString() == identity ? saved : QJsonObject();
+}
+QJsonObject ReaderController::preferences() const {
+    return appearance::readerPreferences(storage::readJson(paths.preferences()), {});
+}
 void ReaderController::open(const QString &path, QSize pixels) {
     if (phase == Phase::Reading && path == current)
         return;

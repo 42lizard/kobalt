@@ -68,7 +68,7 @@ configure_file("${source}/support/build_info.h.in" build_info.h @ONLY)
 # Keep portable objects separate so UI edits do not relink standalone checks.
 file(GLOB_RECURSE shared CONFIGURE_DEPENDS
     "${source}/dictionaries/*.cpp" "${source}/engine/*.cpp"
-    "${source}/model/*.cpp"
+    "${source}/library/*.cpp" "${source}/model/*.cpp"
     "${source}/reading/*.cpp" "${source}/storage/*.cpp")
 add_library(kobalt-core OBJECT ${shared} display.cpp
     "${source}/assets/assets.cpp" "${source}/assets/bundled_fonts.cpp" "${source}/assets/font_catalog.cpp"
@@ -106,8 +106,46 @@ add_library(kobalt-desktop OBJECT ${interfaces}
     "${source}/platform/api/reader_orientation.cpp")
 target_link_libraries(kobalt-desktop PUBLIC kobalt-core)
 target_compile_options(kobalt-desktop PRIVATE -Wall -Wextra)
+# A build from a linked Git worktree is a variant named after the worktree's
+# folder. A variant has its own name, bundle identifier and profile, so it can
+# run beside other builds, and it opens no file types, so macOS does not offer
+# every branch build for EPUB files. Set KOBALT_MAC_VARIANT to an empty string
+# to build the regular app from a worktree.
+execute_process(COMMAND git rev-parse --path-format=absolute --git-dir --git-common-dir
+    WORKING_DIRECTORY "${KOBALT_ROOT}" OUTPUT_VARIABLE git_dirs OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY)
+string(REPLACE "\n" ";" git_dirs "${git_dirs}")
+list(GET git_dirs 0 git_dir)
+list(GET git_dirs 1 git_common_dir)
+set(default_variant "")
+if(NOT git_dir STREQUAL git_common_dir)
+    get_filename_component(default_variant "${KOBALT_ROOT}" NAME)
+endif()
+set(KOBALT_MAC_VARIANT "${default_variant}" CACHE STRING "Name of a side-by-side Mac development build; empty for the regular app")
+if(NOT KOBALT_MAC_VARIANT MATCHES "^[A-Za-z0-9-]*$")
+    message(FATAL_ERROR "KOBALT_MAC_VARIANT may only hold letters, digits and hyphens.")
+endif()
+if(KOBALT_MAC_VARIANT)
+    set(KOBALT_BUNDLE_NAME "Kobalt (${KOBALT_MAC_VARIANT})")
+    set(KOBALT_BUNDLE_IDENTIFIER "com.nicoverbruggen.kobalt.desktop.variant.${KOBALT_MAC_VARIANT}")
+    set(KOBALT_PROFILE_NAME "Kobalt-${KOBALT_MAC_VARIANT}")
+    set(KOBALT_DOCUMENT_TYPES "")
+else()
+    set(KOBALT_BUNDLE_NAME "Kobalt")
+    set(KOBALT_BUNDLE_IDENTIFIER "com.nicoverbruggen.kobalt.desktop")
+    set(KOBALT_PROFILE_NAME "Kobalt")
+    set(KOBALT_DOCUMENT_TYPES "<key>CFBundleDocumentTypes</key><array><dict>
+        <key>CFBundleTypeName</key><string>EPUB book</string>
+        <key>CFBundleTypeRole</key><string>Viewer</string>
+        <key>LSHandlerRank</key><string>Alternate</string>
+        <key>LSItemContentTypes</key><array><string>org.idpf.epub-container</string></array>
+    </dict></array>")
+endif()
+message(STATUS "Mac app: ${KOBALT_BUNDLE_NAME}, ${KOBALT_BUNDLE_IDENTIFIER}")
 add_executable(Kobalt MACOSX_BUNDLE main.cpp)
 target_link_libraries(Kobalt PRIVATE kobalt-desktop kobalt-core)
+# The profile folder under Application Support follows the application name.
+target_compile_definitions(Kobalt PRIVATE KOBALT_PROFILE_NAME="${KOBALT_PROFILE_NAME}")
 set_target_properties(Kobalt PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in")
 set(resources "${KOBALT_ROOT}/assets")
@@ -144,14 +182,14 @@ if(BUILD_TESTING)
         KOBALT_TEST_VARIABLE_FONT="${test_variable_font}")
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-tmp")
     set(headless_environment "QT_QPA_PLATFORM=minimal:enable_fonts:freetype" "QT_STYLE_OVERRIDE=Fusion" "TMPDIR=${CMAKE_CURRENT_BINARY_DIR}/test-tmp")
-    foreach(check startup covers reading errors diagnostics storageDiagnostics features stylesheet bookmarks bookmarkMerge annotations annotationModeFeedback annotationSelection coordinateProbeSerialization annotationGripMenus annotationCrossPageDrag selectionCrossPageDrag annotationCrossPageOverlap annotationOverlap wordSelection touchCursor links
-            annotationSectionBoundary settings advancedText globalLayout columns fullWidthPanels dictionaryRedraw opticalSize desktopControls navigation annotationTwoFingerTapConsumesWholeSequence annotationRightClickRejectsChords)
+    foreach(check startup libraryOnboarding reading errors diagnostics storageDiagnostics features stylesheet bookmarks bookmarkMerge annotations annotationModeFeedback annotationSelection coordinateProbeSerialization annotationGripMenus annotationCrossPageDrag selectionCrossPageDrag annotationCrossPageOverlap annotationOverlap wordSelection touchCursor touchCursorOutsideReader links
+            annotationSectionBoundary settings advancedText globalLayout columns fullWidthPanels dictionaryRedraw opticalSize desktopControls navigation annotationTwoFingerTapConsumesWholeSequence annotationRightClickRejectsChords library libraryGridRows libraryHold libraryAtStart)
         add_test(NAME desktop.${check} COMMAND "${CMAKE_COMMAND}"
             "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-desktop-tests>" "-DTEST_ARGUMENTS=${check}"
             "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake")
         set(lane fast)
-        if(check MATCHES "^(features|diagnostics|stylesheet|bookmarks|bookmarkMerge|annotations|annotationModeFeedback|annotationSelection|coordinateProbeSerialization|annotationGripMenus|annotationCrossPageDrag|annotationSectionBoundary|selectionCrossPageDrag|annotationCrossPageOverlap|annotationOverlap|wordSelection|touchCursor|links|settings|advancedText|globalLayout|columns|fullWidthPanels|dictionaryRedraw|opticalSize|desktopControls|navigation)$")
+        if(check MATCHES "^(features|diagnostics|stylesheet|bookmarks|bookmarkMerge|annotations|annotationModeFeedback|annotationSelection|coordinateProbeSerialization|annotationGripMenus|annotationCrossPageDrag|annotationSectionBoundary|selectionCrossPageDrag|annotationCrossPageOverlap|annotationOverlap|wordSelection|touchCursor|touchCursorOutsideReader|links|settings|advancedText|globalLayout|columns|fullWidthPanels|dictionaryRedraw|opticalSize|desktopControls|navigation|library|libraryGridRows|libraryHold|libraryAtStart)$")
             set(lane integration)
         endif()
         set_tests_properties(desktop.${check} PROPERTIES ENVIRONMENT "${headless_environment}"
@@ -208,6 +246,12 @@ if(BUILD_TESTING)
             canvasReleaseCanDeleteWidgets
             canvasInputRespectsModalBarrier
             connectedModalFooter
+            libraryActionButtons
+            libraryFolderPicker
+            libraryScanCaption
+            libraryOnboardingLayout
+            libraryListFillsPage
+            regularIconWeight
             annotationModeNotice
             marksSortingAndAnnotationRows
             hidingSelectionMenuKeepsDamageCompact
@@ -296,7 +340,8 @@ if(BUILD_TESTING)
     kobalt_regressions(model storage_assets bookmark_store highlight_store appearance_settings header_footer
         layout_cache resource_cache layout_compatibility reading_pace reading_speed engine_activity
         local_resources zip_resource diagnostics dictionary_store image_damage page_pixels
-        logical_word_counter brightness_gesture qt_compat page_refresh_regions screen_refresh plain_archive reading_progress)
+        logical_word_counter brightness_gesture qt_compat page_refresh_regions screen_refresh plain_archive reading_progress
+        library)
     kobalt_regressions(model font_axes touch_rotation)
     kobalt_regressions(platform reader_orientation font_sources system_fonts nickel_dictionary_selection
         nickel_reading_pace_cache nickel_session_calls nickel_book_menu usb_removal page_transition_native)
@@ -311,7 +356,7 @@ if(BUILD_TESTING)
     add_custom_target(screenshots
         COMMAND "${CMAKE_COMMAND}" "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-desktop-tests>"
             "-DTEST_ARGUMENTS=--screenshots;${KOBALT_ROOT}/build/screenshots/mac"
-            "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
+            "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp" "-DTEST_TIMEOUT=120"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake"
         DEPENDS kobalt-desktop-tests USES_TERMINAL VERBATIM)
 endif()

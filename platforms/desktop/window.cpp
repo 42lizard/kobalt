@@ -115,7 +115,8 @@ public:
         libra = preset == 2;
         QSize body = libra ? QSize(1708, 1902) : QSize(1323, 1890);
         QRect screen = libra ? QRect(90, 111, 1264, 1680) : QRect(126, 150, 1072, 1448);
-        QRect previousBounds(1450, 715, 110, 180), nextBounds(1450, 1005, 110, 180);
+        // Long, narrow buttons like the Libra's, centred in the grip.
+        QRect previousBounds(1473, 640, 64, 300), nextBounds(1473, 980, 64, 300);
         if (landscape) {
             // Turn the physical body clockwise; reader content stays upright.
             const auto rotated = [body](QRect rect) {
@@ -163,7 +164,7 @@ private:
 };
 Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder, std::function<QString()> clock)
     : clockSource(std::move(clock)), controller(
-          std::move(paths), std::move(fonts), std::move(placeholder),
+          paths, std::move(fonts), std::move(placeholder),
           [this] {
               auto services = readerServices();
               services.devicePreview = [this] {
@@ -180,7 +181,8 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
               };
               return services;
           },
-          [](Qt::ScreenOrientation) {}) {
+          [](Qt::ScreenOrientation) {}),
+      store(paths.directory, std::make_shared<library::LocalSource>()) {
     setWindowTitle(QStringLiteral(""));
     setMinimumSize(420, 500);
     resize(800, 1136);
@@ -285,25 +287,33 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         renderingDpi = resolutionPicker->currentData().toInt();
         sizeCanvas();
     });
-    start = new android::StartScreen(readerServices().presentation);
-    start->setLastBook(controller.lastBook());
-    connect(start, &android::StartScreen::reopenRequested, this, &Window::openBook);
-    connect(start, &android::StartScreen::forgetRequested, this, [this] {
-        if (controller.forgetLastBook())
-            start->setLastBook({});
-        else
-            start->showForgetError();
+    start = new android::StartScreen(readerServices().presentation, store);
+    start->setDark(controller.preferences().value("dark_mode").toBool(false));
+    connect(start, &android::StartScreen::bookRequested, this, &Window::openBook);
+    connect(start, &android::StartScreen::libraryOpenRequested, this, &Window::chooseBook);
+    connect(start, &android::StartScreen::addFolderRequested, this, &Window::chooseFolder);
+    connect(start, &android::StartScreen::removeFolderRequested, this, [this](const QString &key) {
+        store.removeFolder(key);
     });
+    // The desktop never deletes a book file; it only leaves the library.
+    connect(start, &android::StartScreen::removeBookRequested, this, [this](const QString &key) {
+        store.removeBook(key);
+    });
+    if (store.index().settings.checkAtStart)
+        QTimer::singleShot(0, this, [this] {
+            store.scan();
+        });
     canvas = new android::WidgetCanvas(stack);
     canvas->setMouseTracking(true);
     canvas->viewport()->setMouseTracking(true);
     stack->addWidget(start);
     stack->addWidget(canvas);
-    connect(start, &android::StartScreen::openRequested, this, &Window::chooseBook);
     connect(start, &android::StartScreen::exitRequested, this, &QWidget::close);
     auto *file = menuBar()->addMenu(tr("File"));
     auto *open = file->addAction(tr("Open EPUB…"), this, &Window::chooseBook);
     open->setShortcut(QKeySequence::Open);
+    auto *folder = file->addAction(tr("Add Library Folder…"), this, &Window::chooseFolder);
+    folder->setObjectName("desktopAddFolder");
     auto *quit = file->addAction(tr("Quit Kobalt"), this, &QWidget::close);
     quit->setShortcut(QKeySequence::Quit);
     quit->setMenuRole(QAction::QuitRole);
@@ -377,20 +387,21 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         sizeCanvas();
         reader->show();
         setUpdatesEnabled(true);
-        start->setLastBook(controller.lastBook());
         reader->checkpoint();
         emit bookOpened();
         setPreviewControlsEnabled(true);
     });
     connect(&controller, &android::ReaderController::failed, this, [this](const QString &error) {
         failed = true;
-        start->showError(error);
+        start->showLibraryError(error);
         stack->setCurrentWidget(start);
         emit bookFailed(error);
     });
     connect(&controller, &android::ReaderController::closed, this, [this] {
+        recordProgress();
+        start->setDark(controller.preferences().value("dark_mode").toBool(false));
         if (!failed)
-            start->showReady();
+            start->showLibrary();
         stack->setCurrentWidget(start);
         sizeCanvas();
         if (closing) {
@@ -484,12 +495,15 @@ void Window::sizeCanvas() {
     canvas->setNativePixels(renderingDpi != 0);
     canvas->setTransform(QTransform::fromScale(scale, scale));
     canvas->setSceneRect(QRectF(QPointF(), pixels()));
+    // The library uses the reader's controls, so it gets the reader's size and scale.
+    start->setLibraryScale(pixels(), scale, renderingDpi != 0, renderingDpi ? renderingDpi / 300.0 : 1.0);
 }
 void Window::selectScreen(int index) {
     if (closing || screenPreset == index)
         return;
     setTouchCursor(false);
     screenPreset = index;
+    setTouchCursor(screenPreset && underMouse(), QApplication::mouseButtons() & Qt::LeftButton);
     rotateAction->setEnabled(screenPicker->isEnabled() && screenPreset != 0);
     if (auto *reader = controller.window())
         reader->refreshHostPresentation();
@@ -507,10 +521,30 @@ void Window::chooseBook() {
     if (!path.isEmpty())
         openBook(path);
 }
+void Window::chooseFolder() {
+    const auto path = QFileDialog::getExistingDirectory(this, tr("Add Library Folder"));
+    if (path.isEmpty())
+        return;
+    const QFileInfo folder(path);
+    store.addFolder(
+        {folder.absoluteFilePath(), folder.fileName().isEmpty() ? folder.absoluteFilePath() : folder.fileName()});
+}
+void Window::recordProgress() {
+    if (openedKey.isEmpty())
+        return;
+    const auto progress = library::savedProgress(controller.savedState(openedKey));
+    store.setProgress(std::exchange(openedKey, {}), progress.percent, progress.finished);
+}
 void Window::openBook(const QString &path) {
     const auto absolute = QFileInfo(path).absoluteFilePath();
     if (closing || (controller.window() && controller.path() == absolute))
         return;
+    recordProgress();
+    // Every entry point, including Finder and drag-and-drop, joins the library.
+    if (store.index().books.contains(absolute) || store.addBook(absolute)) {
+        openedKey = absolute;
+        store.setOpened(absolute);
+    }
     failed = false;
     sizeCanvas();
     setPreviewControlsEnabled(false);
@@ -571,8 +605,6 @@ void Window::setTouchCursor(bool visible, bool pressed) {
         if (!touchCursorVisible)
             return;
         QApplication::restoreOverrideCursor();
-        canvas->unsetCursor();
-        canvas->viewport()->unsetCursor();
         touchCursorVisible = false;
         return;
     }
@@ -591,8 +623,6 @@ void Window::setTouchCursor(bool visible, bool pressed) {
         painter.drawEllipse(QRectF(2, 2, 24, 24));
     }
     const QCursor cursor(pixels, 14, 14);
-    canvas->setCursor(cursor);
-    canvas->viewport()->setCursor(cursor);
     if (touchCursorVisible)
         QApplication::changeOverrideCursor(cursor);
     else
@@ -601,17 +631,18 @@ void Window::setTouchCursor(bool visible, bool pressed) {
 }
 
 bool Window::eventFilter(QObject *object, QEvent *event) {
-    if (object == canvas->viewport()) {
-        const auto type = event->type();
-        if (type == QEvent::Leave || type == QEvent::Hide)
-            setTouchCursor(false);
-        else if (type == QEvent::Enter || type == QEvent::MouseMove || type == QEvent::MouseButtonPress ||
-                 type == QEvent::MouseButtonRelease) {
+    const auto type = event->type();
+    if (type == QEvent::Enter || type == QEvent::Leave || type == QEvent::MouseMove ||
+        type == QEvent::MouseButtonPress || type == QEvent::MouseButtonRelease ||
+        (type == QEvent::Hide && object == this)) {
+        auto *widget = qobject_cast<QWidget *>(object);
+        if (widget && widget->window() == this) {
             const auto *mouse = dynamic_cast<QMouseEvent *>(event);
-            const QPoint point = mouse ? mouse->position().toPoint() : canvas->viewport()->mapFromGlobal(QCursor::pos());
-            const bool onPaper = screenPreset && controller.window() && stack->currentWidget() == canvas &&
-                canvas->sceneRect().contains(canvas->mapToScene(point));
-            setTouchCursor(onPaper, mouse && (mouse->buttons() & Qt::LeftButton));
+            const QPoint global = mouse ? mouse->globalPosition().toPoint() : QCursor::pos();
+            const bool leaving = object == this && (type == QEvent::Leave || type == QEvent::Hide);
+            setTouchCursor(screenPreset && isVisible() && !leaving && rect().contains(mapFromGlobal(global)),
+                           mouse ? bool(mouse->buttons() & Qt::LeftButton)
+                                 : bool(QApplication::mouseButtons() & Qt::LeftButton));
         }
     }
     if (object == this && event->type() == QEvent::WindowDeactivate)

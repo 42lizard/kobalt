@@ -96,4 +96,25 @@ void readerStyle(QWidget *widget, const QString &source) {
     if (widget->styleSheet() != style)
         widget->setStyleSheet(style);
 }
+QPalette readerPalette(QPalette colors, bool dark) {
+    const QColor paper = dark ? Qt::black : Qt::white;
+    const QColor ink = dark ? Qt::white : Qt::black;
+    for (const auto role : {QPalette::Window, QPalette::Base, QPalette::Button, QPalette::HighlightedText})
+        colors.setColor(role, paper);
+    for (const auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText, QPalette::Highlight})
+        colors.setColor(role, ink);
+    colors.setColor(QPalette::Mid, QColor("#999999"));
+    colors.setColor(QPalette::Midlight, dark ? QColor("#333333") : QColor("#dddddd"));
+    return colors;
+}
+void applyReaderPalette(QWidget *widget, const QPalette &colors) {
+    widget->setPalette(colors);
+    if (widget->property("reader_style").isValid())
+        readerStyle(widget, widget->property("reader_style").toString());
+    auto styled = widget->palette();
+    for (const auto role : {QPalette::Mid, QPalette::Midlight})
+        for (const auto group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled})
+            styled.setColor(group, role, colors.color(group, role));
+    widget->setPalette(styled);
+}
 }

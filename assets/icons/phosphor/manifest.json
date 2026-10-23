@@ -99,6 +99,14 @@
       "sha256": "067b385ee62469be500d2d5bcd10e2aedd7529cd615ed180fa8414aaef0e40ab"
     },
     {
+      "file": "folder-plus.svg",
+      "sha256": "576f2e68f6adf880e3334363b1d3baa2bd07ef41b7ae04a77cbe4eea240e62df"
+    },
+    {
+      "file": "folders.svg",
+      "sha256": "36b164dda05b50eaecd3325301032e46c61f0eefb566eea97e2247ef87438274"
+    },
+    {
       "file": "gear-fine.svg",
       "sha256": "ca000a36662d0049d39ea5cbe44a0133960d791dd95dd1929692211355fac4e0"
     },
