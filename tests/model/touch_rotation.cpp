@@ -1,4 +1,4 @@
-#include "platform/nickel/qt5/touch_rotation.h"
+#include "platforms/kobo/qt5/touch_rotation.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -24,9 +24,14 @@ QByteArray record(const char *model, const char *firmware = "4.45.23697") {
 int main() {
     using namespace kobalt::nickel4;
     require(reversedTouchForVersion(record("391")), "Clara BW must use corrected mapping");
-    require(reversedTouchForVersion(record("393")) && reversedTouchForVersion(record("395")), "Clara Colour profiles");
-    require(reversedTouchForVersion(record("376", "4.38.23684")), "Clara HD firmware boundary");
+    require(reversedTouchForVersion(record("395")), "Clara BW alternate ID must use corrected mapping");
+    require(reversedTouchForVersion(record("393")), "Clara Colour must use corrected mapping");
+    require(!reversedTouchForVersion(record("376", "4.38.23828")), "Reported Clara HD firmware keeps native mapping");
+    require(!reversedTouchForVersion(record("376", "4.38.23684")), "Clara HD keeps native mapping at former boundary");
     require(!reversedTouchForVersion(record("376", "4.38.23683")), "Earlier HD firmware");
+    require(!reversedTouchForVersion(record("376", "4.46.23836")), "Later Clara HD firmware keeps native mapping");
+    require(!reversedTouchForVersion(record("390")), "Libra Colour keeps native mapping");
+    require(!reversedTouchForVersion(record("388")), "Libra 2 keeps native mapping");
     require(!reversedTouchForVersion(record("386")), "Clara 2E keeps native mapping");
     require(!reversedTouchForVersion(record("391", "6.0.0")), "Qt6 keeps native mapping");
     require(!reversedTouchForVersion(record("391", "4.44.23697")), "Earlier BW firmware");
@@ -45,6 +50,13 @@ int main() {
     const Qt::ScreenOrientation modes[] = {Qt::PortraitOrientation, Qt::LandscapeOrientation,
                                            Qt::InvertedPortraitOrientation, Qt::InvertedLandscapeOrientation};
     const QPoint expected[] = {point, {1417, 20}, {1051, 1417}, {30, 1051}};
+    for (const char *model : {"376", "386", "388", "390", "999"}) {
+        for (const auto mode : modes) {
+            configureTouchRotation(reversedTouchForVersion(record(model, "4.46.23836")), mode, 0, 0);
+            require(kobalt_touch_map_from_device(nullptr, point) == QPoint(120, 230),
+                    "Unaffected devices retain the driver transform in every orientation");
+        }
+    }
     for (int i = 0; i < 4; ++i) {
         configureTouchRotation(true, modes[i], 0, 0);
         require(kobalt_touch_map_from_device(nullptr, point) == expected[i], "Orientation mapping");

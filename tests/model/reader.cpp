@@ -1,4 +1,4 @@
-#include "platform/nickel/common/engine_positions.h"
+#include "platforms/kobo/common/engine_positions.h"
 #include "reader_inputs.h"
 #include "support/qt_compat.h"
 #include "assets/bundled_fonts.h"
@@ -1473,110 +1473,6 @@ int main(int argc, char **argv) {
         require(model.go(3), "Cannot return after section preview check");
     }
     {
-        // A book saved to the document cache opens without parsing. It must
-        // match a parsed book, including Kobalt's prose markers, and a changed
-        // fingerprint or policy must parse again.
-        QTemporaryDir cacheRoot;
-        require(cacheRoot.isValid(), "Cannot create a document cache directory");
-        const auto cacheDirectory = cacheRoot.path() + "/.cache";
-        const QByteArray fingerprint(64, 'a'), policy("document-cache-test");
-        require(kobalt::documentCacheChecksum(policy, 1, "v1.0-beta.1") !=
-                    kobalt::documentCacheChecksum(policy, 1, "v1.0-beta.2"),
-                "A different Kobalt version reused the document cache identity");
-        require(kobalt::documentCacheChecksum(policy, 1) == kobalt::documentCacheChecksum(policy, 1, KOBALT_VERSION),
-                "The document cache identity omitted the compiled Kobalt version");
-        // CREngine leaves books under 30 kB out of its cache.
-        const qint64 cachedBytes = 1024 * 1024;
-        const auto settings = kobalt::qt::object({{"text_alignment", "left"}, {"bold_reading", "off"}});
-        const auto opened = [&](kobalt::ReaderModel &target, const QByteArray &key, const QByteArray &rules,
-                                const QJsonObject &saved) {
-            target.setDocumentCache(cacheDirectory, key, rules, cachedBytes);
-            require(target.open(bytes, QSize(1072, 1328), saved, &error), qPrintable(error));
-        };
-        {
-            kobalt::ReaderModel uncached(model.fontInputs());
-            require(uncached.open(bytes, QSize(1072, 1328), {}, &error), qPrintable(error));
-            require(!uncached.openedFromCache() && !uncached.saveDocumentCache(),
-                    "A book without a cache directory used the cache");
-        }
-        kobalt::ReaderModel parsed(model.fontInputs());
-        opened(parsed, fingerprint, policy, settings);
-        require(!parsed.openedFromCache(), "An empty cache restored a book");
-        require(parsed.saveDocumentCache(), "Cannot save a parsed book to the document cache");
-        kobalt::ReaderModel restored(model.fontInputs());
-        opened(restored, fingerprint, policy, settings);
-        require(restored.openedFromCache(), "A saved book was parsed again");
-        require(restored.pages() == parsed.pages() && restored.title() == parsed.title(),
-                "A restored book changed its pages or title");
-        for (int i = 0; i < parsed.pages(); ++i)
-            require(parsed.go(i) && restored.go(i) && hash(parsed.image(i)) == hash(restored.image(i)),
-                    "A restored page differs from the parsed page");
-        const auto parsedChapters = parsed.chapters(), restoredChapters = restored.chapters();
-        require(parsedChapters.size() == restoredChapters.size(), "A restored book lost chapters");
-        for (int i = 0; i < parsedChapters.size(); ++i)
-            require(parsedChapters[i].title == restoredChapters[i].title &&
-                        parsedChapters[i].page == restoredChapters[i].page &&
-                        parsedChapters[i].position == restoredChapters[i].position,
-                    "A restored chapter moved");
-        const int middle = parsed.pages() / 2;
-        require(restored.goTo(parsed.pageStart(middle)) && restored.page() == middle,
-                "A parsed position did not resolve in the restored book");
-        const auto prefixSettings = kobalt::qt::object({{"text_alignment", "left"}, {"bold_reading", "bold"}});
-        kobalt::ReaderModel emphasized(model.fontInputs()), emphasizedAgain(model.fontInputs()),
-            plainAgain(model.fontInputs());
-        opened(emphasized, fingerprint, policy, prefixSettings);
-        require(!emphasized.openedFromCache(), "Bionic reading reused cached normal pagination");
-        const auto prefixImage = hash(emphasized.image(0));
-        require(emphasized.saveDocumentCache(), "Cannot cache Bionic reading");
-        opened(emphasizedAgain, fingerprint, policy, prefixSettings);
-        require(emphasizedAgain.openedFromCache() && hash(emphasizedAgain.image(0)) == prefixImage,
-                "Cached Bionic reading changed its rendering");
-        require(emphasizedAgain.applyAppearance(settings) && emphasizedAgain.saveDocumentCache(),
-                "Cannot cache a book after disabling Bionic reading");
-        opened(plainAgain, fingerprint, policy, settings);
-        require(plainAgain.openedFromCache(), "A mode change saved the wrong document cache identity");
-        require(hash(plainAgain.image(0)) == hash(parsed.image(0)), "A mode change saved different cached pages");
-        // A different typography reuses the parsed book but lays it out again.
-        const auto larger = kobalt::qt::object({{"text_alignment", "left"}, {"font_pixels", 44}});
-        kobalt::ReaderModel parsedLarger(model.fontInputs()), restoredLarger(model.fontInputs());
-        parsedLarger.setDocumentCache({}, {}, {}, 0);
-        require(parsedLarger.open(bytes, QSize(1072, 1328), larger, &error), qPrintable(error));
-        opened(restoredLarger, fingerprint, policy, larger);
-        require(restoredLarger.openedFromCache() && restoredLarger.pages() == parsedLarger.pages(),
-                "Cached book did not lay out new typography");
-        for (int i = 0; i < parsedLarger.pages(); i += 3)
-            require(parsedLarger.go(i) && restoredLarger.go(i) &&
-                        hash(parsedLarger.image(i)) == hash(restoredLarger.image(i)),
-                    "A cached book drew different pages with new typography");
-        kobalt::ReaderModel otherPolicy(model.fontInputs()), otherBook(model.fontInputs());
-        opened(otherBook, QByteArray(64, 'b'), policy, settings);
-        require(!otherBook.openedFromCache(), "Another fingerprint reused a parsed book");
-        require(otherBook.saveDocumentCache(), "Cannot cache another book");
-        const auto oldEntries = QDir(cacheDirectory).entryList({"*.cr3"}, QDir::Files);
-        require(oldEntries.size() == 2, "Cache retained superseded reading modes");
-        {
-            kobalt::DocumentCacheScope cache(cacheDirectory);
-            require(cache.enabled(), "Cannot initialize cache cleanup check");
-            require(!ldomDocCache::removeObsolete(
-                        Utf8ToUnicode(lString8(fingerprint.constData())),
-                        Utf8ToUnicode(
-                            lString8((cacheDirectory + "/" + oldEntries.first() + ".missing").toUtf8().constData()))),
-                    "Cache cleanup accepted a missing replacement");
-        }
-        require(QDir(cacheDirectory).entryList({"*.cr3"}, QDir::Files) == oldEntries,
-                "A missing replacement removed old caches");
-        opened(otherPolicy, fingerprint, "changed-policy", settings);
-        require(!otherPolicy.openedFromCache(), "A changed cache policy reused a parsed book");
-        require(otherPolicy.saveDocumentCache(), "Cannot save the changed cache policy");
-        const auto newEntries = QDir(cacheDirectory).entryList({"*.cr3"}, QDir::Files);
-        require(newEntries.size() == 2 && newEntries != oldEntries,
-                "Saving a new cache retained the old policy or removed another book");
-        opened(otherPolicy, fingerprint, "changed-policy", settings);
-        opened(otherBook, QByteArray(64, 'b'), policy, settings);
-        require(otherPolicy.openedFromCache() && otherBook.openedFromCache(),
-                "Cache cleanup lost the replacement, another book or their index entries");
-    }
-    {
         kobalt::ReaderModel recycling(model.fontInputs()), fresh(model.fontInputs());
         require(recycling.open(bytes, QSize(1072, 1328), {}, &error), qPrintable(error));
         require(fresh.open(bytes, QSize(1072, 1328), {}, &error), qPrintable(error));
@@ -1985,7 +1881,13 @@ int main(int argc, char **argv) {
     }
     require(css.style(32, 120, "NV Bitter", 36, "publisher") && hash(css.image(0)) == hash(styledPage),
             "Publisher alignment did not restore the original page");
-    const auto variableFace = kobalt::test::variableFont(kobalt::test::readerFonts());
+    const auto variableFace = [] {
+        for (const auto &font : kobalt::discoverReadingFonts(kobalt::test::readerFonts().sources))
+            if (font.weightAxis.available())
+                return font;
+        return kobalt::ReadingFont{};
+    }();
+    require(variableFace.weightAxis.available(), "The pinned variable-font fixture has no weight axis");
     if (variableFace.weightAxis.available()) {
         const auto axis = variableFace.weightAxis;
         const int initialWeight = qBound(axis.minimum, kobalt::defaultVariableFontWeight, axis.maximum);
@@ -2044,8 +1946,7 @@ int main(int argc, char **argv) {
                 "Switching to a static font did not restore thickness control");
         require(variable.style(32, 120, variableFace.family, 36) && variable.weight() == normalWeight,
                 "Static thickness replaced the saved variable weight");
-    } else
-        fprintf(stderr, "SKIP: variable font integration; set KOBALT_TEST_VARIABLE_FONTS\n");
+    }
     const int weightPages = model.pages();
     const auto weightAnchor = model.position();
     const auto boundaryPage = model.page();

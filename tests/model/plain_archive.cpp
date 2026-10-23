@@ -2,7 +2,7 @@
 #include "publication/layout_compatibility.h"
 #include "publication/resource_cache.h"
 #include "publication/publication.h"
-#include "platform/nickel/common/local_book_path.h"
+#include "platforms/kobo/common/local_book_path.h"
 #include "check.h"
 #include "support/qt_compat.h"
 #include <QCoreApplication>

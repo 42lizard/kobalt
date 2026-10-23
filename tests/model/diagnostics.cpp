@@ -80,8 +80,8 @@ int main(int argc, char **argv) {
     QFile::remove(path);
     const auto target = (directory.path() + "/" + "untouched");
     QFile sentinel(target);
-    sentinel.open(QIODevice::WriteOnly);
-    sentinel.write("sentinel");
+    if (!sentinel.open(QIODevice::WriteOnly) || sentinel.write("sentinel") != 8)
+        qFatal("Cannot write symlink target fixture");
     sentinel.close();
     if (::symlink(QFile::encodeName(target), QFile::encodeName(path)) != 0)
         qFatal("Cannot create test symlink");

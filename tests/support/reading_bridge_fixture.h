@@ -1,0 +1,86 @@
+#pragma once
+#include "reading/reading_bridge.h"
+#include <memory>
+#include <utility>
+
+namespace kobalt::test {
+// The platform's saved reading position, which a test changes as a sync or
+// another device would. Writes from the reader are recorded, not stored.
+struct HostProgress {
+    ReadingProgress current;
+    ReadingEstimates remaining;
+    bool hasEstimates = false;
+    std::function<void()> notifyEstimates;
+    bool changed = false, failWrite = false;
+    int writes = 0;
+    double percent = 0;
+    void publish(ReadingProgress progress) {
+        current = std::move(progress);
+        changed = true;
+    }
+};
+class HostReadingBridge final : public ReadingBridge {
+public:
+    explicit HostReadingBridge(std::shared_ptr<HostProgress> progress) : progress(std::move(progress)) {
+        this->progress->notifyEstimates = [this] {
+            if (estimatesChanged) {
+                estimatesChanged();
+            }
+        };
+    }
+    ~HostReadingBridge() override {
+        progress->notifyEstimates = {};
+    }
+    bool estimates(const ReadingActivity &, ReadingEstimates *result) override {
+        if (!progress->hasEstimates) {
+            return false;
+        }
+        *result = progress->remaining;
+        return true;
+    }
+    bool deviceTransition() const override {
+        return false;
+    }
+    bool writable() const override {
+        return true;
+    }
+    ReadingProgress read(QString *) const override {
+        return progress->current;
+    }
+    bool takeChange() override {
+        return std::exchange(progress->changed, false);
+    }
+    bool write(const ReadingProgress &expected, const QString &location, double percent, bool finished,
+               const ReadingActivity &, ReadingProgress *verified, QString *error) override {
+        if (progress->failWrite) {
+            if (error) {
+                *error = "The database is busy.";
+            }
+            return false;
+        }
+        if (!(expected == progress->current)) {
+            if (error)
+                *error = "The saved position changed.";
+            return false;
+        }
+        ++progress->writes;
+        progress->percent = percent;
+        if (!location.isEmpty())
+            progress->current.location = location;
+        progress->current.status = finished ? 2 : 1;
+        progress->current.modified += 1;
+        progress->current.valid = true;
+        if (verified)
+            *verified = progress->current;
+        return true;
+    }
+    void observeReading(const ReadingActivity &) override {}
+    void stopReading() override {}
+
+private:
+    std::shared_ptr<HostProgress> progress;
+};
+inline std::unique_ptr<ReadingBridge> hostReadingBridge(std::shared_ptr<HostProgress> progress) {
+    return std::make_unique<HostReadingBridge>(std::move(progress));
+}
+}

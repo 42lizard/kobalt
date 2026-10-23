@@ -58,6 +58,14 @@ bool BookmarkSession::sync() {
     const auto key = layout();
     if (key == layout_)
         return true;
+    // There are no source positions to resolve. Queueing a lookup here leaves
+    // the first tap after opening or reflow temporarily unable to add a mark.
+    if (store->bookmarks().isEmpty()) {
+        lookup_.clear();
+        layout_ = key;
+        pages_.clear();
+        return true;
+    }
     if (lookup_ == key)
         return false;
     lookup_ = key;

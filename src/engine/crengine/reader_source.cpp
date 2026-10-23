@@ -556,6 +556,29 @@ bool ReaderModel::openPreview(ReaderModel &source, QSize size, QString *error) {
             }
             selected = true;
         }
+        const bool spine = input.isStartElement() && input.name() == QStringLiteral("spine");
+        const bool navigation = input.isStartElement() && input.name() == QStringLiteral("item") &&
+                                input.attributes().value("properties").toString()
+                                    .split(QRegularExpression("\\s+"), qt::skipEmptyParts).contains("nav");
+        if (spine || navigation) {
+            // This package has one section. Whole-book navigation otherwise
+            // points at absent fragments and adds warnings to every preview.
+            output.writeStartElement(input.qualifiedName().toString());
+            for (const auto &declaration : input.namespaceDeclarations())
+                output.writeNamespace(declaration.namespaceUri().toString(), declaration.prefix().toString());
+            for (const auto &attribute : input.attributes()) {
+                if (spine && (attribute.name() == QStringLiteral("toc") || attribute.name() == QStringLiteral("page-map")))
+                    continue;
+                auto value = attribute.value().toString();
+                if (navigation && attribute.name() == QStringLiteral("properties")) {
+                    auto properties = value.split(QRegularExpression("\\s+"), qt::skipEmptyParts);
+                    properties.removeAll("nav");
+                    value = properties.join(' ');
+                }
+                output.writeAttribute(attribute.qualifiedName().toString(), value);
+            }
+            continue;
+        }
         output.writeCurrentToken(input);
         if (input.isEndElement() && input.name() == QStringLiteral("spine"))
             inSpine = false;
@@ -564,7 +587,7 @@ bool ReaderModel::openPreview(ReaderModel &source, QSize size, QString *error) {
         return fail(strings::get("error.could_not_isolate_the_current_section"));
     if (resourceError)
         return fail(strings::get("error.could_not_read_the_section_metadata"));
-    // Change only the spine. Every other stream comes from the original
+    // Change only the package metadata. Every other stream comes from the original
     // container, so opening a preview never copies the book's assets.
     auto preview = std::make_shared<ReaderSource>();
     preview->parent = source.source_;

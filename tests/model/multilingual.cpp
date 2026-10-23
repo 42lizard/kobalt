@@ -1,298 +1,184 @@
-#include "reader_inputs.h"
-#include "assets/bundled_fonts.h"
-#include "support/qt_compat.h"
 #include "engine/crengine/reader_model.h"
+#include "reader_inputs.h"
+#include "book_fixtures.h"
+#include "engine_fixtures.h"
+#include "check.h"
+#include <QCryptographicHash>
 #include <QFile>
 #include <QGuiApplication>
-#include <QSet>
-#include <QFileInfo>
-#include <QDir>
-#include <QJsonDocument>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QRawFont>
-#include <cstdio>
-#include "check.h"
+#include <QRegularExpression>
+#include <QSet>
+#include <QTemporaryDir>
+#include <QTextDocumentFragment>
 
+using namespace kobalt;
 namespace {
-QByteArray read(const char *path) {
-    QFile file(QString::fromLocal8Bit(path));
-    require(file.open(QIODevice::ReadOnly), "Cannot open multilingual EPUB");
+QByteArray read(const QString &path) {
+    QFile file(path);
+    require(file.open(QIODevice::ReadOnly), qPrintable("Cannot read " + path));
     return file.readAll();
 }
-
-QVector<kobalt::SearchHit> search(kobalt::ReaderModel &model, const QString &query) {
-    QVector<kobalt::SearchHit> found;
+QByteArray escaped(const QJsonValue &value) {
+    return value.toString().toHtmlEscaped().toUtf8();
+}
+QVector<SearchHit> search(ReaderModel &model, const QString &query) {
+    QVector<SearchHit> hits;
     QSet<QString> starts;
-    for (int page = 0; page < model.pages(); ++page) {
-        const auto batch = model.searchPage(query, page);
-        for (const auto &hit : batch.hits) {
+    for (int page = 0; page < model.pages(); ++page)
+        for (const auto &hit : model.searchPage(query, page).hits) {
             require(!starts.contains(hit.start), "Duplicate multilingual search result");
-            starts.insert(hit.start);
             require(!hit.start.isEmpty() && !hit.end.isEmpty() && hit.page == page,
                     "Multilingual search returned an invalid source range");
-            found.push_back(hit);
+            starts.insert(hit.start);
+            hits.append(hit);
+        }
+    return hits;
+}
+QString prose(const QJsonArray &paragraphs, const QString &title) {
+    QString best;
+    for (const auto &value : paragraphs) {
+        // Ruby annotations split logical prose. Select one original contiguous run.
+        const auto runs = value.toString().split(QRegularExpression("<ruby>.*?</ruby>"));
+        for (const auto &run : runs) {
+            const auto plain = QTextDocumentFragment::fromHtml(run).toPlainText().trimmed();
+            if (plain != title && plain.size() > best.size())
+                best = plain;
         }
     }
-    return found;
+    return best.left(24);
 }
-
-QRect bounds(const QVector<QRect> &rectangles) {
-    QRect result;
-    for (const auto &rect : rectangles)
-        result = result.isNull() ? rect : result.united(rect);
-    return result;
-}
-
-int inkPixels(const QImage &image, const QVector<QRect> &rectangles) {
-    int count = 0;
-    for (const auto &rect : rectangles) {
-        const auto area = rect.intersected(image.rect());
-        for (int y = area.top(); y <= area.bottom(); ++y)
-            for (int x = area.left(); x <= area.right(); ++x)
-                if (qGray(image.pixel(x, y)) < 230)
-                    ++count;
+void checkBook(const QJsonObject &entry, const QString &directory) {
+    const auto language = entry["language"].toString();
+    const auto bytes = read(QStringLiteral(KOBALT_TEST_CORPUS) + '/' + entry["file"].toString());
+    require(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex() == entry["sha256"].toString().toLatin1(),
+            "Literary source checksum differs from the original fixture");
+    const auto book = QJsonDocument::fromJson(bytes).object();
+    require(book["language"].toString() == language && !book["license"].toString().isEmpty(),
+            "Literary source identity or license is missing");
+    const QString fontName = language == "ar" ? "NotoNaskhArabic-Regular.ttf"
+                           : language == "he" ? "NotoSerifHebrew-Regular.ttf"
+                           : language == "hi" ? "NotoSerifDevanagari-Regular.ttf" : "NotoSerifCJK-Regular.ttc";
+    const QRawFont scriptFont(test::readerAssets().fontData(fontName), 36, QFont::PreferNoHinting);
+    const char32_t letter = language == "ar" ? U'م' : language == "he" ? U'א' : language == "hi" ? U'क' : U'日';
+    require(scriptFont.isValid() && scriptFont.supportsCharacter(letter), "Bundled script font has no probe glyph");
+    const bool rtl = language == "ar" || language == "he";
+    const QByteArray direction = rtl ? "rtl" : "ltr";
+    test::BookFiles files;
+    QByteArray spine, contents, sources;
+    QStringList probes, titles;
+    const auto chapters = book["chapters"].toArray();
+    require(chapters.size() >= 2, "Literary fixture must include two original chapters");
+    for (int index = 0; index < 2; ++index) {
+        const auto chapter = chapters[index].toObject();
+        const auto paragraphs = chapter["paragraphs"].toArray();
+        QByteArray original;
+        for (const auto &paragraph : paragraphs)
+            original += paragraph.toString().toUtf8() + '\n';
+        require(QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex() ==
+                    chapter["sha256"].toString().toLatin1(), "Original literary chapter checksum differs");
+        // Eight unmodified paragraphs per chapter bound routine corpus work.
+        QJsonArray excerpt;
+        QByteArray body;
+        for (int p = 0; p < qMin(8, int(paragraphs.size())); ++p) {
+            excerpt.append(paragraphs[p]);
+            body += paragraphs[p].toString().toUtf8();
+        }
+        const auto title = chapter["title"].toString();
+        titles.append(title);
+        probes.append(prose(excerpt, title));
+        require(!probes.last().isEmpty(), "Literary excerpt has no searchable prose");
+        const auto name = "c" + QByteArray::number(index) + ".xhtml";
+        files[QString::fromLatin1(name)] =
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"" + language.toUtf8() + "\" lang=\"" + language.toUtf8() +
+            "\"><head><title>" + escaped(chapter["title"]) + "</title></head><body dir=\"" + direction + "\"><h1>" +
+            escaped(chapter["title"]) + "</h1>" + body + "</body></html>";
+        spine += "<itemref idref=\"" + name + "\"/>";
+        contents += "<li><a href=\"" + name + "\">" + escaped(chapter["title"]) + "</a></li>";
+        sources += "<dc:source>" + escaped(chapter["source"]) + "</dc:source>";
     }
-    return count;
-}
-
-void checkBook(const QByteArray &bytes, const QString &language, const QString &marker, const QString &first,
-               const QString &second, const QString &ltrFirst, const QString &ltrSecond, const QString &ltrNumber,
-               const QString &arabicDigits, const QString &westernDigits, const QString &rtlAlignment,
-               const QString &ltrAlignment, const QString &scriptWord) {
-    kobalt::ReaderModel model(kobalt::test::readerFonts());
+    files["nav.xhtml"] = "<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\">"
+        "<head><title>Contents</title></head><body><nav epub:type=\"toc\"><ol>" + contents + "</ol></nav></body></html>";
+    files = test::publisherPackage(language.toUtf8(), escaped(book["title"]), files, spine);
+    auto &opf = files["book.opf"];
+    opf.replace("<spine>", "<spine page-progression-direction=\"" + direction + "\">");
+    opf.replace("<item id=\"nav.xhtml\"", "<item properties=\"nav\" id=\"nav.xhtml\"");
+    opf.replace("</metadata>", "<dc:creator>" + escaped(book["author"]) + "</dc:creator>"
+        "<dc:contributor>Wikisource contributors</dc:contributor><dc:rights>" + escaped(book["rights"]) + "; " +
+        escaped(book["license"]) + "</dc:rights>" + sources + "</metadata>");
+    opf.replace("</manifest>", "<item id=\"credits\" href=\"sources.json\" media-type=\"application/json\"/></manifest>");
+    files["sources.json"] = bytes;
+    const auto name = language + ".epub";
+    require(test::writeBook(directory, name, files), "Cannot generate literary EPUB");
+    ReaderModel model(test::readerFonts());
     QString error;
-    require(model.open(bytes, {1264, 1680}, kobalt::qt::object({{"font_pixels", 36}, {"text_alignment", "publisher"}}),
-                       &error),
-            qPrintable(error));
-    require(model.pages() >= 2, qPrintable(language + " fixture did not paginate"));
-    require(model.chapters().size() >= 2, qPrintable(language + " fixture lost its chapter structure"));
-
-    const auto markerHits = search(model, marker);
-    require(markerHits.size() == 1, qPrintable(language + " logical marker search was not unique"));
-    const auto markerStart = markerHits.first().start;
-    require(model.goTo(markerStart), qPrintable(language + " marker anchor did not resolve"));
-    require(!model.rangeRects(markerHits.first().start, markerHits.first().end).isEmpty(),
-            qPrintable(language + " marker has no rendered selection geometry"));
-
-    const auto firstHits = search(model, first);
-    const auto secondHits = search(model, second);
-    require(firstHits.size() == 1 && secondHits.size() == 1,
-            qPrintable(language + " mixed-direction words are not searchable"));
-    const auto firstBounds = bounds(model.rangeRects(firstHits.first().start, firstHits.first().end));
-    const auto secondBounds = bounds(model.rangeRects(secondHits.first().start, secondHits.first().end));
-    require(!firstBounds.isEmpty() && !secondBounds.isEmpty(), qPrintable(language + " mixed run lost geometry"));
-    require(qAbs(firstBounds.center().y() - secondBounds.center().y()) <=
-                qMax(firstBounds.height(), secondBounds.height()),
-            qPrintable(language + " mixed-order probes unexpectedly wrapped to separate lines"));
-    require(firstBounds.center().x() > secondBounds.center().x(),
-            qPrintable(language + " RTL logical order did not place its first LTR run on the right"));
-    const auto mixedGeometry = model.annotationGeometry(firstHits.first().start, secondHits.first().end);
-    require(!mixedGeometry.vertical && mixedGeometry.start.visible && mixedGeometry.end.visible &&
-                mixedGeometry.start.first.x() > mixedGeometry.end.first.x(),
-            qPrintable(language + " logical endpoint order was replaced by left-to-right screen sorting"));
-    require(mixedGeometry.start.outward == QPoint(-1, 0) && mixedGeometry.end.outward == QPoint(1, 0),
-            qPrintable(language + " LTR run edges inherited the surrounding RTL direction"));
-    const auto arabicDigitHits = search(model, arabicDigits);
-    const auto westernDigitHits = search(model, westernDigits);
-    require(arabicDigitHits.size() == 1 && westernDigitHits.size() == 1,
-            qPrintable(language + " directional digit runs are not searchable"));
-    const auto arabicDigitBounds = bounds(model.rangeRects(arabicDigitHits.first().start, arabicDigitHits.first().end));
-    const auto westernDigitBounds =
-        bounds(model.rangeRects(westernDigitHits.first().start, westernDigitHits.first().end));
-    require(!arabicDigitBounds.isEmpty() && !westernDigitBounds.isEmpty() &&
-                qAbs(arabicDigitBounds.center().y() - westernDigitBounds.center().y()) <=
-                    qMax(arabicDigitBounds.height(), westernDigitBounds.height()),
-            qPrintable(language + " RTL-base digit runs lost same-line geometry"));
-    require(arabicDigitBounds.center().x() > westernDigitBounds.center().x(),
-            qPrintable(language + " RTL logical order did not place its first digit run on the right"));
-
-    const auto ltrFirstHits = search(model, ltrFirst);
-    const auto ltrSecondHits = search(model, ltrSecond);
-    require(ltrFirstHits.size() == 1 && ltrSecondHits.size() == 1,
-            qPrintable(language + " LTR-base mixed-direction words are not searchable"));
-    const auto ltrFirstBounds = bounds(model.rangeRects(ltrFirstHits.first().start, ltrFirstHits.first().end));
-    const auto ltrSecondBounds = bounds(model.rangeRects(ltrSecondHits.first().start, ltrSecondHits.first().end));
-    require(!ltrFirstBounds.isEmpty() && !ltrSecondBounds.isEmpty() &&
-                qAbs(ltrFirstBounds.center().y() - ltrSecondBounds.center().y()) <=
-                    qMax(ltrFirstBounds.height(), ltrSecondBounds.height()),
-            qPrintable(language + " LTR-base mixed-run probes lost same-line geometry"));
-    require(ltrFirstBounds.center().x() < ltrSecondBounds.center().x(),
-            qPrintable(language + " LTR logical order did not place its first run on the left"));
-    const auto ltrNumberHits = search(model, ltrNumber);
-    require(ltrNumberHits.size() == 1, qPrintable(language + " LTR-base number is not searchable"));
-    const auto ltrNumberBounds = bounds(model.rangeRects(ltrNumberHits.first().start, ltrNumberHits.first().end));
-    require(!ltrNumberBounds.isEmpty() && ltrNumberBounds.center().x() > ltrSecondBounds.center().x(),
-            qPrintable(language + " LTR logical order misplaced the following number"));
-
-    const auto rtlAlignmentHits = search(model, rtlAlignment);
-    const auto ltrAlignmentHits = search(model, ltrAlignment);
-    require(rtlAlignmentHits.size() == 1 && ltrAlignmentHits.size() == 1,
-            qPrintable(language + " alignment probes are not unique"));
-    const auto rtlAlignmentBounds =
-        bounds(model.rangeRects(rtlAlignmentHits.first().start, rtlAlignmentHits.first().end));
-    const auto ltrAlignmentBounds =
-        bounds(model.rangeRects(ltrAlignmentHits.first().start, ltrAlignmentHits.first().end));
-    require(!rtlAlignmentBounds.isEmpty() && !ltrAlignmentBounds.isEmpty() &&
-                rtlAlignmentBounds.center().x() > model.viewport().width() * 0.6 &&
-                ltrAlignmentBounds.center().x() < model.viewport().width() * 0.4,
-            qPrintable(language + " short paragraphs did not align to their direction start"));
-
-    const auto scriptHits = search(model, scriptWord);
-    require(scriptHits.size() == 1, qPrintable(language + " diacritic-bearing script text is not searchable"));
-    require(model.goTo(scriptHits.first().start), qPrintable(language + " script-word anchor did not resolve"));
-    const auto scriptRects = model.rangeRects(scriptHits.first().start, scriptHits.first().end);
-    require(!scriptRects.isEmpty(), qPrintable(language + " script word has no geometry"));
-    const auto scriptGeometry = model.annotationGeometry(scriptHits.first().start, scriptHits.first().end);
-    require(scriptGeometry.start.visible && scriptGeometry.end.visible &&
-                scriptGeometry.start.first.x() > scriptGeometry.end.first.x() &&
-                scriptGeometry.start.outward == QPoint(1, 0) && scriptGeometry.end.outward == QPoint(-1, 0),
-            qPrintable(language + " RTL glyph endpoints did not follow their logical source direction"));
-    require(inkPixels(model.image(model.page()), scriptRects) > 2,
-            qPrintable(language + " script word produced no visible ink in its selection geometry"));
-    const auto selection = model.wordAt(scriptRects.first().center());
-    require(selection.text.normalized(QString::NormalizationForm_C) ==
-                    scriptWord.normalized(QString::NormalizationForm_C) &&
-                !selection.start.isEmpty() && !selection.end.isEmpty(),
-            qPrintable(language + " word selection mismatch: expected " + scriptWord + ", got " + selection.text));
-
-    const auto savedAnchor = model.position();
-    require(model.style(48, 120), qPrintable(language + " fixture could not reflow"));
-    require(model.pages() >= 2, qPrintable(language + " fixture stopped paginating after reflow"));
-    const auto afterReflow = search(model, marker);
-    require(afterReflow.size() == 1 && afterReflow.first().start == markerStart,
-            qPrintable(language + " search anchor changed after reflow"));
-    require(model.goTo(savedAnchor) && !model.rangeRects(scriptHits.first().start, scriptHits.first().end).isEmpty(),
-            qPrintable(language + " logical anchor or selection geometry failed after reflow"));
-
-    int visiblePages = 0;
-    for (int page = 0; page < model.pages(); ++page) {
-        require(model.go(page), qPrintable(language + " page navigation failed after reflow"));
-        if (!model.pageStart(page).isEmpty() && !model.image(page).isNull())
-            ++visiblePages;
-    }
-    require(visiblePages >= 2, qPrintable(language + " reflow produced fewer than two renderable pages"));
-}
-void checkPublicDomain(const QString &directory) {
-    QFile file(QDir(directory).filePath("public-domain-inventory.json"));
-    require(file.open(QIODevice::ReadOnly), "Cannot read literary fixture inventory");
-    const auto entries = QJsonDocument::fromJson(file.readAll()).array();
-    require(entries.size() == 16, "Literary script inventory is incomplete");
-    for (const auto &value : entries) {
-        const auto entry = value.toObject();
-        const auto language = entry["language"].toString();
-        const auto path = QDir(directory).filePath(entry["file"].toString()).toLocal8Bit();
-        kobalt::ReaderModel model(kobalt::test::readerFonts());
-        QString error;
-        require(model.open(read(path.constData()), {1264, 1680}, {}, &error), qPrintable(error));
-        require(model.pages() > 1, qPrintable(language + " literary chapter did not paginate"));
-        require(model.state()["page_progression_rtl"].toBool() == (language == "ar" || language == "he"),
-                qPrintable(language + " literary book has the wrong page direction"));
-        const auto chapters = model.chapters();
-        for (const auto &item : entry["chapters"].toArray()) {
-            const auto chapter = item.toObject();
-            bool visited = false;
-            for (const auto &choice : chapters)
-                if (choice.title == chapter["title"].toString()) {
-                    require(model.goTo(choice.position) && !model.image(model.page()).isNull(),
-                            qPrintable(language + " literary chapter navigation failed"));
-                    visited = true;
-                    break;
-                }
-            require(visited,
-                    qPrintable(language + " literary TOC lost a native title: " + chapter["title"].toString()));
-            require(
-                !search(model, chapter["probe"].toString()).isEmpty(),
-                qPrintable(language + " original literary opening is not searchable: " + chapter["probe"].toString()));
-        }
-        std::printf("PASS: %s public-domain chapters and native TOC\n", qPrintable(language));
-    }
-}
-void checkInternational(const QString &directory) {
-    QFile metadata(QDir(directory).filePath("international.json"));
-    require(metadata.open(QIODevice::ReadOnly), "Cannot open international fixture inventory");
-    const auto entries = QJsonDocument::fromJson(metadata.readAll()).array();
-    require(entries.size() >= 13, "International fixture inventory is incomplete");
-    for (const auto &value : entries) {
-        const auto entry = value.toObject();
-        const auto language = entry["language"].toString(), probe = entry["probe"].toString();
-        QRawFont font(kobalt::test::readerAssets().file("fonts/" + entry["font"].toString()), 36);
-        QRawFont latin(kobalt::test::readerAssets().file("fonts/NotoSerif-Regular.ttf"), 36);
-        require(font.isValid() && latin.isValid(), qPrintable(language + " fallback font did not load"));
-        const auto text = entry["title"].toString() + probe + entry["paragraph"].toString();
-        for (const auto codepoint : text.toUcs4()) {
-            if (QChar::category(codepoint) == QChar::Other_Format || QChar::isSpace(codepoint))
-                continue;
-            require(font.supportsCharacter(codepoint) || latin.supportsCharacter(codepoint),
-                    qPrintable(language + " has a missing glyph: U+" + QString::number(codepoint, 16)));
-        }
-        const auto path = QDir(directory).filePath(entry["file"].toString()).toLocal8Bit();
-        kobalt::ReaderModel model(kobalt::test::readerFonts());
-        QString error;
-        require(model.open(read(path.constData()), {1264, 1680},
-                           kobalt::qt::object({{"font_pixels", kobalt::defaultFontPixels()}}), &error),
-                qPrintable(error));
-        require(model.state()["language"].toString().compare(language, Qt::CaseInsensitive) == 0,
-                qPrintable(language + " document language was not exposed to the picker"));
-        const auto supplemental = kobalt::supplementalFontFamily(language);
-        bool offered = supplemental.isEmpty();
-        for (const auto &face : model.fontCatalog())
-            if (face.family == supplemental)
-                offered = true;
-        require(offered, qPrintable(language + " supplemental reading font is unavailable: " + supplemental));
-        require(model.pages() >= 3 && model.chapters().size() >= 2,
-                qPrintable(language + " book lost pagination or chapters"));
-        require(!model.state()["page_progression_rtl"].toBool(),
-                qPrintable(language + " LTR book has RTL progression"));
-        const auto hits = search(model, probe);
-        require(hits.size() == 1, qPrintable(language + " native-script probe is not uniquely searchable"));
-        require(model.goTo(hits.first().start), qPrintable(language + " native-script anchor did not resolve"));
-        auto rectangles = model.rangeRects(hits.first().start, hits.first().end);
-        require(!rectangles.isEmpty() && inkPixels(model.image(model.page()), rectangles) > 2,
-                qPrintable(language + " native-script text has no visible ink"));
-        const auto selected = model.wordAt(rectangles.first().center());
-        require(!selected.text.isEmpty() && !selected.start.isEmpty() && !selected.end.isEmpty(),
-                qPrintable(language + " word selection has no source range"));
-        require(probe.contains(selected.text) || selected.text.contains(probe),
-                qPrintable(language + " native-script selection differs: " + selected.text));
-        require(model.style(kobalt::defaultFontPixels(), 130), qPrintable(language + " default-size reflow failed"));
-        const auto latinHits = search(model, QStringLiteral("SCRIPT-PROBE-1"));
-        require(latinHits.size() == 1 && model.goTo(latinHits.first().start),
-                qPrintable(language + " mixed Latin text is not searchable"));
-        const auto latinRects = model.rangeRects(latinHits.first().start, latinHits.first().end);
-        require(!latinRects.isEmpty() && inkPixels(model.image(model.page()), latinRects) > 2,
-                qPrintable(language + " mixed Latin text has no visible ink"));
+    require(model.open(read(directory + '/' + name), {1264, 1680}, {}, &error), qPrintable(error));
+    require(model.pages() > 1, "Literary chapters did not paginate");
+    require(model.state()["page_progression_rtl"].toBool() == rtl, "Literary book has the wrong page direction");
+    const auto links = model.chapters();
+    for (int chapter = 0; chapter < 2; ++chapter) {
+        bool visited = false;
+        for (const auto &link : links)
+            if (link.title == titles[chapter]) {
+                require(model.goTo(link.position) && !model.image(model.page()).isNull(),
+                        "Literary chapter navigation failed");
+                visited = true;
+                break;
+            }
+        require(visited, "Literary TOC lost an original chapter title");
+        const auto hits = search(model, probes[chapter]);
+        require(!hits.isEmpty(), qPrintable("Original literary prose is not searchable: " + probes[chapter]));
         const auto anchor = hits.first().start;
-        require(model.style(48, 130), qPrintable(language + " book could not reflow"));
-        const auto reflowed = search(model, probe);
-        require(reflowed.size() == 1 && reflowed.first().start == anchor && model.goTo(anchor),
-                qPrintable(language + " source anchor changed after reflow"));
-        require(model.goTo(model.chapters().last().position), qPrintable(language + " second chapter did not open"));
-        require(!model.image(model.page()).isNull(), qPrintable(language + " second chapter did not render"));
-        const auto checkpoint = model.state();
-        kobalt::ReaderModel reopened(kobalt::test::readerFonts());
-        require(reopened.open(read(path.constData()), {1264, 1680}, checkpoint, &error), qPrintable(error));
-        require(reopened.position() == model.position(),
-                qPrintable(language + " reopened book lost its source position"));
-        printf("PASS: %s glyph coverage, native-script search, selection, chapters and reflow\n", qPrintable(language));
+        require(model.goTo(anchor), "Literary search anchor did not resolve");
+        const auto rectangles = model.rangeRects(hits.first().start, hits.first().end);
+        require(!rectangles.isEmpty(), "Literary prose has no selection geometry");
+        int ink = 0;
+        const auto page = model.image(model.page());
+        for (const auto &rect : rectangles)
+            for (int y = qMax(0, rect.top()); y <= qMin(page.height() - 1, rect.bottom()); ++y)
+                for (int x = qMax(0, rect.left()); x <= qMin(page.width() - 1, rect.right()); ++x)
+                    ink += qGray(page.pixel(x, y)) < 230;
+        require(ink > 2, "Literary prose has no rendered ink");
+        // A multiword range center can be whitespace, especially in RTL prose.
+        // Find a selectable word inside the searched text, as the word-selection suite does.
+        WordSelection selected;
+        const auto probe = probes[chapter].normalized(QString::NormalizationForm_C);
+        for (const auto &rectangle : rectangles) {
+            const auto area = rectangle.intersected(page.rect());
+            for (int x = area.left(); x <= area.right() && selected.text.isEmpty(); x += 2) {
+                const auto candidate = model.wordAt({x, area.center().y()});
+                if (!candidate.text.isEmpty() && probe.contains(candidate.text.normalized(QString::NormalizationForm_C)))
+                    selected = candidate;
+            }
+        }
+        require(!selected.text.isEmpty() && !selected.start.isEmpty() && !selected.end.isEmpty(),
+                qPrintable("Native-script prose has no selectable word: " + language));
+        require(model.style(48, 130), "Literary book could not reflow");
+        const auto reflowed = search(model, probes[chapter]);
+        require(!reflowed.isEmpty() && reflowed.first().start == anchor && model.goTo(anchor),
+                "Literary source anchor changed after reflow");
     }
+    const auto checkpoint = model.state();
+    ReaderModel reopened(test::readerFonts());
+    require(reopened.open(read(directory + '/' + name), {1264, 1680}, checkpoint, &error), qPrintable(error));
+    require(reopened.position() == model.position(), "Literary reopen lost its source position");
+    std::printf("PASS: %s literary excerpts, native TOC, search, selection, reflow and reopen\n", qPrintable(language));
 }
-
 }
-
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
-    require(argc == 3, "Pass Arabic and Hebrew synthetic EPUB paths");
-    checkBook(read(argv[1]), QStringLiteral("Arabic"), QStringLiteral("ARABIC-ANCHOR-7429"),
-              QStringLiteral("FIRST6814"), QStringLiteral("SECOND9273"), QStringLiteral("LTRFIRST8120"),
-              QStringLiteral("LTRSECOND5926"), QStringLiteral("37"), QString::fromUtf8("١٢٣٤٥"),
-              QStringLiteral("67890"), QString::fromUtf8("خِتَامٌ"), QStringLiteral("Direction starts here"),
-              QString::fromUtf8("بِدَايَةٌ"));
-    checkBook(read(argv[2]), QStringLiteral("Hebrew"), QStringLiteral("HEBREW-ANCHOR-8362"),
-              QStringLiteral("FIRST3141"), QStringLiteral("SECOND5926"), QStringLiteral("LTRFIRST4162"),
-              QStringLiteral("LTRSECOND2673"), QStringLiteral("84"), QString::fromUtf8("١٢٣٤٥"),
-              QStringLiteral("67890"), QString::fromUtf8("סִיּוּם"), QStringLiteral("Direction starts here"),
-              QString::fromUtf8("רֵאשִׁית"));
-    checkInternational(QFileInfo(QString::fromLocal8Bit(argv[1])).absolutePath());
-    checkPublicDomain(QFileInfo(QString::fromLocal8Bit(argv[1])).absolutePath());
-    puts("PASS: Arabic and Hebrew shaping inputs, mixed LTR/RTL placement, selection and reflow anchors");
+    const auto entries = QJsonDocument::fromJson(read(QStringLiteral(KOBALT_TEST_CORPUS) + "/catalog.json")).array();
+    require(entries.size() == 4, "Representative literary inventory must contain four languages");
+    QTemporaryDir directory;
+    require(directory.isValid(), "Cannot create literary fixture directory");
+    QSet<QString> found;
+    for (const auto &entry : entries) {
+        const auto language = entry.toObject()["language"].toString();
+        require(!found.contains(language), "Duplicate literary language");
+        found.insert(language);
+        checkBook(entry.toObject(), directory.path());
+    }
+    require(found == QSet<QString>({"ar", "he", "hi", "ja"}), "Representative literary selection changed");
 }

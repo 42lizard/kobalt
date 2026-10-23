@@ -1,4 +1,4 @@
-#include "platform/nickel/qt5/session_calls.h"
+#include "platforms/kobo/qt5/session_calls.h"
 #include "check.h"
 
 #include <cstring>

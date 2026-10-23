@@ -321,7 +321,7 @@ void SearchPanel::redraw() {
     const auto excerptStyle =
         QString("background:transparent;border:none;font-family:\"%1\";font-size:%2px;font-weight:400;")
             .arg(family)
-            .arg(m::search::excerptText);
+            .arg(int(m::search::excerptText));
     while (buttons.size() < pageSize) {
         const int row = buttons.size();
         renderedStarts.append(QString());
@@ -343,7 +343,7 @@ void SearchPanel::redraw() {
             QString(
                 "QPushButton{border:none;border-radius:0;border-bottom:%1px solid palette(light);background:palette(window);min-height:0;padding:0;}"
                 " QPushButton:pressed{background:palette(midlight);}")
-                .arg(m::control::border));
+                .arg(int(m::control::border)));
         connect(button, &QPushButton::clicked, this, [this, row] {
             const int index = resultPage * pageSize + row;
             if (index < hits.size() && selected) {

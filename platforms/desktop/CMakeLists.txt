@@ -1,0 +1,305 @@
+cmake_minimum_required(VERSION 3.22)
+project(Kobalt LANGUAGES C CXX)
+
+if(NOT APPLE)
+    message(FATAL_ERROR "Only the Mac development app is configured so far.")
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+include(CTest)
+set(qt_components Core Gui Widgets Network Sensors)
+if(BUILD_TESTING)
+    list(APPEND qt_components Test)
+endif()
+find_package(Qt6 6.11.3 EXACT REQUIRED COMPONENTS ${qt_components})
+file(REAL_PATH "${Qt6_DIR}/.." qt_config_root)
+foreach(component IN LISTS qt_components)
+    file(REAL_PATH "${Qt6${component}_DIR}/.." component_root)
+    if(NOT component_root STREQUAL qt_config_root)
+        message(FATAL_ERROR "Mixed Qt SDK cache for ${component}. Configure a fresh output or clear cached Qt6 package paths with -UQt6* before selecting the SDK.")
+    endif()
+endforeach()
+get_filename_component(KOBALT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+foreach(retired KOBALT_DEPENDENCIES KOBALT_DEPENDENCY_CACHE KOBALT_ASSETS)
+    unset(${retired} CACHE)
+endforeach()
+
+add_subdirectory("${KOBALT_ROOT}/dependencies" "${CMAKE_CURRENT_BINARY_DIR}/dependencies")
+add_subdirectory("${KOBALT_ROOT}/assets" "${CMAKE_CURRENT_BINARY_DIR}/assets")
+
+file(READ "${KOBALT_ASSETS}/manifest.json" assets)
+string(JSON KOBALT_VERSION GET "${assets}" version)
+string(JSON count LENGTH "${assets}" files)
+math(EXPR last "${count} - 1")
+foreach(index RANGE ${last})
+    string(JSON name GET "${assets}" files ${index} path)
+    if(IS_ABSOLUTE "${name}" OR name MATCHES "(^|/)\\.\\.(/|$)")
+        message(FATAL_ERROR "Invalid asset path: ${name}")
+    endif()
+    string(JSON expected GET "${assets}" files ${index} sha256)
+    file(SHA256 "${KOBALT_ASSETS}/${name}" actual)
+    if(NOT actual STREQUAL expected)
+        message(FATAL_ERROR "Prepared runtime asset changed: ${name}")
+    endif()
+endforeach()
+string(REGEX REPLACE "^v([0-9]+\\.[0-9]+(\\.[0-9]+)?).*$" "\\1" KOBALT_BUNDLE_VERSION "${KOBALT_VERSION}")
+
+set(source "${KOBALT_ROOT}/src")
+file(READ "${CRENGINE_SOURCE}/cr3gui/data/html5.css" READER_HTML_CSS)
+configure_file("${source}/engine/crengine/reader_styles.h.in" reader_styles.h @ONLY)
+file(GLOB patterns RELATIVE "${CRENGINE_SOURCE}/cr3gui/data/hyph" "${CRENGINE_SOURCE}/cr3gui/data/hyph/*.pattern")
+list(SORT patterns)
+list(TRANSFORM patterns PREPEND "\"")
+list(TRANSFORM patterns APPEND "\"")
+list(JOIN patterns ", " READER_HYPHENATION_PATTERNS)
+configure_file("${source}/engine/crengine/reader_hyphenation.h.in" reader_hyphenation.h @ONLY)
+execute_process(COMMAND git rev-parse --short HEAD WORKING_DIRECTORY "${KOBALT_ROOT}"
+    OUTPUT_VARIABLE KOBALT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+execute_process(COMMAND git status --porcelain WORKING_DIRECTORY "${KOBALT_ROOT}"
+    OUTPUT_VARIABLE modifications COMMAND_ERROR_IS_FATAL ANY)
+set(KOBALT_COMMIT_MODIFIED OFF)
+if(modifications)
+    set(KOBALT_COMMIT_MODIFIED ON)
+endif()
+configure_file("${source}/support/build_info.h.in" build_info.h @ONLY)
+
+# Keep portable objects separate so UI edits do not relink standalone checks.
+file(GLOB_RECURSE shared CONFIGURE_DEPENDS
+    "${source}/dictionaries/*.cpp" "${source}/engine/*.cpp"
+    "${source}/model/*.cpp"
+    "${source}/reading/*.cpp" "${source}/storage/*.cpp")
+add_library(kobalt-core OBJECT ${shared} display.cpp
+    "${source}/assets/assets.cpp" "${source}/assets/bundled_fonts.cpp" "${source}/assets/font_catalog.cpp"
+    "${source}/assets/system_fonts.cpp"
+    "${source}/support/diagnostics.cpp"
+    "${source}/publication/publication.cpp" "${source}/publication/zip_resource.cpp"
+    "${source}/publication/resource_cache.cpp" "${source}/publication/local_resources.cpp"
+    "${source}/publication/image_policy.cpp" "${source}/publication/layout_compatibility.cpp"
+    "${source}/publication/native_resources.cpp" "${source}/publication/resource_server.cpp"
+    "${source}/publication/plain_archive.cpp")
+add_dependencies(kobalt-core kobalt-dependencies)
+target_include_directories(kobalt-core PUBLIC "${KOBALT_ROOT}" "${source}" "${CMAKE_CURRENT_BINARY_DIR}"
+    "${source}/interfaces/reader/ui/controls")
+target_include_directories(kobalt-core SYSTEM PUBLIC
+    "${CRENGINE_SOURCE}/crengine/include" "${CRENGINE_BUILD}"
+    "${KOBALT_TEST_DEPENDENCIES}/include" "${KOBALT_TEST_DEPENDENCIES}/include/harfbuzz"
+    "${KOBALT_TEST_DEPENDENCIES}/include/freetype2" "${KOBALT_TEST_DEPENDENCIES}/include/fribidi"
+    "${KOBALT_TEST_PNG_INCLUDE}")
+target_compile_definitions(kobalt-core PUBLIC KOBALT_READER_HARDWARE KOBALT_VERSION="${KOBALT_VERSION}"
+    KOBALT_LAYOUT_POLICY="native-public-v1" fdatasync=fsync)
+target_compile_options(kobalt-core PRIVATE -Wall -Wextra)
+target_link_libraries(kobalt-core PUBLIC Qt6::Widgets Qt6::Network Qt6::Sensors
+    "${CRENGINE_BUILD}/libcrengine.a"
+    "${KOBALT_TEST_DEPENDENCIES}/lib/libharfbuzz.a" "${KOBALT_TEST_DEPENDENCIES}/lib/libxxhash.a"
+    "${KOBALT_TEST_DEPENDENCIES}/lib/libutf8proc.a" "${KOBALT_TEST_DEPENDENCIES}/lib/libjpeg.a"
+    "${KOBALT_TEST_DEPENDENCIES}/lib/liblunasvg.a" "${KOBALT_TEST_DEPENDENCIES}/lib/libfreetype.a"
+    "${KOBALT_TEST_DEPENDENCIES}/lib/libfribidi.a" "${KOBALT_TEST_DEPENDENCIES}/lib/libunibreak.a"
+    "${KOBALT_TEST_PNG}" z)
+# The engine and Qt must keep separate FreeType glyph implementations.
+target_link_options(kobalt-core INTERFACE "LINKER:-force_load,${KOBALT_TEST_DEPENDENCIES}/lib/libfreetype.a")
+file(GLOB_RECURSE interfaces CONFIGURE_DEPENDS "${source}/interfaces/*.cpp")
+add_library(kobalt-desktop OBJECT ${interfaces}
+    window.cpp services.cpp
+    ../android/reader.cpp ../android/start_screen.cpp
+    "${source}/platform/api/reader_orientation.cpp")
+target_link_libraries(kobalt-desktop PUBLIC kobalt-core)
+target_compile_options(kobalt-desktop PRIVATE -Wall -Wextra)
+add_executable(Kobalt MACOSX_BUNDLE main.cpp)
+target_link_libraries(Kobalt PRIVATE kobalt-desktop kobalt-core)
+set_target_properties(Kobalt PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in")
+set(resources "${KOBALT_ROOT}/assets")
+file(GLOB notices CONFIGURE_DEPENDS "${resources}/notices/*")
+qt_add_resources(kobalt-desktop desktop_artwork PREFIX "/desktop" BASE "${resources}" FILES "${resources}/kobalt-android.svg")
+qt_add_resources(kobalt-desktop notices PREFIX "/kobalt" BASE "${resources}" FILES "${resources}/acknowledgments.json" ${notices})
+set(bundle_assets "${CMAKE_CURRENT_BINARY_DIR}/Kobalt.app/Contents/Resources/assets")
+add_custom_command(OUTPUT "${bundle_assets}/manifest.json"
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${bundle_assets}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${KOBALT_ASSETS}" "${bundle_assets}"
+    DEPENDS ${KOBALT_ASSET_INPUTS}
+    VERBATIM)
+add_custom_target(kobalt-runtime-assets DEPENDS "${bundle_assets}/manifest.json")
+add_dependencies(Kobalt kobalt-runtime-assets)
+
+if(BUILD_TESTING)
+    find_program(KOBALT_TEST_ZIP zip REQUIRED)
+    set(test_book "${KOBALT_ROOT}/tests/fixtures/trevelyans-type-tester.kepub.epub")
+    file(SHA256 "${test_book}" test_book_hash)
+    if(NOT test_book_hash STREQUAL "1050bc7af6a6b19267319c8b56965ca7cbf63abedfa8079ab5c4eacbb6c407ac")
+        message(FATAL_ERROR "Type Tester fixture does not match the pinned v1.2 copy with the chapter-heading CSS fix")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${test_book}")
+    set(test_variable_font "${KOBALT_ROOT}/tests/fixtures/AmstelvarAlpha-VF.ttf")
+    file(SHA256 "${test_variable_font}" test_font_hash)
+    if(NOT test_font_hash STREQUAL "8064db0a8d839ae41296252291acb8e4deffab64dddfb55485b0180420568626")
+        message(FATAL_ERROR "Variable-font fixture does not match its pinned source")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${test_variable_font}")
+    add_executable(kobalt-desktop-tests "${KOBALT_ROOT}/tests/desktop.cpp")
+    target_link_libraries(kobalt-desktop-tests PRIVATE kobalt-desktop kobalt-core Qt6::Test)
+    target_compile_definitions(kobalt-desktop-tests PRIVATE
+        KOBALT_TEST_ASSETS="${KOBALT_ASSETS}" KOBALT_TEST_ZIP="${KOBALT_TEST_ZIP}" KOBALT_TEST_BOOK="${test_book}"
+        KOBALT_TEST_VARIABLE_FONT="${test_variable_font}")
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-tmp")
+    set(headless_environment "QT_QPA_PLATFORM=minimal:enable_fonts:freetype" "QT_STYLE_OVERRIDE=Fusion" "TMPDIR=${CMAKE_CURRENT_BINARY_DIR}/test-tmp")
+    foreach(check startup covers reading errors diagnostics storageDiagnostics features stylesheet bookmarks bookmarkMerge annotations links
+            settings dictionaryRedraw opticalSize desktopControls navigation annotationTwoFingerTapConsumesWholeSequence annotationRightClickRejectsChords)
+        add_test(NAME desktop.${check} COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-desktop-tests>" "-DTEST_ARGUMENTS=${check}"
+            "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake")
+        set(lane fast)
+        if(check MATCHES "^(features|diagnostics|stylesheet|bookmarks|bookmarkMerge|annotations|links|settings|dictionaryRedraw|opticalSize|desktopControls|navigation)$")
+            set(lane integration)
+        endif()
+        set_tests_properties(desktop.${check} PROPERTIES ENVIRONMENT "${headless_environment}"
+            LABELS "desktop;${lane}" TIMEOUT 35)
+    endforeach()
+    # Archive the existing objects so each standalone check links only the
+    # production objects it uses, without compiling another implementation.
+    add_library(kobalt-regression-runtime STATIC)
+    set_target_properties(kobalt-regression-runtime PROPERTIES AUTOMOC OFF)
+    target_link_libraries(kobalt-regression-runtime PUBLIC kobalt-core)
+    add_custom_target(kobalt-tests DEPENDS kobalt-desktop-tests)
+    add_custom_target(kobalt-fast-tests DEPENDS kobalt-desktop-tests)
+    add_executable(kobalt-reader-lifecycle-tests "${KOBALT_ROOT}/tests/reader_lifecycle.cpp"
+        "${KOBALT_ROOT}/platforms/kobo/common/engine_positions.cpp")
+    target_link_libraries(kobalt-reader-lifecycle-tests PRIVATE kobalt-desktop kobalt-core Qt6::Test)
+    target_include_directories(kobalt-reader-lifecycle-tests PRIVATE "${KOBALT_ROOT}/tests")
+    target_compile_options(kobalt-reader-lifecycle-tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_definitions(kobalt-reader-lifecycle-tests PRIVATE
+        KOBALT_TEST_ASSET_ROOT="${KOBALT_ASSETS}" KOBALT_TEST_BOOK="${test_book}"
+        KOBALT_TEST_ZIP="${KOBALT_TEST_ZIP}"
+        KOBALT_FONT_DIRECTORY="${KOBALT_ASSETS}/fonts" KOBALT_INSTALLED_FONTS)
+    add_dependencies(kobalt-tests kobalt-reader-lifecycle-tests)
+    foreach(check uneditedPanelTransitions appearanceApplyOnNavigation appearanceRelayoutPreservesPassage
+            overflowClosesCurrentPanel appearanceSettingsRetainsDraft appearanceWriteFailureRetainsDraft
+            appearanceSleepRetainsDraft appearanceFailedPreviewDismisses appearanceApplyFailureCanExit
+            appearanceCloseDuringPreview appearanceSleepDuringFirstEdit appearanceDragsDuringPreview
+            pageTurnsResumeWhenReaderIsShownAfterSleep closeWithPendingBookmark
+            pageGestureBurstKeepsOnePendingTurn exitThroughReaderAndReopen staleSearchReplyIgnored searchSurvivesReflow
+            sleepRequestFreezesOrientationBeforeHandoff closePublishesHeldOrientationBeforeBackgroundPaint
+            closeRestoresOrientationBeforeBackgroundPaint rotationOwnership customSleepScreenIsOptIn
+            sleepScreenUpdatesWhilePluggedIn sleepScreenDimsOnlyItsOwnedPage sleepSnapshotMatchesTheDisplayedPage
+            sleepSnapshotReplacesEachClockWithoutChangingTheReadingPage sleepTimeLeftUsesHoursAboveTwoHours
+            sleepScreenModesKeepTheStockDefaultAndMigrateTheOptIn sleepCoverFitsWithoutCroppingOrDimming
+            sleepCoverDecodingIsBoundedAndHonorsSourceCancellation remoteKeyActivityRequiresActiveReading
+            finishChoiceSurvivesSleepAndRequiresActiveReader nativeProgressAutosave usbFinalSave
+            progressChoiceKeepAndGo finishedSyncWithoutPositionKeepsLocalReading
+            progressChoiceForOlderAlert progressChoiceUnavailablePosition
+            appearanceOpeningDoesNotRepaintToolbar annotationFramesKeepFirstPaintComplete)
+        add_test(NAME lifecycle.${check} COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-reader-lifecycle-tests>" "-DTEST_ARGUMENTS=${check}"
+            "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake")
+        set_tests_properties(lifecycle.${check} PROPERTIES ENVIRONMENT "${headless_environment}"
+            LABELS "lifecycle;integration" TIMEOUT 35)
+    endforeach()
+    add_executable(kobalt-reader-ui-tests "${KOBALT_ROOT}/tests/reader_ui.cpp")
+    target_link_libraries(kobalt-reader-ui-tests PRIVATE kobalt-desktop kobalt-core Qt6::Test)
+    target_compile_options(kobalt-reader-ui-tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_definitions(kobalt-reader-ui-tests PRIVATE KOBALT_TEST_ASSET_ROOT="${KOBALT_ASSETS}")
+    add_dependencies(kobalt-tests kobalt-reader-ui-tests)
+    foreach(check cancelledCanvasTouchRestoresSlider
+            canvasCancellationCanDeleteTarget
+            canvasCancellationKeepsReentrantGesture
+            canvasReleaseCanDeleteWidgets
+            canvasInputRespectsModalBarrier
+            delayedProgressPaintsAfterTheEventLoop
+            progressPaintsOnlyChangedPixels
+            openingProgressPaintsAfterTheEventLoop
+            openingFirstPaintCallback
+            readingStripChangesLeaveBodyUnpainted
+            annotationPaintPreservesText
+            annotationDamageBatchesLogicalUpdate
+            annotationFrameDamageJoinsRawDamage
+            annotationContourKeepsParagraphGaps)
+        add_test(NAME ui.${check} COMMAND "${CMAKE_COMMAND}"
+            "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-reader-ui-tests>" "-DTEST_ARGUMENTS=${check}"
+            "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake")
+        set_tests_properties(ui.${check} PROPERTIES ENVIRONMENT "${headless_environment}"
+            LABELS "ui;integration" TIMEOUT 35)
+    endforeach()
+    function(kobalt_regressions group)
+        foreach(check IN LISTS ARGN)
+            string(REPLACE "_" "-" name "${check}")
+            add_executable(kobalt-${name}-tests "${KOBALT_ROOT}/tests/model/${check}.cpp")
+            set_target_properties(kobalt-${name}-tests PROPERTIES AUTOMOC OFF)
+            target_include_directories(kobalt-${name}-tests PRIVATE "${KOBALT_ROOT}/tests/support")
+            target_compile_options(kobalt-${name}-tests PRIVATE -Wall -Wextra -Werror)
+            if(check STREQUAL "touch_rotation")
+                target_link_libraries(kobalt-${name}-tests PRIVATE Qt6::Gui)
+                target_include_directories(kobalt-${name}-tests PRIVATE "${KOBALT_ROOT}")
+            elseif(group STREQUAL "component" OR check STREQUAL "reader_orientation")
+                target_link_libraries(kobalt-${name}-tests PRIVATE kobalt-desktop kobalt-core)
+            else()
+                target_link_libraries(kobalt-${name}-tests PRIVATE kobalt-regression-runtime)
+            endif()
+            target_compile_definitions(kobalt-${name}-tests PRIVATE
+                KOBALT_TEST_ASSET_ROOT="${KOBALT_ASSETS}" KOBALT_FONT_DIRECTORY="${KOBALT_ASSETS}/fonts"
+                KOBALT_INSTALLED_FONTS)
+            if(check STREQUAL "svg_limits")
+                target_include_directories(kobalt-${name}-tests SYSTEM PRIVATE "${KOBALT_TEST_DEPENDENCIES}/include/lunasvg")
+            endif()
+            if(check STREQUAL "touch_rotation")
+                target_sources(kobalt-${name}-tests PRIVATE "${KOBALT_ROOT}/platforms/kobo/qt5/touch_rotation.cpp")
+            endif()
+            if(check STREQUAL "reader")
+                target_sources(kobalt-${name}-tests PRIVATE "${KOBALT_ROOT}/platforms/kobo/common/engine_positions.cpp")
+                target_compile_definitions(kobalt-${name}-tests PRIVATE
+                    KOBALT_TEST_VARIABLE_FONT_DIRECTORY="${KOBALT_ROOT}/tests/fixtures")
+            endif()
+            add_dependencies(kobalt-tests kobalt-${name}-tests)
+            set(lane integration)
+            if(group STREQUAL "model")
+                set(lane fast)
+                add_dependencies(kobalt-fast-tests kobalt-${name}-tests)
+            endif()
+            set(executable "$<TARGET_FILE:kobalt-${name}-tests>")
+            set(arguments)
+            if(group STREQUAL "session" OR check MATCHES "^(links|search|word_selection|reader|publisher_markup|local_reader|document_word_count|document_cache)$")
+                set(arguments "--regression;$<TARGET_FILE:kobalt-${name}-tests>")
+                set(executable "$<TARGET_FILE:kobalt-desktop-tests>")
+            endif()
+            if(check STREQUAL "system_fonts")
+                set(arguments "${KOBALT_ASSETS}/fonts/ebook-core/NV_Bitter-Regular.ttf")
+            endif()
+            if(check STREQUAL "font_sources")
+                set(arguments "${test_variable_font};${test_book}")
+            endif()
+            if(check STREQUAL "font_registration")
+                set(arguments "${KOBALT_ASSETS}/fonts/ebook-core/NV_Bitter-Regular.ttf")
+            endif()
+            add_test(NAME ${group}.${name} COMMAND "${CMAKE_COMMAND}"
+                "-DTEST_EXECUTABLE=${executable}" "-DTEST_ARGUMENTS=${arguments}"
+                "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake")
+            set_tests_properties(${group}.${name} PROPERTIES
+                ENVIRONMENT "${headless_environment}" LABELS "${group};${lane}" TIMEOUT 35)
+        endforeach()
+    endfunction()
+    kobalt_regressions(model storage_assets bookmark_store highlight_store appearance_settings header_footer
+        layout_cache resource_cache layout_compatibility reading_pace reading_speed engine_activity
+        local_resources zip_resource diagnostics dictionary_store image_damage page_pixels
+        logical_word_counter brightness_gesture qt_compat page_refresh_regions screen_refresh plain_archive reading_progress)
+    kobalt_regressions(model font_axes touch_rotation)
+    kobalt_regressions(platform reader_orientation font_sources system_fonts nickel_dictionary_selection
+        nickel_reading_pace_cache nickel_session_calls usb_removal page_transition_native)
+    kobalt_regressions(engine alignment indentation page_layout vertical_writing mathml line_breaking
+        fallback_styles svg_limits whitespace links search word_selection reader publisher_markup local_reader document_word_count document_cache)
+    kobalt_regressions(component ui acknowledgments font_data font_registration)
+    kobalt_regressions(session reading_book bookmark_session highlight_session reader_session)
+    kobalt_regressions(resource image_policy resource_provider)
+    kobalt_regressions(corpus multilingual)
+    target_compile_definitions(kobalt-multilingual-tests PRIVATE
+        KOBALT_TEST_ZIP="${KOBALT_TEST_ZIP}" KOBALT_TEST_CORPUS="${KOBALT_ROOT}/tests/fixtures/public-domain")
+    add_custom_target(screenshots
+        COMMAND "${CMAKE_COMMAND}" "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-desktop-tests>"
+            "-DTEST_ARGUMENTS=--screenshots;${KOBALT_ROOT}/build/screenshots/mac"
+            "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake"
+        DEPENDS kobalt-desktop-tests USES_TERMINAL VERBATIM)
+endif()

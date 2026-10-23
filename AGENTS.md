@@ -1,104 +1,35 @@
-# Working on Kobalt public source
+# Working on Kobalt
 
-Read [README.md](README.md) before changing code. Follow [Building Kobalt](docs/development.md) for build commands, tests and source boundaries. [Shared reader controls](docs/development.md#shared-reader-controls) is the canonical component guidance. Keep reader behavior documentation current in [Reader behavior](docs/reader.md).
+Read [Building](doc/building.md) before running a build. This branch is rebuilding the development tooling incrementally. Do not restore retired runners wholesale.
 
-## README edits
+## Build ownership
 
-Only the user edits this repository's root `README.md`. Agents may edit README files in subdirectories as ordinary project documentation. As soon as you identify a necessary edit to the root `README.md`, tell the user why it is needed and propose the exact wording. Notify the user immediately, even when other work remains. Continue other pending work that can proceed independently. Wait for the user's root README edits only when no other pending work can proceed.
+Use CMake and presets for application builds. Do not add Python tooling or an internal build-support framework. Keep platform build definitions, presets and toolchains under `platforms/`. Shared application source remains under `src/`. Shared asset inputs live under root `assets/`; stage runtime bundles inside each platform output. Do not read runtime assets from another checkout.
 
-## Worktrees and branches
+Kobo and Android builds use prepared `kobuild` images. Use native ARM64 Android containers on ARM64 hosts when the selected image supports them. The compiler, sysroot, Qt modules, Android SDK, NDK and JDK belong to kobuild. Fix missing SDK components in kobuild rather than building Qt modules or repairing SDKs in the application. Never compile Qt or any Qt module as part of a Kobalt build.
 
-`develop` is this repository's integration branch. Start new implementation work in a separate worktree and task branch based on `develop`. Name task branches `feature/*`. Continue existing work in its existing worktree and branch unless the user requests otherwise. Target completed implementation changes at `develop`. Use `main` only for explicitly requested release work.
+The Mac app uses an existing native Qt SDK. A Kobo cross SDK cannot replace the native Mac SDK. Application-specific dependencies such as CREngine remain application inputs, separate from Qt SDK production.
 
-When the user explicitly asks you to implement a change and merge it into `develop`, you may create the task branch and worktree, stage and commit the task's changes, and integrate them into local `develop` after the required checks pass. This authorization covers only repositories named in the request. Follow the signing requirements and preserve unrelated work. Do not ask again for operations already covered by that authorization.
+Mac development uses Qt 6.11.3. From `platforms/desktop/`, build `mac-tests` and run `ctest --preset mac` for native headless checks. Build `mac-screenshots` for the current captures in `build/screenshots/mac/`. Both paths use the same compiled desktop implementation as the app. Keep test profiles isolated and remove temporary fixture and capture state when a run ends. See [headless tests and screenshots](doc/building.md#headless-tests-and-screenshots) for scope and commands.
 
-A request to merge a task means to integrate its commits. Fast-forward `develop` when possible. Otherwise, cherry-pick the task's commits in order onto current `develop`. Create a merge commit only when the user explicitly requests one. Preserve independent changes when resolving conflicts. If the resulting source differs from the tested source, run the affected checks again before finishing.
+Restore portable regression assertions from `develop` with only necessary path, fixture and SDK adaptations. The `mac-tests` preset builds desktop, model, engine, session, resource and component checks; use `ctest --preset mac -L model` for the restored model group. Reuse compiled application objects. Native checks run through `platforms/desktop/run-test.cmake` so failure and timeout cleanup does not depend on test destructors. Keep the Fusion style used by the app and the original component suite. Await asynchronous UI completion before sending the next action. A page center can be covered by a panel; target exposed paper when dismissing it.
 
-A request to fix or implement something without an explicit merge instruction authorizes local edits and verification only. A request naming only a specific Git operation authorizes only that operation. Rebasing and destructive cleanup require separate explicit authorization. Completed task branches and worktrees follow the cleanup rule below.
+Use the checked-in Trevelyan's Type Tester fixture for general reading checks and screenshots. It includes the chapter-heading CSS fix documented in [Native validation](doc/validation.md#book-fixtures). Keep synthetic books for focused regressions, not as a replacement for the general book fixture.
 
-Never push branches, tags or any other refs unless the user explicitly requests that push. Permission to commit or merge does not authorize a push. Force-pushing requires an explicit force-push instruction. Global agent instructions still govern permissions, Git authorization and signing.
+Use [Native validation](doc/validation.md) for the test inventory, feature coverage and explicit gaps. The everyday loop is `mac-fast-tests` followed by `ctest --preset mac-fast`; `mac-tests` and `ctest --preset mac` run the full native set. `mac-screenshots` produces the current image set, checksum manifest and local gallery. Use `ctest --preset mac -L lifecycle` for reader lifecycle and annotation-frame checks, `-L ui` for shared canvas and paint checks, `-L platform` for portable adapter checks and `-L corpus` for the representative literary corpus. All four groups belong to the integration lane. Keep them in the integration lane and link the existing production objects; do not restore the old test-host application or scroll-only canvas. Keep public validation independent of private runtime services. Public Nickel compatibility checks are deferred until the user chooses an approach.
 
-## Signing handoff
+Flag suboptimal approaches before extending them. Identify duplicated build logic, application-side SDK workarounds, dependence on an old worktree, unnecessary rebuilds and unclear ownership. Explain the issue and propose a simpler approach.
 
-When committing is authorized, finish implementation and required verification before the signing handoff. Present the proposed atomic commits and their validation results, then warn the user before triggering signing prompts. Use imperative one-line commit messages and no agent coauthor attribution.
+## Execution and cleanup
 
-Always sign project commits, including cherry-picked commits and explicitly requested merge commits. Run commits that use 1Password signing outside the agent sandbox. If signing fails, retry once automatically. Before retrying, confirm that the intended commit was not already created. If the second signing attempt fails, stop and ask permission for one further attempt so the user can intervene. Do not make further attempts without permission, and never fall back to unsigned commits.
+Run native Qt commands outside the agent sandbox on the development Mac. Headless Qt tools still need CPU capabilities that the sandbox can hide. Container commands need access to the engine socket. Keep outputs and caches in the authorized workspace.
 
-After signing succeeds, continue any local integration already authorized without asking again.
+Do not open a visible app or run visible UI tests without authorization. Prefer native headless validation while editing, then validate Kobo and Android integrations last. Reuse prepared SDKs and verified dependencies.
 
-## Key constraints
+Stop and reap run-owned helper processes and remove scratch profiles, staging directories and temporary containers when a run ends, including on failure or interruption. Preserve the user's app state, active runs, SDKs and incremental caches. Retain useful current results and unresolved failure evidence rather than every successful raw log indefinitely.
 
-- Design for slow ARM cores, limited memory and e-paper displays. Follow [Performance and resource use](docs/development.md#performance-and-resource-use) and support performance claims with measurements.
-- Keep shared reader behavior compatible with Kobo Qt5, Kobo Qt6, Android and the macOS development app. Firmware 4 uses Qt5; firmware 5 and 6 use Qt6. For Kobo development builds, interactive previews and integration checks, use firmware 4 and Qt5 unless the user requests another target. Build and check the same target and installation mode. Host tests use their documented host Qt SDK.
-- Before adding a control or interaction, look for an existing shared reader component. Follow its ownership, layout and interaction rules.
-- Preserve existing functionality when adding features or refactoring. Check affected callers and platform implementations before changing shared contracts.
-- Public builds and tests must work from this checkout alone. Do not add dependencies on private checkouts, private fixtures or local services.
+## Repository practice
 
-## UI proposals
+Keep Markdown in `doc/`, except the root `README.md` and `AGENTS.md`. The user owns root README edits. Keep these instructions and build commands current in the same change as tooling updates.
 
-Requested UI changes and bug fixes within the requested scope do not require a separate proposal review. Choose routine layout and implementation details using the project's existing components and conventions.
-
-Before changing established UI behavior beyond the requested scope, explain the proposed behavior and wait for approval. If the task leaves a material choice between different user-visible behaviors unresolved, ask before implementing that choice. UI proposals should normally include a design or mockup.
-
-## Build speed and caches
-
-Use incremental development builds while implementing a change. Reserve fresh packaging builds for final package validation or investigation of build reproducibility.
-
-Cache each compiled dependency separately and share verified dependency artifacts across worktrees. Cache keys must cover source checksums, patches, compiler and toolchain identity, relevant build options and upstream dependency identities. Changing one dependency must invalidate only that dependency and those that depend on it. Follow the build documentation for the configurable cache location.
-
-Keep application objects and writable build directories inside each worktree's ignored build output. Do not share configured CMake build directories between worktrees. Verify cached artifacts before reuse. Rebuild invalid entries rather than bypassing verification.
-
-Report build and test durations separately from investigation time. Do not impose a maximum duration without representative measurements.
-
-## Verification
-
-During implementation, use focused tests and incremental builds for quick feedback. Add regression tests for bugs you fix. Before merging, run all checks required by [Building Kobalt](docs/development.md) for the affected code and platforms against the completed change, including the formatting and UI architecture checks when they apply. Run the complete required verification once against the completed change before integrating it into `develop`. Do not require intermediate atomic commits to build or pass tests. Do not run tests or create temporary checkouts solely to verify each intermediate commit. Focused checks during development remain appropriate. Repeat affected checks only when their relevant source, dependency, toolchain or configuration inputs change. Reuse recorded results when those inputs match. Creating or cherry-picking commits does not invalidate verification merely because commit hashes change.
-
-A filtered test run does not count as a full-suite pass. Report skipped or unavailable checks explicitly. Do not weaken assertions merely to obtain a pass. If a required check fails or cannot run, resolve it before merging. If it cannot be resolved within the authorized task, report the blocker and stop before merging unless the user explicitly approves an exception.
-
-For UI changes, complete the required screenshot captures and inspect affected screenshots in light and dark mode at the documented densities. Preserve the affected capture set before a UI refactor, as described in [Native screenshot tour](docs/development.md#native-screenshot-tour). Successful capture alone does not establish visual correctness.
-
-Report source inspection, host tests, platform integration checks and physical-device checks separately. Do not claim one establishes the results of another. Host tests do not establish Nickel ABI compatibility or physical-device display behavior.
-
-## Evidence and cleanup
-
-Record the source commits, hashes of relevant uncommitted inputs, build configuration and commands alongside verification results. Keep required logs, screenshots and reports in ignored build output. Do not create tracked summary documents or publish artifacts without explicit approval.
-
-Arrange cleanup before starting temporary test devices. Copy required evidence out, then stop and delete each device immediately after its last use, including after failed tests. Verify that the device's temporary storage was removed. Remove only devices and scratch files created by the current task. Preserve explicitly persistent devices and shared caches.
-
-After successfully integrating a task into `develop`, remove the completed task's feature worktree and delete its feature branch. This cleanup is included in the merge authorization. Before removal, verify that all intended changes are present in `develop`, the worktree has no uncommitted changes, and no other active task is using it. Preserve required verification evidence outside the worktree first.
-
-Do not discard uncommitted work or delete unrelated branches or worktrees. If safe cleanup cannot be established, leave them intact and report why. This does not authorize deleting remote branches or performing any push.
-
-## Changelog version selection
-
-Before adding changelog entries, check the newest versioned heading and whether its exact Git tag exists. Ignore a generic `Unreleased` heading when identifying that version.
-
-If the tag does not exist, that version is still open. Put new features and fixes under that heading. If the tag exists, that version is closed to new changes. Open the next version's section and keep `VERSION` consistent with it.
-
-Choose the next version automatically only when an established project rule makes it unambiguous. Otherwise, ask before selecting it. During a beta cycle, ask whether to continue with the next beta or move to the final release.
-
-Verify tag availability against the authoritative release remote. If verification fails, do not assume the tag is absent. Selecting an upcoming version does not authorize creating or pushing a Git tag.
-
-## Note on Nickel 6.x
-
-Firmware 6 Nickel can abort with heap corruption while its process exits, after `ServiceLocator::~ServiceLocator`, with `malloc_consolidate(): unaligned fastbin chunk detected` or `corrupted double-linked list`. This happens with any NickelHook plugin loaded, including one with no hooks and no Kobalt code. The cause is not known. It happens only at process exit, after Kobalt has saved its state. Since Nickel 6.x isn't considered stable yet, treat it as a known issue, not as a regression or a release blocker, unless a change makes it happen before exit or more often.
-
-## Platforms
-
-- Intended release platforms are Kobo with Qt5 or Qt6, and Android. This does not mean every target is ready for release; see the README for current availability.
-- macOS is a development platform for the shared reader, not a general release target.
-- Tolino has partial support through Qt6 but is not a supported release target.
-- iOS/iPadOS, PocketBook and jailbroken Kindle are under consideration and are not supported.
-
-## Release validation
-
-Before a release is tagged, do the following:
-
-- Make sure the changelog contains all new user-facing changes (not technical decisions, minor changes).
-- When preparing a release, update the root `VERSION` file to the release tag, such as `v1.0-beta.2`, in the same change as its `CHANGELOG.md` entry. Check that both match before tagging. Untagged builds use `VERSION`; tagged CI builds use the triggering tag.
-- Assemble the screenshot pass for the previous tag and compare it to the new release. Did all the differences match expected changes in the codebase, or did something unexpected change?
-
-## Acknowledgements
-
-Update [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) when adding or replacing a dependency or asset. Include upstream links and the original authors. Credit Nico Verbruggen for his projects and adaptations, while keeping the original upstream authors credited. Keep maintenance instructions in this file, not in the acknowledgements document.
+Do not stage, commit, push or publish without explicit authorization. Signed operations require an advance warning for 1Password prompts. Never add an agent coauthor. Preserve unrelated changes and the original checkout.

@@ -1,8 +1,8 @@
 #include "support/qt_compat.h"
 #include "reading/reading_progress.h"
-#include "platform/nickel/common/native_location.h"
-#include "platform/nickel/common/local_book_path.h"
-#include "platform/nickel/qt5/native_location.h"
+#include "platforms/kobo/common/native_location.h"
+#include "platforms/kobo/common/local_book_path.h"
+#include "platforms/kobo/qt5/native_location.h"
 #include <QCoreApplication>
 #include "check.h"
 using namespace kobalt;

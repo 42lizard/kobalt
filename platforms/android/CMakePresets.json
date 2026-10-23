@@ -1,0 +1,31 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "android",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build/android-$env{KOBALT_ANDROID_HOST_ARCH}",
+      "toolchainFile": "$env{QT_ANDROID_ARM64_PATH}/lib/cmake/Qt6/qt.toolchain.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ANDROID_ABI": "arm64-v8a",
+        "ANDROID_PLATFORM": "android-28",
+        "ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES": "ON",
+        "QT_HOST_PATH": "$env{QT_HOST_PATH}",
+        "ANDROID_SDK_ROOT": "$env{ANDROID_HOME}",
+        "ANDROID_NDK_ROOT": "$env{ANDROID_NDK_ROOT}",
+        "QT_ANDROID_SDK_BUILD_TOOLS_REVISION": "$env{KOBUILD_ANDROID_BUILD_TOOLS}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "android",
+      "configurePreset": "android",
+      "jobs": 2,
+      "targets": [
+        "apk"
+      ]
+    }
+  ]
+}

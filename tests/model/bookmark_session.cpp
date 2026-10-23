@@ -97,6 +97,19 @@ int main(int argc, char **argv) {
         const QSize pageArea(758, 900);
         const auto originalState = model.state();
         const auto originalKey = bookmarkLayoutKey(model.pages(), originalState, pageArea);
+        {
+            QTemporaryDir emptyRoot;
+            require(emptyRoot.isValid(), "Cannot create immediate-bookmark fixture");
+            BookmarkSession empty(model, [&] { return bookmarkLayoutKey(model.pages(), model.state(), pageArea); },
+                                  emptyRoot.path(), "immediate-bookmark", model.sourceHash(), model.title());
+            require(empty.available() && empty.writable(), "Immediate bookmark storage is unavailable");
+            require(empty.sync() && empty.resolved(), "An empty bookmark list deferred its ready layout");
+            bool added = false;
+            empty.added = [&] { added = true; };
+            require(empty.toggle(model.page()) == BookmarkSession::Toggle::Adding,
+                    "The first bookmark after resolving an empty layout was refused");
+            waitUntil([&] { return added; });
+        }
         for (const auto *field : {"top_margin_pixels", "bottom_margin_pixels", "weight_steps", "bold_reading"}) {
             auto changed = originalState;
             changed[field] = QByteArray(field) == "bold_reading" ? QJsonValue(QStringLiteral("bold")) : QJsonValue(40);

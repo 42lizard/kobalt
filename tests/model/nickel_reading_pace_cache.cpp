@@ -1,4 +1,4 @@
-#include "platform/nickel/common/reading_pace_cache.h"
+#include "platforms/kobo/common/reading_pace_cache.h"
 #include "check.h"
 
 #include <QCoreApplication>

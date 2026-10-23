@@ -313,7 +313,7 @@ void DictionariesPage::redraw() {
                     .arg(int(c::labelText))
                     .arg(ui::px(66))
                     .arg(ui::px(220))
-                    .arg(m::control::border));
+                    .arg(int(m::control::border)));
         if (!installed && !active) {
             ui::buttonIcon(action, ui::ControlIcon::Download);
             action->setIconSize(QSize(ui::px(28), ui::px(28)));

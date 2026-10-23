@@ -1,4 +1,4 @@
-#include "platform/nickel/common/usb_removal.h"
+#include "platforms/kobo/common/usb_removal.h"
 #include <cstdlib>
 
 void check(bool value) {

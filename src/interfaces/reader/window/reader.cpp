@@ -892,7 +892,7 @@ bool Reader::openLink(QPoint point) {
                 kobalt::ui::buttonIcon(button, icon);
                 kobalt::ui::readerStyle(button,
                                         QString("QPushButton{min-height:%1px;max-height:%1px;padding:0;border:none;}")
-                                            .arg(m::links::actionHeight));
+                                            .arg(int(m::links::actionHeight)));
                 return button;
             };
             action("rrLinkGo", strings::get("reader.follow_link"), kobalt::ui::ControlIcon::Link,
@@ -1363,6 +1363,9 @@ void Reader::showControls() {
     const bool opening = !topVisible && !bottomControls->isVisible();
     model->cancelPendingTurn();
     if (opening) {
+        // A page turn can defer control updates until after its first paint.
+        // Opening the menu needs the completed page's navigation state now.
+        syncReadingControls();
         flashAfterMenu = property("reader_dark").toBool();
         if (flashAfterMenu) {
             requestFlash("menu-open");

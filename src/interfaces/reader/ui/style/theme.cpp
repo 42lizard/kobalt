@@ -73,7 +73,7 @@ void paintHeaderRules(QPainter &painter, const QWidget *view) {
 void readerStyle(QWidget *widget, const QString &source) {
     widget->setProperty("reader_style", source);
     const bool dark = darkTheme(widget);
-    auto style = QString("QPushButton{border-radius:%1px;} ").arg(m::control::buttonRadius);
+    auto style = QString("QPushButton{border-radius:%1px;} ").arg(int(m::control::buttonRadius));
     style += source.contains('{') ? source : QString("*{%1}").arg(source);
     const auto escapedFamily = [](QString name) {
         name.replace('\\', "\\\\");

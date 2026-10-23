@@ -1,4 +1,4 @@
-#include "platform/nickel/display/page_transition.h"
+#include "platforms/kobo/display/page_transition.h"
 #include "check.h"
 #include <QApplication>
 #include <QWindow>

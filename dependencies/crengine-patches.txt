@@ -13,3 +13,4 @@ crengine-cache-obsolete.patch
 crengine-whitespace-fallback.patch
 crengine-page-layout.patch
 crengine-inherited-indent.patch
+crengine-compaction-diagnostics.patch

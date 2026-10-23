@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/kobalt.svg" alt="Kobalt" width="320" height="208">
+  <img src="assets/kobalt.svg" alt="Kobalt" width="320" height="208">
 </p>
 
 **Kobalt is an experimental EPUB reader with a CREngine renderer and a Qt reading interface, with a focus on speed and an excellent user experience.**
@@ -19,9 +19,9 @@ Protected books, previews, PDFs and other unsupported formats show “Opening in
 
 The source code is included, but the Android and Mac versions are not ready for general release yet.
 
-- The Android version opens unprotected EPUBs through the document picker or Open with. It keeps reading progress and bookmarks locally. See [Android setup, building, signing and limitations](android/README.md) for more information.
+- The Android version opens unprotected EPUBs through the document picker or Open with. It keeps reading progress and bookmarks locally. See [Android setup, building, signing and limitations](doc/building.md#android) for more information.
 
-- The macOS development app uses the same reader in a resizable window for testing books. For more information, take a look at [the documentation](docs/development.md#macos).
+- The macOS development app uses the same reader in a resizable window for testing books. For more information, take a look at [the documentation](doc/building.md#mac).
 
 ## Compatibility and installation
 
@@ -60,7 +60,7 @@ If you have a sample book that exhibits an issue, please attach it if you are pe
 
 ## Acknowledgements
 
-For a complete list, please check out [the acknowledgements](ACKNOWLEDGEMENTS.md) document.
+For a complete list, please check out [the acknowledgements](doc/acknowledgements.md) document.
 
 ### KOReader
 
@@ -76,6 +76,6 @@ For a complete list, please check out [the acknowledgements](ACKNOWLEDGEMENTS.md
 
 Like KOReader, this project is available under an open source license.
 
-Kobalt's own source code uses the MIT license in [LICENSE](LICENSE). CREngine patches use GNU GPL v2 or later, and Qt patches use Qt's licenses. Third-party code and assets retain their own licenses and notices in `resources/notices/`, `toolchains/nickelhook-qt6/` and `toolchains/qt6/source/LICENSES/`.
+Kobalt's own source code uses the MIT license in [LICENSE](LICENSE). CREngine patches use GNU GPL v2 or later, and Qt patches use Qt's licenses. Third-party code and assets retain their own licenses and notices in `assets/notices/` and `platforms/kobo/toolchains/nickelhook-qt6/`.
 
 The combined package includes GPL and AGPL code and is distributed under GNU AGPL v3, without warranty. Binary releases include the corresponding source and dependency sources.

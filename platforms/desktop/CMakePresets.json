@@ -1,0 +1,33 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 22, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "mac",
+      "displayName": "Mac development app",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build/desktop-mac",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "14.0"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "mac", "configurePreset": "mac", "targets": ["Kobalt"], "jobs": 2 },
+    { "name": "mac-tests", "configurePreset": "mac", "targets": ["kobalt-tests"], "jobs": 2 },
+    { "name": "mac-fast-tests", "configurePreset": "mac", "targets": ["kobalt-fast-tests"], "jobs": 2 },
+    { "name": "mac-screenshots", "configurePreset": "mac", "targets": ["screenshots"], "jobs": 2 }
+  ],
+  "testPresets": [
+    {
+      "name": "mac",
+      "configurePreset": "mac",
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 2, "noTestsAction": "error" }
+    },
+    { "name": "mac-fast", "inherits": "mac", "filter": { "include": { "label": "fast" } } },
+    { "name": "mac-integration", "inherits": "mac", "filter": { "include": { "label": "integration" } } }
+  ]
+}

@@ -1,0 +1,16 @@
+// This public key signs debug builds only. Release signing uses an external key.
+android {
+    signingConfigs {
+        debug {
+            storeFile file('@CMAKE_CURRENT_SOURCE_DIR@/app/debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+    }
+}

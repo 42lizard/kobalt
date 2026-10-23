@@ -1,4 +1,4 @@
-#include "platform/nickel/common/dictionary_selection.h"
+#include "platforms/kobo/common/dictionary_selection.h"
 #include "check.h"
 
 #include <QVector>

@@ -492,7 +492,7 @@ void ChoiceScreen::redrawFonts() {
             QString(
                 "QPushButton{min-height:0;padding:0;border:0;border-right:%2px solid palette(light);border-bottom:%2px solid palette(light);background:%1;}")
                 .arg(selectedItem ? "palette(window-text)" : "palette(window)")
-                .arg(m::control::border));
+                .arg(int(m::control::border)));
         const QFont labelFont = fontSample(item.value.isEmpty() ? QStringLiteral("Libron") : item.value);
         label->setFont(labelFont);
         fontCell->helpFont = labelFont;

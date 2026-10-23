@@ -134,7 +134,7 @@ void DictionaryPanel::open(const QString &word, const DictionaryResult &result, 
                                                     : result.dictionary);
     currentId = result.dictionaryId;
     dropdown->hide();
-    const auto note = QString("font-size:%1px;color:%2;").arg(c::descriptionText).arg(ui::noteColor(this).name());
+    const auto note = QString("font-size:%1px;color:%2;").arg(int(c::descriptionText)).arg(ui::noteColor(this).name());
     QString html = formatDefinition(result.html);
     // The adapter reports a word without an entry as an error. Name the word instead.
     const bool missing = result.received && result.restored && html.trimmed().isEmpty();
@@ -150,7 +150,7 @@ void DictionaryPanel::open(const QString &word, const DictionaryResult &result, 
     if (!result.source.isEmpty())
         html += QString("<hr><p style=\"font-family:'%1';font-size:%2px;color:%3;\">%4</p><p style=\"%5\">%6</p>")
                     .arg(ui::chromeFont().family())
-                    .arg(c::captionText)
+                    .arg(int(c::captionText))
                     .arg(ui::noteColor(this).name())
                     .arg(strings::get("dictionary_panel.source").toUpper().toHtmlEscaped(), note, result.source);
     place(selection);

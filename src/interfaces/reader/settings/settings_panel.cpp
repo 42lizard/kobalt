@@ -376,7 +376,7 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
         debugProgress->setFixedWidth(m::control::iconButtonWidth);
         readerStyle(debugProgress,
                     QString("padding:0;border:none;min-width:%1px;max-width:%1px;min-height:%1px;max-height:%1px;")
-                        .arg(m::control::stepSize));
+                        .arg(int(m::control::stepSize)));
         debugProgress->setFixedSize(m::control::stepSize, m::control::stepSize);
     }
     dictionaries = new DictionariesPage(settingsPages);
@@ -484,9 +484,9 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
             button,
             QString(
                 "QPushButton{font-size:%1px;min-height:%2px;max-height:%2px;border:0;border-radius:0;text-align:left;padding:0 %3px;background:palette(window);color:palette(window-text);} QPushButton:pressed{background:palette(midlight);}")
-                .arg(c::labelText)
-                .arg(c::listActionHeight)
-                .arg(c::inset));
+                .arg(int(c::labelText))
+                .arg(int(c::listActionHeight))
+                .arg(int(c::inset)));
         button->setFixedHeight(c::listActionHeight);
     }
     settingsTabs->setAlignment(Qt::AlignTop);
@@ -503,16 +503,16 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
             button,
             QString(
                 "QPushButton{font-size:%1px;min-height:%2px;max-height:%2px;border:0;border-bottom:%5px solid %3;border-right:%5px solid palette(window-text);border-radius:0;text-align:left;padding:0 %4px;background:palette(window);color:palette(window-text);} QPushButton:checked,QPushButton:pressed{background:palette(window-text);color:palette(window);}")
-                .arg(c::tabText)
-                .arg(c::railRowHeight)
+                .arg(int(c::tabText))
+                .arg(int(c::railRowHeight))
                 .arg(c::dividerLight)
-                .arg(c::railInset)
-                .arg(m::control::border));
+                .arg(int(c::railInset))
+                .arg(int(m::control::border)));
     }
     fitRail();
     ui::readerStyle(
         settingsPages,
-        QString("QStackedWidget{border:0;border-left:%1px solid palette(window-text);}").arg(m::control::border));
+        QString("QStackedWidget{border:0;border-left:%1px solid palette(window-text);}").arg(int(m::control::border)));
     ui::readerStyle(description, ui::styles::font(c::labelText));
     ui::readerStyle(version, ui::styles::font(c::descriptionText));
     ui::readerStyle(commit, ui::styles::font(ui::px(21)));

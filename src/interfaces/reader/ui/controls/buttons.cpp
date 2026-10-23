@@ -279,7 +279,7 @@ StepButton::StepButton(ControlIcon icon, QWidget *parent)
     readerStyle(
         this,
         QString("QPushButton{min-width:%1px;max-width:%1px;min-height:%1px;max-height:%1px;padding:0;border:none;}")
-            .arg(m::control::stepSize));
+            .arg(int(m::control::stepSize)));
     setFixedSize(m::control::stepSize, m::control::stepSize);
 }
 bool StepButton::hitButton(const QPoint &point) const {

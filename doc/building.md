@@ -1,0 +1,86 @@
+# Building Kobalt
+
+Application code lives in `src/` and `platforms/`. Shared assets live in root `assets/`. Pinned third-party source URLs, checksums, patches and CMake recipes live in `dependencies/`. Each platform owns its CMake project, presets and toolchain definitions. Generated files, downloaded sources and incremental objects stay under ignored `build/` in this worktree.
+
+Application builds do not use Python, compile Qt or read prepared libraries or assets from another checkout. The first configuration downloads the selected third-party archives and verifies their SHA-256 checksums. The build compiles those libraries before compiling Kobalt. Later builds reuse the configured sources and objects. Network access is required for uncached sources and Android Gradle packages.
+
+## Mac
+
+Use an installed native Qt 6.11.3 SDK with Core, Gui, Widgets, Network, Sensors, Test and its bundled libpng headers and archive. CMake 3.22 or later, Ninja, the Xcode command-line tools, make, patch and pkg-config must be available. The headless tests also use the system `zip` executable to create an offline EPUB fixture. The current desktop project supports macOS; Linux validation has not been restored yet.
+
+Run these commands from `platforms/desktop/`:
+
+```sh
+cmake --preset mac -DCMAKE_PREFIX_PATH="$HOME/Qt/6.11.3/macos"
+cmake --build --preset mac
+```
+
+The selected SDK stays in the CMake cache. Use a fresh output directory when changing SDKs, or clear cached Qt package paths with `'-UQt6*'` while selecting the new SDK. The build rejects mixed Qt component paths.
+
+The app is `build/desktop-mac/Kobalt.app`. Open it manually for an interactive session. Building does not launch a window. Native Qt commands must run outside the agent sandbox on the development Mac, including headless builds.
+
+### Headless tests and screenshots
+
+Run from `platforms/desktop/` after configuration:
+
+```sh
+cmake --build --preset mac-tests
+ctest --preset mac
+cmake --build --preset mac-screenshots
+```
+
+The app and tests reuse the same compiled desktop implementation. They share one dependency build. The `mac` build preset builds the interactive app; `mac-tests` builds the desktop test executable and all restored standalone checks. The model checks link a static archive of existing portable core objects, so they include only the objects they use. CTest does not build the tests automatically. Configure with `-DBUILD_TESTING=OFF` for an app-only build without Qt Test or zip.
+
+The tests always select Qt's windowless minimal platform. They check startup controls, recent-book covers, EPUB opening, rendered text, page turns, saved positions, reopening, opening errors and cancellation. Reading checks cover Fill window, the six-inch preview and the seven-inch preview in light and dark mode. General reading checks and screenshots use the checked-in public-domain Trevelyan's Type Tester v1.2, with its chapter-heading CSS fix. See [book fixtures](validation.md#book-fixtures) for provenance and checksum. Focused session and stylesheet regressions generate synthetic EPUBs offline in C++, with fixed ZIP timestamps. A diagnostic check captures native stdout and stderr to reject unexpected PNG errors and CREngine warnings during normal use. A separate storage check verifies that forced compaction does not report memory pressure and that actual pressure still does. Each case has an isolated profile. Profiles and generated fixture files stay under `build/desktop-mac/test-tmp/` and are removed when their run ends. The user's app and reading state are not used.
+
+The screenshot preset runs the same application code headlessly with a fixed 09:00 clock. It saves 133 PNGs under `build/screenshots/mac/`, covering the book cover, reading interface, panels and important states in each device size and both themes. Open `index.html` in that output directory to browse and filter the captures. `manifest.json` lists image dimensions and SHA-256 checksums, Qt and application versions, source commit, modified status and fixture checksum. A failed capture leaves the last complete set in place. The generator refuses to replace a directory without its own manifest. Temporary capture directories are removed after success or failure. Inspect the generated images before judging visual correctness; these checks do not compare screenshots against golden images. See [Native validation](validation.md) for the complete scene list and coverage.
+
+The 26 restored model checks cover asset verification and recovery, bookmark and highlight storage, appearance settings, headers and footers, layout inspection and caching, resource caching, local resource access, ZIP validation, reading pace and speed, engine pause/resume, diagnostics, dictionary installation, pixel damage and conversion, word counting, brightness gestures, refresh policy, plain archives, progress conversion, font-axis bounds and Kobo touch-rotation guards. They create synthetic inputs in C++ and require no external fixtures or downloads. The optional real-dictionary archive case is not part of this group. Run `ctest --preset mac -L model` for this group or `ctest --preset mac -L desktop` for the desktop checks. Each native test process gets a private working and temporary directory under `build/desktop-mac/test-tmp/`. The CMake launcher removes it after the process exits or reaches its 30-second limit, including when a failed assertion bypasses C++ destructors.
+
+The restored engine group checks layout, alignment, indentation, vertical text, MathML, line breaking, font fallbacks, SVG limits, whitespace, links, footnotes, Unicode search and word selection. It also preserves the original reader, publisher-markup, local-reader and document-word-count assertions with offline C++ fixtures. These check publisher and embedded fonts, real variable axes, Bionic rendering, colour and dark mode, source positions, document-cache recovery, local CSS and logical counts. The document-cache matrix runs separately to keep the reader check within its deadline. All these cases stay in the integration lane and reuse the compiled core archive. Component checks exercise production controls, footnote and dictionary panels, font parsing and registration, and acknowledgment/license paging. Desktop integration covers bookmark removal and merging after reflow, annotation creation, passage editing, recoloring, write-error recovery, settings apply and persistence, navigation preview/cancel/commit, rotation, resolution and page-button controls. Two-finger and right-click gesture checks preserve the original pointer assertions. The session group checks reading-book, bookmark, highlight and reader-session behavior with C++ EPUB fixtures. The resource integration group checks image limits and the resource-server protocol with local controlled servers. Use `ctest --preset mac-fast` for the 33 everyday checks or `ctest --preset mac-integration` for renderer, session and broader desktop interactions. Build `mac-fast-tests` for only the fast lane, or `mac-tests` for all 136 checks. Neither lane downloads test books or rebuilds the SDK.
+
+The separate reader lifecycle executable restores 41 integration checks, including preview cancellation and failed apply, draft persistence through sleep and closing, orientation handoff, sleep images, stale searches, pending bookmarks, finish dialogs, progress conflicts, USB final-save recovery, complete annotation frames and toolbar invalidation. Run `ctest --preset mac -L lifecycle` for this group. It reuses production objects and does not add work to the fast build target or the 33 fast checks. Controlled host services replace hardware callbacks; no device or firmware is needed. See [Native validation](validation.md#test-inventory) for the assertion inventory and exclusions.
+
+The additional native integration groups reuse the same production objects. Run `ctest --preset mac -L ui` for 14 shared canvas and paint checks, `-L platform` for eight portable orientation, font-source and Kobo-helper checks, or `-L corpus` for four representative literary excerpts in one check. The fast lane remains at 33 checks. The orientation matrix uses the production 250 ms debounce and takes about 20 seconds; it is not part of the fast lane. No test probes device hardware. See [Native validation](validation.md) for fixture ownership and deliberate exclusions.
+
+## Assets
+
+`assets/manifest.json` records the runtime file selection, version, sizes and SHA-256 checksums. Font metadata records upstream sources and revisions. The selected eBook font collection is checked in under `assets/fonts/ebook-core/`; builds do not fetch fonts. Keep the manifest consistent when changing runtime assets.
+
+Each platform uses `assets/CMakeLists.txt` to verify and stage the selected files under its own output directory. CMake tracks these inputs and removes retired files from the staging directory. The Mac app copies the runtime bundle into its Resources directory; Kobo packages it under `.adds/kobalt/assets`; Android embeds it as Qt resources. Artwork and notices are compiled from root `assets/`. Source metadata and unused font files are not copied into the runtime bundle.
+
+English strings, icon geometry and the dictionary catalogue still use checked-in C++ snapshots. Their maintenance workflow has not been restored.
+
+## Kobo
+
+The `qt5` and `qt6` presets consume prepared kobuild SDKs, including Sensors. Compiler, sysroot and Qt repairs belong in kobuild. Pull the selected SDK images before building:
+
+```sh
+docker pull ghcr.io/nicoverbruggen/kobuild:qt5-v0.2.3
+docker pull ghcr.io/nicoverbruggen/kobuild:qt6-v0.2.2
+bash platforms/kobo/build.sh qt5
+bash platforms/kobo/build.sh qt6
+```
+
+The launcher pins these images by digest. It mounts this worktree, configures CMake and builds the reader dependencies, application and installation ZIP. It does not pull or repair SDKs. Configure and build/package durations are printed separately. Parallelism defaults to two; set `JOBS` to change it.
+
+Outputs are `build/kobo-qt5/` and `build/kobo-qt6/`. Each contains `libkobalt.so` with debug symbols and `Kobalt-VERSION-qtN.zip` with a stripped installation library and runtime assets. Qt5 uses `.kobo/KoboRoot.tgz`; Qt6 uses `.kobo/Kobo.tgz`. Packaging removes its staging directory and does no work when its inputs are unchanged.
+
+## Android
+
+The Android project builds a signed debug APK through Qt's standard CMake `apk` target. It uses the prepared multi-architecture kobuild image; Docker selects its native host variant. Both variants target Android `arm64-v8a`.
+
+```sh
+docker pull ghcr.io/nicoverbruggen/kobuild:android-v0.3.0
+bash platforms/android/build.sh
+```
+
+The launcher pins the released image by digest. Set `KOBALT_ANDROID_IMAGE` only to select another prepared image for SDK validation. Host architectures use separate `build/android-amd64/` and `build/android-arm64/` outputs, so Qt host-tool caches cannot cross between them. Gradle downloads stay under `build/gradle/`. The launcher rejects concurrent use of one Android output and removes its container when finished. Compiler parallelism defaults to two; set `JOBS` to change it.
+
+The APK is `build/android-HOST/android-build/build/outputs/apk/debug/android-build-debug.apk`. It uses `com.nicoverbruggen.kobalt.debug`, the public debug key under `platforms/android/app/` and a version ending in `-debug`. Android 9 or later and ARM64 are required. Release signing is outside this build's scope.
+
+## Dependencies and validation
+
+CREngine and its text/image libraries use the versions and patches recorded in this worktree. Android also builds OpenSSL and downloads the pinned BOOX compatibility JAR. These application dependencies are separate from Qt SDK production. Build directories are separated by compiler, SDK, source manifest and recipe identity. This initial setup invalidates the dependency set when its recipes, patches or source pins change; application-only changes reuse it.
+
+Stop and reap run-owned helper processes and remove temporary profiles, staging directories and containers after each run. Keep current outputs, useful measurements and incremental caches. Native desktop, model, renderer and session checks cover the paths listed above. [Native validation](validation.md#feature-coverage-and-limits) records the remaining corpus, gesture and platform gaps. These checks do not establish firmware compatibility or physical-device display behavior.

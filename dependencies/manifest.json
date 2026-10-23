@@ -29,11 +29,6 @@
     "sha256": "fbb439cf3036043340fda8cf6afa557beba1cce5f18d61307cf150bdd4b6efaf",
     "directory": "koreader-base-9a8729713ab73f539b607af23ede6aa89d04cfed"
   },
-  "qtsensors": {
-    "url": "https://download.qt.io/archive/qt/6.5/6.5.2/submodules/qtsensors-everywhere-src-6.5.2.tar.xz",
-    "sha256": "4006bd7cfbb4302a887bda82b7fe3c31633626363a5e6ba9730bdb4fa8ab2aa6",
-    "directory": "qtsensors-everywhere-src-6.5.2"
-  },
   "utf8proc": {
     "url": "https://codeload.github.com/JuliaStrings/utf8proc/tar.gz/refs/tags/v2.11.3",
     "sha256": "abfed50b6d4da51345713661370290f4f4747263ee73dc90356299dfc7990c78",
@@ -54,9 +49,18 @@
     "sha256": "87c7f1f8699b91e89f773f7dcfa505b044e1dae67f62a55d4e29c3afdcac4fb8",
     "directory": "freetype-VER-2-15-0"
   },
-  "fonttools": {
-    "url": "https://codeload.github.com/fonttools/fonttools/tar.gz/refs/tags/4.61.1",
-    "sha256": "7dfe8416ee774c0d70e086e08021dfa4e2284a89777e6ade1a6434e4157f7ab3",
-    "directory": "fonttools-4.61.1"
+  "libpng": {
+    "url": "https://codeload.github.com/pnggroup/libpng/tar.gz/refs/tags/v1.6.59",
+    "sha256": "2540302a1844ad2b2b501977abecfa850f265f97b78f065a712ab4074a89f5b5",
+    "directory": "libpng-1.6.59"
+  },
+  "openssl": {
+    "url": "https://codeload.github.com/openssl/openssl/tar.gz/refs/tags/openssl-3.5.9",
+    "sha256": "796831ec533bf41998eaaee9d632d921b8a69f57394fa4086ff01a941113d26d",
+    "directory": "openssl-openssl-3.5.9"
+  },
+  "hiddenapibypass": {
+    "url": "https://repo.maven.apache.org/maven2/org/lsposed/hiddenapibypass/hiddenapibypass/4.3/hiddenapibypass-4.3.aar",
+    "sha256": "e9c2b90785b8c0d49aaa5f723a83d8c51d9789cd4f2b1ecf6e3335e6fc561201"
   }
 }

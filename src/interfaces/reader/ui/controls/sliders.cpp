@@ -24,7 +24,7 @@ SettingSlider::SettingSlider(QWidget *parent, int minimum, int maximum, int step
     setSingleStep(step);
     setMinimumHeight(m::control::sliderHeight);
     // Nickel fixes QSlider at 80 pixels, which clips inside our scaled rows.
-    readerStyle(this, QString("QSlider{min-height:%1px;max-height:%1px;}").arg(m::control::sliderHeight));
+    readerStyle(this, QString("QSlider{min-height:%1px;max-height:%1px;}").arg(int(m::control::sliderHeight)));
     setFocusPolicy(Qt::NoFocus);
     setAttribute(Qt::WA_AcceptTouchEvents);
 }
