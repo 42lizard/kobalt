@@ -146,8 +146,53 @@ int wrappedInterfaceTextHeight(const QString &text, const QFont &font, int width
         return QFontMetrics(font).boundingRect(QRect(0, 0, qMax(1, width), 0), Qt::TextWordWrap, text).height();
     return qCeil(excerptTextHeight(interfaceHtml(text), font, qMax(1, width)));
 }
-void drawWrappedInterfaceText(QPainter &painter, const QRect &bounds, const QString &text, Qt::Alignment alignment) {
+void drawWrappedInterfaceText(QPainter &painter, const QRect &bounds, const QString &text, Qt::Alignment alignment,
+                              int maximumLines, int lineSpacing, QVector<QRect> *lineRectangles) {
+    if (lineRectangles)
+        lineRectangles->clear();
     if (!needsPrivateText(text, painter.font())) {
+        if (maximumLines > 0) {
+            QTextLayout layout(text, painter.font());
+            QTextOption option;
+            option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+            option.setTextDirection(text.isRightToLeft() ? Qt::RightToLeft : Qt::LeftToRight);
+            layout.setTextOption(option);
+            QVector<QTextLine> lines;
+            qreal height = 0;
+            layout.beginLayout();
+            for (int i = 0; i < maximumLines; ++i) {
+                auto line = layout.createLine();
+                if (!line.isValid())
+                    break;
+                line.setLineWidth(bounds.width());
+                line.setPosition(QPointF(0, height));
+                height += qMax(qreal(lineSpacing), line.height());
+                lines.append(line);
+            }
+            layout.endLayout();
+            const qreal top = bounds.y() + (alignment & Qt::AlignVCenter ? (bounds.height() - height) / 2
+                : alignment & Qt::AlignBottom ? bounds.height() - height : 0);
+            painter.save();
+            painter.setClipRect(bounds, Qt::IntersectClip);
+            for (int i = 0; i < lines.size(); ++i) {
+                const auto &line = lines[i];
+                const int end = line.textStart() + line.textLength();
+                qreal advance = line.naturalTextWidth();
+                if (i + 1 == maximumLines && end < text.size()) {
+                    const auto last = QFontMetrics(painter.font()).elidedText(
+                        text.mid(line.textStart(), line.textLength()).trimmed() + QStringLiteral(" …"),
+                        Qt::ElideRight, bounds.width());
+                    painter.drawText(QPointF(bounds.x(), top + line.y() + line.ascent()), last);
+                    advance = kobalt::qt::textWidth(QFontMetricsF(painter.font()), last);
+                } else {
+                    line.draw(&painter, QPointF(bounds.x(), top));
+                }
+                if (lineRectangles)
+                    lineRectangles->append(QRectF(bounds.x(), top + line.y(), advance, line.height()).toAlignedRect());
+            }
+            painter.restore();
+            return;
+        }
         painter.drawText(bounds, alignment | Qt::TextWordWrap, text);
         return;
     }
@@ -155,7 +200,20 @@ void drawWrappedInterfaceText(QPainter &painter, const QRect &bounds, const QStr
     document.setDefaultFont(painter.font());
     document.setDocumentMargin(0);
     document.setHtml(interfaceHtml(text));
-    const auto lines = privateExcerptLines(document, painter.font(), bounds.width());
+    auto lines = privateExcerptLines(document, painter.font(), bounds.width());
+    if (maximumLines > 0 && lines.size() > maximumLines) {
+        auto &last = lines[maximumLines - 1];
+        last.text = elidePrivateText(last.text + QStringLiteral(" …"), painter.font(), bounds.width());
+        last.advance = measurePrivateText(last.text, painter.font());
+        lines.resize(maximumLines);
+    }
+    if (lineSpacing > 0) {
+        qreal top = 0;
+        for (auto &line : lines) {
+            line.top = top;
+            top += qMax(qreal(lineSpacing), line.height);
+        }
+    }
     const qreal height = lines.isEmpty() ? 0 : lines.last().top + lines.last().height;
     const qreal top = bounds.y() + (alignment & Qt::AlignVCenter  ? (bounds.height() - height) / 2
                                     : alignment & Qt::AlignBottom ? bounds.height() - height
@@ -176,6 +234,8 @@ void drawWrappedInterfaceText(QPainter &painter, const QRect &bounds, const QStr
                                                                 : 0);
         painter.drawImage(QPointF(x + rendered.origin.x(), top + line.top + line.ascent + rendered.origin.y()),
                           rendered.image);
+        if (lineRectangles)
+            lineRectangles->append(QRectF(x, top + line.top, line.advance, line.height).toAlignedRect());
     }
     painter.restore();
 }

@@ -7,6 +7,7 @@
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/theme.h"
 #include "settings_panel.h"
+#include "reading/appearance_settings.h"
 #include "support/strings.h"
 #include "assets/font_catalog.h"
 #include "interfaces/reader/ui/style/metrics.h"
@@ -384,12 +385,7 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
     inheritTextLayoutOption = check(defaultsPage, "rrInheritTextLayout", strings::get("settings.inherit_text_layout"),
                                     strings::get("settings.inherit_text_layout_description"));
     defaultsRows->addWidget(inheritTextLayoutOption);
-    inheritHeaderFooterOption =
-        check(defaultsPage, "rrInheritHeaderFooter", strings::get("settings.inherit_header_footer"),
-              strings::get("settings.inherit_header_footer_description"));
-    defaultsRows->addWidget(inheritHeaderFooterOption);
     inheritTextLayoutOption->setChecked(true);
-    inheritHeaderFooterOption->setChecked(true);
     section(defaultsPage, defaultsRows, "rrDefaultsGlobalFontSection",
             strings::get("settings.section_default_global_font"));
     defaultFontButton =
@@ -634,7 +630,6 @@ SettingsPanel::SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs)
                                               animationOption,
                                               inheritTextLayoutOption,
                                               edgeLightOption,
-                                              inheritHeaderFooterOption,
                                               denseGraphOption,
                                               hideTabLabelsOption,
                                               automaticOpeningOption,
@@ -963,6 +958,10 @@ void SettingsPanel::showHeaderFooterWeights(int current, const QFont &sampleFont
     fontDialog->raise();
     fontDialog->setFocus();
 }
+QString SettingsPanel::columnSpacingLabel(int percent) {
+    return percent == defaultColumnSpacingPercent ? strings::get("settings.column_spacing_default")
+                                                 : QString::number(percent / 100.0, 'f', 1) + QChar(0x00d7);
+}
 void SettingsPanel::showColumnSpacingChoices(int current, std::function<void(int)> chosen) {
     if (fontDialog)
         return;
@@ -984,7 +983,7 @@ void SettingsPanel::showColumnSpacingChoices(int current, std::function<void(int
     choices->setMinimumRowHeight(c::listActionHeight);
     choices->setTopDivider(true);
     for (int percent : {100, 150, 200, 250, 300}) {
-        choices->add(QString("rrColumnSpacing%1").arg(percent), QString::number(percent / 100.0, 'f', 1) + QChar(0x00d7));
+        choices->add(QString("rrColumnSpacing%1").arg(percent), columnSpacingLabel(percent));
         if (percent == current)
             choices->setCurrent(choices->options().size() - 1);
     }

@@ -5,6 +5,7 @@
 #include <lvdocview.h>
 #include <QTextBoundaryFinder>
 #include <QSet>
+#include <vector>
 
 namespace kobalt {
 namespace {
@@ -27,8 +28,13 @@ QString contextText(const QString &text) {
     return result;
 }
 }
-QVector<int> ReaderModel::pagesOf(const QStringList &positions, bool rangeEndpoints) const {
+QVector<int> ReaderModel::pagesOf(const QStringList &positions, bool rangeEndpoints, QVector<int> *sourceOrder) const {
     QVector<int> pages;
+    QVector<ldomXPointerEx> pointers;
+    if (sourceOrder) {
+        pointers.resize(positions.size());
+        sourceOrder->fill(-1, positions.size());
+    }
     if (!engine_) {
         pages.fill(-1, positions.size());
         return pages;
@@ -37,12 +43,25 @@ QVector<int> ReaderModel::pagesOf(const QStringList &positions, bool rangeEndpoi
     for (int i = 0; i < positions.size(); ++i) {
         const auto &position = positions[i];
         ldomXPointerEx pointer(position.isEmpty() ? ldomXPointer() : doc->createXPointer(cre(position)));
+        if (sourceOrder)
+            pointers[i] = pointer;
         // Passage ends are exclusive. Locate their preceding character so a
         // boundary exactly at the next page does not add an empty final page.
         if (rangeEndpoints && i % 2 == 1 && !pointer.isNull()) {
             pointer.prevVisibleChar(false);
         }
         pages.append(pointer.isNull() ? -1 : engine_->getBookmarkPage(pointer));
+    }
+    if (sourceOrder) {
+        QVector<int> indices;
+        for (int i = 0; i < positions.size(); ++i)
+            if (!pointers[i].isNull())
+                indices.append(i);
+        std::stable_sort(indices.begin(), indices.end(), [&](int a, int b) {
+            return pointers[a].compare(pointers[b]) < 0;
+        });
+        for (int rank = 0; rank < indices.size(); ++rank)
+            (*sourceOrder)[indices[rank]] = rank;
     }
     return pages;
 }
@@ -564,6 +583,117 @@ WordSelection ReaderModel::wordAt(QPoint point) {
     }
     return {};
 }
+AnnotationPageEdges ReaderModel::annotationPageEdges() {
+    AnnotationPageEdges result;
+    if (!engine_ || pages() <= 0)
+        return result;
+    auto *doc = engine_->getDocument();
+    const ldomXPointerEx first(engine_->getPageBookmark(page()));
+    const ldomXPointerEx last = page() + 1 < pages()
+        ? ldomXPointerEx(engine_->getPageBookmark(page() + 1))
+        : ldomXRange(doc->getRootNode(), true).getEnd();
+    if (first.isNull() || last.isNull())
+        return result;
+    result.columns = columns_;
+    QString firstPosition, lastPosition;
+    auto find = [&](ldomXPointerEx cursor, bool forward) {
+        AnnotationToken punctuation;
+        for (int n = 0; n < 8192; ++n) {
+            if (n % 64 == 0)
+                engineActivity().checkpoint();
+            if (cursor.isText() && cursor.compare(first) >= 0 && cursor.compare(last) < 0) {
+                const auto text = cursor.getNode()->getText();
+                const int offset = cursor.getOffset();
+                if (offset >= 0 && offset < text.length() && !QChar::isSpace(text[offset])) {
+                    auto token = sourceWord(engine_.get(), size_, cursor, true);
+                    if (!token.text.isEmpty() && !token.rectangles.isEmpty()) {
+                        if (forward) {
+                            firstPosition = qstring(cursor.toString());
+                        } else if (lastPosition.isEmpty()) {
+                            auto end = cursor;
+                            end.setOffset(offset + 1);
+                            lastPosition = qstring(end.toString());
+                        }
+                        if (forward || !token.punctuation)
+                            return token;
+                        // Extend onto the last word, while keeping the physical
+                        // page edge after its punctuation. Punctuation-only pages
+                        // retain their selectable endpoint when no word exists.
+                        if (punctuation.text.isEmpty())
+                            punctuation = token;
+                    }
+                }
+            }
+            if (!(forward ? cursor.nextVisibleChar(false) : cursor.prevVisibleChar(false)))
+                break;
+            if (cursor.compare(first) < 0 || cursor.compare(last) >= 0)
+                break;
+        }
+        return punctuation;
+    };
+    result.first = find(first, true);
+    auto tail = last;
+    if (tail.prevVisibleChar(false))
+        result.last = find(tail, false);
+    if (!result.first.text.isEmpty() && !result.last.text.isEmpty()) {
+        const auto geometry = annotationGeometry(firstPosition, lastPosition);
+        result.start = geometry.start;
+        result.end = geometry.end;
+        result.vertical = geometry.vertical;
+        const auto sameSection = [&](ldomXPointerEx before, ldomXPointerEx after) {
+            const auto section = [](ldomNode *node) {
+                for (; node; node = node->getParentNode())
+                    if (node->isNodeName("DocFragment") || node->isNodeName("section") || node->isNodeName("article"))
+                        return node;
+                return static_cast<ldomNode *>(nullptr);
+            };
+            if (section(before.getNode()) != section(after.getNode()))
+                return false;
+            // A table-of-contents chapter can begin inside one spine document.
+            std::vector<LVTocItem *> pending{engine_->getToc()};
+            while (!pending.empty()) {
+                auto *item = pending.back();
+                pending.pop_back();
+                if (!item)
+                    continue;
+                const ldomXPointerEx marker(item->getXPointer());
+                if (!marker.isNull() && marker.compare(before) > 0 && marker.compare(after) <= 0)
+                    return false;
+                for (int i = 0; i < item->getChildCount(); ++i)
+                    pending.push_back(item->getChild(i));
+            }
+            return true;
+        };
+        const auto continuation = [&](bool forward) {
+            if (forward ? page() + 1 >= pages() : page() == 0)
+                return false;
+            ldomXPointerEx edge(doc->createXPointer(cre(forward ? lastPosition : firstPosition)));
+            auto adjacent = forward ? last : edge;
+            if (!forward && !adjacent.prevVisibleChar(false))
+                return false;
+            for (int n = 0; n < 8192; ++n) {
+                if (n % 64 == 0)
+                    engineActivity().checkpoint();
+                if (adjacent.isText() && adjacent.isVisible()) {
+                    const auto text = adjacent.getNode()->getText();
+                    const int offset = adjacent.getOffset();
+                    if (offset >= 0 && offset < text.length() && !QChar::isSpace(text[offset])) {
+                        if (engine_->getBookmarkPage(adjacent) != page() + (forward ? 1 : -1))
+                            return false;
+                        return forward ? sameSection(edge, adjacent) : sameSection(adjacent, edge);
+                    }
+                }
+                if (!(forward ? adjacent.nextVisibleChar(false) : adjacent.prevVisibleChar(false)))
+                    break;
+            }
+            return false;
+        };
+        result.continuesBefore = continuation(false);
+        result.continuesAfter = continuation(true);
+    }
+    return result;
+}
+
 AnnotationToken ReaderModel::annotationTokenAt(QPoint point) {
     if (!engine_ || !QRect(QPoint(), size_).contains(point)) {
         return {};

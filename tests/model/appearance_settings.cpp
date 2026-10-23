@@ -144,13 +144,13 @@ int main() {
         {{"show_clock", true}, {"header_text_size", "small"}, {"bold_reading", "bold"}, {"page_animations", true}});
     const auto book = qt::object({{"show_clock", false}, {"header_text_size", "large"}, {"bold_reading", "off"}});
     const auto preferences = appearance::readerPreferences(global, book);
-    require(!preferences["show_clock"].toBool() && preferences["header_text_size"].toString() == "large",
-            "Book layout did not override legacy global settings");
+    require(preferences["show_clock"].toBool() && preferences["header_text_size"].toString() == "small",
+            "Book layout replaced global settings");
     require(preferences["bold_reading"].toString() == "bold", "Book state overrode global Bionic reading");
     const auto persistedGlobal = appearance::globalPreferences(preferences);
-    require(!persistedGlobal.contains("show_clock") && !persistedGlobal.contains("header_text_size") &&
+    require(persistedGlobal["show_clock"].toBool() && persistedGlobal["header_text_size"].toString() == "small" &&
                 persistedGlobal["page_animations"].toBool(),
-            "Global save mixed book layout with overflow settings");
+            "Global save lost shared layout or overflow settings");
     for (const auto *mode : {"bold", "off", "synthetic"}) {
         const auto legacy = qt::object({{"bionic_reading", mode}, {"page_animations", true}});
         const auto migrated = appearance::readerPreferences(legacy, book);
@@ -171,8 +171,7 @@ int main() {
         require(migrated.value("bold_reading") == value && !migrated.contains("bionic_reading"),
                 "Legacy Bionic reading replaced an explicit Bold reading choice");
     }
-    // A book without a header and footer of its own starts with the last preset;
-    // a book with one, even from before presets, keeps it.
+    // Migrate the last preset once. A shared preset replaces stale book choices.
     const auto last = qt::object({{appearance::lastPresetKey, "alternative_b"}});
     require(appearance::readerPreferences(last, {}).value("header_footer").toString() == "alternative_b" &&
                 appearance::readerPreferences(last, qt::object({{"orientation", "portrait"}}))
@@ -181,15 +180,22 @@ int main() {
             "A new book did not start with the last preset");
     require(appearance::readerPreferences(last, qt::object({{"header_footer", "default"}}))
                         .value("header_footer")
-                        .toString() == "default" &&
-                !appearance::readerPreferences(last, qt::object({{"show_clock", false}})).contains("header_footer") &&
+                        .toString() == "alternative_b" &&
+                appearance::readerPreferences(last, qt::object({{"show_clock", false}})).value("header_footer").toString() == "alternative_b" &&
                 !appearance::readerPreferences({}, {}).contains("header_footer"),
-            "The last preset replaced a book's own header and footer");
+            "A stale book replaced shared header and footer settings");
     const auto custom = qt::object({{"header_footer", "custom"}, {appearance::lastPresetKey, "default"}});
-    require(appearance::globalPreferences(custom) == qt::object({{appearance::lastPresetKey, "custom"}}),
-            "A global save did not record the book's preset as the last one");
-    require(appearance::globalPreferences(qt::object({{"header_footer", "default"}})).isEmpty(),
-            "A profile that only uses Kobalt saved a last preset");
+    require(appearance::globalPreferences(custom) == qt::object({{"header_footer", "custom"}}),
+            "A global save lost the shared preset or kept the retired last preset");
+    require(appearance::globalPreferences(qt::object({{"header_footer", "default"}})) == qt::object({{"header_footer", "default"}}),
+            "A global save lost the default header and footer choice");
+    const auto sharedOrientation = qt::object({{"orientation", 2}, {"auto_rotate", true}});
+    require(appearance::readerPreferences(sharedOrientation, qt::object({{"orientation", 1}, {"auto_rotate", false}})) == sharedOrientation,
+            "A stale book replaced shared rotation");
+    require(appearance::readerPreferences({}, sharedOrientation) == sharedOrientation,
+            "An existing book's rotation could not migrate to shared settings");
+    require(!appearance::readerPreferences(qt::object({{"orientation", 2}}), sharedOrientation).contains("auto_rotate"),
+            "An old book enabled automatic rotation over a global orientation lock");
     require(!appearance::readerPreferences({}, qt::object({{"bionic_reading", "bold"}})).contains("bold_reading") &&
                 !appearance::readerPreferences({}, {}).contains("bold_reading"),
             "A book-specific legacy setting or a fresh profile enabled global Bold reading");
@@ -219,8 +225,9 @@ int main() {
     inherited["header_footer"] = QStringLiteral("alternative_a");
     QJsonObject nextBook;
     appearance::rememberTextLayout(nextBook, inherited);
-    require(nextBook.value(appearance::lastTextLayoutKey).toObject().size() == 13,
-            "Last text and layout included unrelated book state");
+    appearance::rememberPageMargins(nextBook, inherited);
+    require(nextBook.value(appearance::lastTextLayoutKey).toObject().size() == 10,
+            "Last text style included unrelated layout or book state");
     auto initial = appearance::bookDefaults(nextBook);
     for (const auto *key : appearance::typographyKeys) {
         require(initial.value(key) == inherited.value(key), "New book lost inherited typography or margins");
@@ -232,9 +239,9 @@ int main() {
     require(blank.value("font_face") == inherited.value("font_face"), "Empty saved state ignored inherited font");
     auto own = qt::object({{"font_pixels", 40}, {"position", "chapter#own"}});
     appearance::applyBookDefaults(own, initial);
-    require(own.value("font_pixels").toInt() == 40 && !own.contains("margin_pixels") &&
+    require(own.value("font_pixels").toInt() == 40 && own.value("margin_pixels").toInt() == 60 &&
                 own.value("position").toString() == "chapter#own",
-            "Inheritance overwrote a book with partial saved typography");
+            "Shared margins replaced a book's text style or did not apply");
     auto globalColumns = appearance::bookDefaults(qt::object({{"two_columns_landscape", true}, {"column_spacing_percent", 200}, {appearance::inheritTextLayoutKey, false}}));
     auto savedColumns = qt::object({{"font_pixels", 40}, {"columns", 2}, {"column_spacing_percent", 100}});
     appearance::applyBookDefaults(savedColumns, globalColumns);
@@ -243,7 +250,7 @@ int main() {
             "Saved book columns overrode the global landscape policy");
     appearance::applyBookDefaults(savedColumns, appearance::bookDefaults({}));
     require(!savedColumns.value("two_columns_landscape").toBool() && savedColumns.value("columns").toInt() == 1 &&
-                savedColumns.value("column_spacing_percent").toInt() == 100,
+                savedColumns.value("column_spacing_percent").toInt() == 150,
             "Disabling global columns retained a book override");
     require(!nextBook.value(appearance::lastTextLayoutKey).toObject().contains("columns") &&
                 !nextBook.value(appearance::lastTextLayoutKey).toObject().contains("column_spacing"),
@@ -251,7 +258,8 @@ int main() {
     nextBook[appearance::inheritTextLayoutKey] = false;
     auto fixed = appearance::bookDefaults(nextBook);
     require(fixed.value("font_pixels").toInt() == defaultFontPixels() &&
-                fixed.value("font_face").toString() == defaultFontFace && !fixed.value("two_columns_landscape").toBool(),
+                fixed.value("font_face").toString() == defaultFontFace && !fixed.value("two_columns_landscape").toBool() &&
+                fixed.value("margin_pixels").toInt() == 60,
             "Disabling text inheritance did not restore new-book defaults");
     nextBook["default_font_face"] = QStringLiteral("NV Ancizar Serif");
     require(appearance::bookDefaults(nextBook).value("font_face").toString() == "NV Ancizar Serif",
@@ -266,11 +274,24 @@ int main() {
     readingPpi.store(300);
     auto disabledChrome = last;
     disabledChrome[appearance::inheritHeaderFooterKey] = false;
-    require(appearance::readerPreferences(disabledChrome, {}).value("header_footer").toString() == "default" &&
+    require(appearance::readerPreferences(disabledChrome, {}).value("header_footer").toString() == "alternative_b" &&
                 appearance::readerPreferences(disabledChrome, qt::object({{"header_footer", "alternative_a"}}))
                         .value("header_footer")
-                        .toString() == "alternative_a",
-            "Disabling header/footer inheritance changed a saved book or kept new books on the last preset");
+                        .toString() == "alternative_b" &&
+                !appearance::globalPreferences(disabledChrome).contains(appearance::inheritHeaderFooterKey),
+            "Retired header/footer inheritance changed shared layout");
+    auto legacyMargins = qt::object({{appearance::lastTextLayoutKey,
+                                     qt::object({{"reading_ppi", 212}, {"margin_pixels", 42},
+                                                 {"top_margin_pixels", 21}, {"bottom_margin_pixels", 25}})}});
+    initial = appearance::bookDefaults(legacyMargins);
+    require(initial.value("margin_pixels").toInt() == 59 && initial.value("top_margin_pixels").toInt() == 30 &&
+                initial.value("bottom_margin_pixels").toInt() == 35,
+            "Legacy margins did not migrate from the original screen density");
+    legacyMargins[appearance::pageMarginsKey] = qt::object({{"margin_pixels", -5}, {"top_margin_pixels", 999}, {"bottom_margin_pixels", 12}});
+    initial = appearance::bookDefaults(legacyMargins);
+    require(initial.value("margin_pixels").toInt() == 0 && initial.value("top_margin_pixels").toInt() == 120 &&
+                initial.value("bottom_margin_pixels").toInt() == 12,
+            "Shared margins did not override legacy values within slider bounds");
     const auto retired = qt::object({{"smooth_images", false}, {"heavier_interface_text", false}});
     require(appearance::globalPreferences(retired).isEmpty() && appearance::readerPreferences(retired, {}).isEmpty(),
             "Retired settings survived global preference loading or saving");

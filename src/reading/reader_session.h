@@ -9,6 +9,9 @@
 #include <memory>
 
 namespace kobalt {
+struct BookmarkLocations {
+    QVector<int> pages, order;
+};
 struct ReaderMarkupRange {
     QString start, end, color;
     QString style = QStringLiteral("shaded");
@@ -139,6 +142,7 @@ public:
     void compareNativePosition(const QString &location, std::function<void(PositionComparison)> finished);
     // Bookmark lookups on the engine thread. They report nothing when the
     // layout changed before they finished; the caller asks again.
+    void bookmarkLocations(QStringList positions, std::function<void(BookmarkLocations)> finished, bool rangeEndpoints = false, bool sourceOrder = true);
     void bookmarkPages(QStringList positions, std::function<void(QVector<int>)> finished, bool rangeEndpoints = false);
     void pageSummary(int page, std::function<void(QString position, QString excerpt)> finished);
     // Renders a bounded thumbnail with saved highlights without moving the reading position. Only
@@ -148,6 +152,7 @@ public:
     // One worker job resolves all eligible passages. Stale replies contain no indices.
     void intersectingRanges(const QString &start, const QString &end, QVector<QPair<QString, QString>> ranges,
                             std::function<void(QVector<int>)> finished);
+    void annotationPageEdges(std::function<void(AnnotationPageEdges)> finished);
     void annotationTokenAt(QPoint point, std::function<void(AnnotationToken)> finished,
                            const QString &boundary = {}, bool start = false);
     void annotationRange(const QString &startTokenStart, const QString &startTokenEnd, const QString &endTokenStart,

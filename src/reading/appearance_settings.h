@@ -8,35 +8,37 @@ inline constexpr auto defaultFontFace = "Libron";
 inline constexpr int defaultLineSpacing = 150;
 inline constexpr int maximumLineSpacing = 300;
 inline constexpr int defaultVariableFontWeight = 450;
+inline constexpr int defaultColumnSpacingPercent = 150;
 
 namespace appearance {
 // Global generic-family fallbacks. An empty value keeps the bundled default.
 inline constexpr std::array<const char *, 3> fallbackFontKeys{"serif_font_face", "sans_font_face",
                                                               "monospace_font_face"};
-// Saved per book. The old header, footer and clock keys stay for books saved
-// before header and footer presets; see header_footer.h.
+// Global layout choices. Legacy book values are read only during migration.
 inline constexpr std::array<const char *, 8> layoutKeys{"header_footer",    "show_header",      "show_footer",
                                                         "header_text_size", "footer_text_size", "show_clock",
                                                         "orientation",      "auto_rotate"};
-// Saved globally: the header and footer preset of the book opened or changed
-// last. New books inherit it when header/footer inheritance is enabled.
+// Legacy keys retained for migration.
 inline constexpr auto lastPresetKey = "last_header_footer";
 inline constexpr auto inheritTextLayoutKey = "inherit_text_layout";
 inline constexpr auto inheritHeaderFooterKey = "inherit_header_footer";
 inline constexpr auto lastTextLayoutKey = "last_text_layout";
-inline constexpr std::array<const char *, 12> typographyKeys{
-    "font_face",     "font_pixels",       "line_spacing",         "line_spacing_version",
-    "margin_pixels", "top_margin_pixels", "bottom_margin_pixels", "text_alignment",
+inline constexpr std::array<const char *, 9> typographyKeys{
+    "font_face",     "font_pixels",       "line_spacing",         "line_spacing_version", "text_alignment",
     "weight_steps",  "font_weight",       "font_optical_size",    "hyphenation"};
+inline constexpr std::array<const char *, 3> marginKeys{"margin_pixels", "top_margin_pixels", "bottom_margin_pixels"};
+inline constexpr auto pageMarginsKey = "page_margins";
 // Defaults for a book without saved typography, in the current screen density.
 QJsonObject bookDefaults(const QJsonObject &preferences);
 void applyBookDefaults(QJsonObject &saved, const QJsonObject &defaults);
-// Records only text and page margins. Display choices and reading position stay separate.
+// Records only text. Global layout and reading position stay separate.
 void rememberTextLayout(QJsonObject &preferences, const QJsonObject &state);
-// Book layout takes precedence over legacy global layout values.
+// Stores applied margins globally in 300 ppi units, independent of host density.
+void rememberPageMargins(QJsonObject &preferences, const QJsonObject &state);
+// Global layout takes precedence over legacy book values.
 // Converts the legacy global Bionic Reading key unless Bold Reading is already set.
 QJsonObject readerPreferences(const QJsonObject &global, const QJsonObject &book);
-// Removes the book layout and records the book's preset as the last one.
+// Keeps global layout and removes retired inheritance keys.
 QJsonObject globalPreferences(QJsonObject preferences);
 // The saved settings that decide how the book is laid out and drawn. A
 // retained layout is reused only when all of them match.

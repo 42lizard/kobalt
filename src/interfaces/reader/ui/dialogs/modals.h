@@ -4,6 +4,7 @@
 #include <QDialog>
 #include <QImage>
 #include <QPixmap>
+#include <QRegion>
 #include <QPushButton>
 #include <functional>
 
@@ -35,12 +36,15 @@ private:
 class ModalOverlay : public QWidget {
 public:
     explicit ModalOverlay(QWidget *parent);
+    void setVisible(bool visible) override;
     PopupCard *card() const {
         return content;
     }
     // Nonblocking anchored menus receive input only over their card and arrow.
     // Page gestures and controls outside those pixels remain available.
     void setInputBarrier(bool enabled);
+    // Keep underlying adjustment handles usable without dismissing the menu.
+    void setInputExclusions(const QRegion &region);
     // The patterned backdrop covers the parent only while this overlay blocks input.
     void setDimmed(bool enabled);
     bool inputBarrier() const {
@@ -73,6 +77,7 @@ private:
     PopupCard *content;
     QWidget *pointer;
     QRect anchor;
+    QRegion inputExclusions;
     ProgressBar *loadingProgress = nullptr;
     QLabel *loadingMessage = nullptr;
 };

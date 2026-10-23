@@ -2,6 +2,7 @@
 #include "support/qt_compat.h"
 #include "support/strings.h"
 #include "reader_session.h"
+#include "engine_worker.h"
 #include "ui/highlight_paint.h"
 #include "appearance_settings.h"
 #include "engine/crengine/engine_activity.h"
@@ -64,9 +65,6 @@ QByteArray readUserStyleSheet(const QString &path) {
         return {};
     }
     return bytes;
-}
-QObject *engineWorker() {
-    return engineWorkerState()->object;
 }
 
 struct ModelDeleter {
@@ -185,6 +183,10 @@ ReaderFrame capture(ReaderModel &model, const PositionCodec &positions, bool nei
     result.error = model.resourceError();
     return result;
 }
+}
+
+QObject *engineWorker() {
+    return engineWorkerState()->object;
 }
 
 ReaderSession::ReaderSession(EngineFontInputs fonts, QString placeholderFamily)
@@ -1039,20 +1041,27 @@ void ReaderSession::coverImage(QSize maximumSize, std::function<void(QImage)> fi
 }
 void ReaderSession::bookmarkPages(QStringList positions, std::function<void(QVector<int>)> finished,
                                   bool rangeEndpoints) {
+    bookmarkLocations(std::move(positions), [finished](BookmarkLocations result) {
+        finished(std::move(result.pages));
+    }, rangeEndpoints, false);
+}
+void ReaderSession::bookmarkLocations(QStringList positions, std::function<void(BookmarkLocations)> finished,
+                                      bool rangeEndpoints, bool sourceOrder) {
     auto engine = model;
     QPointer<ReaderSession> guard(this);
     const auto job = revision;
     kobalt::qt::invoke(
         engineWorker(),
-        [engine, guard, positions, finished, job, rangeEndpoints] {
+        [engine, guard, positions, finished, job, rangeEndpoints, sourceOrder] {
             EngineJob activity;
-            const auto pages = engine->pagesOf(positions, rangeEndpoints);
+            BookmarkLocations locations;
+            locations.pages = engine->pagesOf(positions, rangeEndpoints, sourceOrder ? &locations.order : nullptr);
             kobalt::qt::invoke(
                 qApp,
-                [guard, pages, finished, job] {
+                [guard, locations, finished, job] {
                     if (!guard)
                         return;
-                    finished(guard->revision == job && !guard->running ? pages : QVector<int>());
+                    finished(guard->revision == job && !guard->running ? locations : BookmarkLocations{});
                 },
                 Qt::QueuedConnection);
         },
@@ -1185,6 +1194,19 @@ void ReaderSession::intersectingRanges(const QString &start, const QString &end,
                 Qt::QueuedConnection);
         },
         Qt::QueuedConnection);
+}
+void ReaderSession::annotationPageEdges(std::function<void(AnnotationPageEdges)> finished) {
+    auto engine = model;
+    QPointer<ReaderSession> guard(this);
+    const auto job = revision;
+    kobalt::qt::invoke(engineWorker(), [engine, guard, job, finished] {
+        EngineJob activity;
+        const auto result = engine->annotationPageEdges();
+        kobalt::qt::invoke(qApp, [guard, job, result, finished] {
+            if (guard)
+                finished(guard->revision == job && !guard->running ? result : AnnotationPageEdges{});
+        }, Qt::QueuedConnection);
+    }, Qt::QueuedConnection);
 }
 void ReaderSession::annotationTokenAt(QPoint point, std::function<void(AnnotationToken)> finished,
                                       const QString &boundary, bool start) {

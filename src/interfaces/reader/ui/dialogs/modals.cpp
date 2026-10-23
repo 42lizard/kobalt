@@ -219,6 +219,22 @@ void ModalOverlay::setInputBarrier(bool enabled) {
     updateInputRegion();
     update();
 }
+void ModalOverlay::setVisible(bool visible) {
+    if (visible) {
+        updateInputRegion();
+    } else if (blocksInput && !inputExclusions.isEmpty()) {
+        // Circular grip cutouts split the exposed page into hundreds of strips.
+        // Remove them before Qt computes hide damage, then restore them on show.
+        clearMask();
+    }
+    QWidget::setVisible(visible);
+}
+void ModalOverlay::setInputExclusions(const QRegion &region) {
+    if (inputExclusions == region)
+        return;
+    inputExclusions = region;
+    updateInputRegion();
+}
 void ModalOverlay::setDimmed(bool enabled) {
     if (dimmed == enabled) {
         return;
@@ -246,11 +262,13 @@ void ModalOverlay::paintEvent(QPaintEvent *) {
     }
 }
 void ModalOverlay::updateInputRegion() {
-    if (blocksInput) {
+    if (blocksInput && inputExclusions.isEmpty()) {
         clearMask();
         return;
     }
-    QRegion region(content->geometry());
+    QRegion region = blocksInput ? QRegion(rect()).subtracted(inputExclusions) : QRegion();
+    // The card and arrow retain priority if a handle hit area reaches them.
+    region += content->geometry();
     if (!pointer->isHidden()) {
         region += pointer->geometry();
     }

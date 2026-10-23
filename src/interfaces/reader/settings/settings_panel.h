@@ -43,6 +43,7 @@ public:
     void dismissFontChoices();
     void showHeaderFooterWeights(int current, const QFont &sampleFont, std::function<void(int)> chosen);
     void showColumnSpacingChoices(int current, std::function<void(int)> chosen);
+    static QString columnSpacingLabel(int percent);
     enum class AdvancedText { WordSpacing, Tracking, Pagination };
     void showAdvancedTextChoices(AdvancedText feature, int current, std::function<void(int)> chosen,
                                  const QFont &sampleFont = {}, const QString &alignment = {});
@@ -55,7 +56,7 @@ public:
     QStackedWidget *settingsPages = nullptr;
     QVector<QPushButton *> settingsTabButtons;
     ui::DescribedOption *darkOption = nullptr, *inheritTextLayoutOption = nullptr, *animationOption = nullptr;
-    ui::DescribedOption *edgeLightOption = nullptr, *denseGraphOption = nullptr, *inheritHeaderFooterOption = nullptr;
+    ui::DescribedOption *edgeLightOption = nullptr, *denseGraphOption = nullptr;
     ui::DescribedOption *linkIndicatorOption = nullptr, *hideNonlinearOption = nullptr,
                         *avoidWastefulStylingOption = nullptr;
     ui::DescribedOption *automaticOpeningOption = nullptr, *minimalAnnotationOption = nullptr;

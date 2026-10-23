@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QFont>
+#include <QColor>
 #include <QImage>
 #include <QLabel>
 #include <QString>
@@ -63,6 +64,13 @@ void drawOpticalPrivateText(QPainter &painter, const QRect &area, const QString 
 class PrivateTextLabel : public QLabel {
 public:
     using QLabel::QLabel;
+    void setMaximumLines(int value) { maximumLines = value; update(); }
+    void setHighlight(const QString &style, QColor color, int spacing) {
+        highlightStyle = style;
+        highlightColor = color;
+        lineSpacing = spacing;
+        update();
+    }
     int textWidth(const QString &value) const;
     QString elidedText(const QString &value, int width) const;
     QSize sizeHint() const override;
@@ -70,5 +78,11 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *) override;
+
+private:
+    int maximumLines = 0;
+    QString highlightStyle;
+    QColor highlightColor;
+    int lineSpacing = 0;
 };
 }

@@ -20,6 +20,13 @@
 
 using namespace kobalt;
 namespace {
+QJsonObject persistedBook(QJsonObject state) {
+    for (const auto *key : appearance::layoutKeys)
+        state.remove(key);
+    for (const auto *key : appearance::marginKeys)
+        state.remove(key);
+    return state;
+}
 void waitUntil(const std::function<bool()> &ready) {
     if (ready())
         return;
@@ -219,20 +226,27 @@ int main(int argc, char **argv) {
     {
         auto session = open();
         const auto hash = session->sourceHash();
+        require(storage::writeJson(paths.preferences(),
+                                   qt::object({{"show_clock", false}, {"header_text_size", "large"}, {"orientation", 2}})),
+                "Cannot save global layout");
         ReadingBook local(std::move(session), paths.bookState("local-id"), paths, "local-id", hash, nullptr, {}, {});
-        require(local.saveLayoutPreferences(
-                    qt::object({{"show_clock", false}, {"header_text_size", "large"}, {"orientation", 2}})),
-                "Cannot save book layout");
         require(local.saveDictionaryChoice("test-dictionary"), "Cannot save dictionary choice");
         QJsonObject layoutSnapshot;
         require(local.checkpoint(&layoutSnapshot), "Cannot checkpoint book layout");
         const auto savedLayout = storage::readJson(paths.bookState("local-id"));
-        require(!savedLayout["show_clock"].toBool() && savedLayout["header_text_size"].toString() == "large" &&
-                    savedLayout["orientation"].toInt() == 2,
-                "Checkpoint lost book layout");
+        require(!savedLayout.contains("show_clock") && !savedLayout.contains("header_text_size") &&
+                    !savedLayout.contains("orientation") && !savedLayout.contains("margin_pixels"),
+                "Checkpoint persisted global layout with a book");
         require(savedLayout["dictionary_id"].toString() == "test-dictionary", "Checkpoint lost dictionary choice");
-        require(!storage::readJson(paths.preferences()).contains("show_clock"),
-                "Book layout changed global preferences");
+        require(storage::readJson(paths.preferences()).value("orientation").toInt() == 2 &&
+                    !layoutSnapshot.value("show_clock").toBool(),
+                "Checkpoint lost shared rotation or layout inspection");
+        require(local.session()->setVerticalMargins(readingPixels(36)), "Cannot change shared vertical margins");
+        waitUntil([&] { return !local.session()->busy(); });
+        require(local.checkpoint(&layoutSnapshot), "Cannot checkpoint changed global margins");
+        require(storage::readJson(paths.preferences()).value(appearance::pageMarginsKey).toObject()
+                    .value("top_margin_pixels").toInt() == 36,
+                "A margins-only change was skipped by checkpoint caching");
         require(!local.canWriteNative() && !local.deviceTransition(), "Local book acquired platform services");
         require(local.estimates().learningPace && local.estimates().bookMilliseconds > 0,
                 "Standalone book did not provide a rough estimate at opening");
@@ -256,7 +270,7 @@ int main(int argc, char **argv) {
         require(local.writeNative({}, "no native mapping"), "Local-only save required a platform position");
         QJsonObject snapshot;
         require(local.checkpoint(&snapshot), "Local checkpoint failed");
-        require(snapshot == storage::readJson(paths.bookState("local-id")), "Local checkpoint fields changed on disk");
+        require(persistedBook(snapshot) == storage::readJson(paths.bookState("local-id")), "Local checkpoint fields changed on disk");
         require(snapshot.value("book") == QStringLiteral("local-id") && snapshot.value("schema") == 1 &&
                     snapshot.value("fingerprint").toString() == QString::fromLatin1(hash) &&
                     !snapshot.value("finished_position").toString().isEmpty() &&
@@ -377,7 +391,7 @@ int main(int argc, char **argv) {
         require(!book.checkpoint(&snapshot), "Checkpoint reported success when storage refused the write");
         require(QDir().rmdir(statePath) && book.checkpoint(&snapshot),
                 "Failed checkpoint was cached instead of retried");
-        require(storage::readJson(statePath) == snapshot, "Retried checkpoint lost the current state");
+        require(storage::readJson(statePath) == persistedBook(snapshot), "Retried checkpoint lost the current state");
         book.releaseNative();
         require(calls.destroyed == 1 && !book.canWriteNative(), "Release retained platform services");
         book.pollProgress();

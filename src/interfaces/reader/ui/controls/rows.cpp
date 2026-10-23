@@ -52,11 +52,27 @@ void ListRow::setTitle(const QString &text) {
     setAccessibleName(text);
     arrange();
 }
+void ListRow::setDetailLines(int lines) {
+    lines = qBound(1, lines, 3);
+    if (detailLines == lines)
+        return;
+    detailLines = lines;
+    detail->setMaximumLines(lines);
+    detail->setWordWrap(lines > 1);
+    detail->setAlignment(lines > 1 ? Qt::AlignLeft | Qt::AlignTop : Qt::AlignLeft | Qt::AlignVCenter);
+    arrange();
+    updateGeometry();
+}
 void ListRow::setDetail(const QString &text) {
     if (detailText == text)
         return;
     detailText = text;
     arrange();
+}
+void ListRow::setDetailHighlight(const QString &style, QColor color, int lineSpacing) {
+    detail->setHighlight(style, color, lineSpacing);
+    detail->setMaximumLines(detailLines);
+    detail->setWordWrap(detailLines > 1 || !style.isEmpty() || lineSpacing > 0);
 }
 void ListRow::setCaption(const QString &text) {
     if (captionText == text)
@@ -84,6 +100,13 @@ void ListRow::setTitlePixels(int pixels) {
         return;
     labelStyles[0] = style;
     syncLabelStyles();
+}
+void ListRow::setTitleGap(int pixels) {
+    pixels = qMax(0, pixels);
+    if (titleGap == pixels)
+        return;
+    titleGap = pixels;
+    arrange();
 }
 void ListRow::setLabelFont(PrivateTextLabel *label, int index, const QFont &font) {
     auto family = font.family();
@@ -131,8 +154,10 @@ void ListRow::setActionRule(bool value) {
                                                          : Edges(Qt::BottomEdge));
 }
 QSize ListRow::sizeHint() const {
-    const int lines = 1 + !detailText.isEmpty() + !captionText.isEmpty();
-    return {0, lines == 3 ? int(m::list::threeLines) : lines == 2 ? int(m::list::twoLines) : int(m::list::oneLine)};
+    const int lines = 1 + (detailText.isEmpty() ? 0 : detailLines) + !captionText.isEmpty();
+    if (lines > 3)
+        return {0, int(m::list::threeLines) + (lines - 3) * detail->fontMetrics().height() + titleGap};
+    return {0, (lines == 3 ? int(m::list::threeLines) : lines == 2 ? int(m::list::twoLines) : int(m::list::oneLine)) + titleGap};
 }
 void ListRow::resizeEvent(QResizeEvent *) {
     arrange();
@@ -223,9 +248,9 @@ void ListRow::arrange() {
                                                                   : int(m::chrome::cellIcon);
     const int start = m::list::inset + lead + indentation;
     const int textWidth = qMax(0, end - start - trail - (trail ? int(m::contents::pageGap) : 0));
-    const int lines = 1 + !detailText.isEmpty() + !captionText.isEmpty();
+    const int lines = 1 + (detailText.isEmpty() ? 0 : detailLines) + !captionText.isEmpty();
     const int top = lines == 1 ? 0 : int(m::list::lineInset);
-    const int lineHeight = qMax(1, (height() - 2 * top - m::control::border) / lines);
+    const int lineHeight = qMax(1, (height() - 2 * top - titleGap - m::control::border) / lines);
     title->setGeometry(start, top, textWidth, lineHeight);
     title->setText(title->elidedText(titleText, textWidth));
     int line = 1;
@@ -234,8 +259,10 @@ void ListRow::arrange() {
     for (const auto &item : {qMakePair(detail, detailText), qMakePair(caption, captionText)}) {
         if (item.second.isEmpty())
             continue;
-        item.first->setGeometry(start, top + line++ * lineHeight, qMax(0, end - start), lineHeight);
-        item.first->setText(item.first->elidedText(item.second, item.first->width()));
+        const int count = item.first == detail ? detailLines : 1;
+        item.first->setGeometry(start, top + titleGap + line * lineHeight, qMax(0, end - start), count * lineHeight);
+        line += count;
+        item.first->setText(count > 1 ? item.second : item.first->elidedText(item.second, item.first->width()));
     }
     leading->setVisible(!leadingText.isEmpty());
     leading->setText(leadingText);

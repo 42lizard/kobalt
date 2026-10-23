@@ -48,6 +48,8 @@ public:
     explicit ListRow(QWidget *parent);
     void setTitle(const QString &text);
     void setDetail(const QString &text);
+    void setDetailLines(int lines);
+    void setDetailHighlight(const QString &style, QColor color, int lineSpacing);
     void setCaption(const QString &text);
     void setLeading(const QString &text, int indent = 0);
     void setAccessory(Accessory value);
@@ -55,6 +57,7 @@ public:
         return accessory;
     }
     void setTitlePixels(int pixels);
+    void setTitleGap(int pixels);
     void setDetailFont(const QFont &font);
     void setMetadataFont(const QFont &font);
     QPushButton *addAction(const QString &name, const QString &accessibleName);
@@ -97,6 +100,8 @@ private:
     QString labelStyles[5];
     Accessory accessory = None{};
     QPointer<QWidget> observedParent;
+    int detailLines = 1;
+    int titleGap = 0;
     int indentation = 0;
     bool arranging = false, synchronizing = false;
 };

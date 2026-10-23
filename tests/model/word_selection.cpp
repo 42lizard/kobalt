@@ -38,6 +38,10 @@ int main(int argc, char **argv) {
         }
     }
     const auto first = selected.value("Hello"), last = selected.value("world");
+    QVector<int> sourceOrder;
+    const auto samePage = model.pagesOf({last.start, first.start, "invalid"}, false, &sourceOrder);
+    require(samePage[0] == samePage[1] && sourceOrder[1] < sourceOrder[0] && sourceOrder[2] == -1,
+            "Book order must use source positions within a page and leave unresolved positions unranked");
     bool foundSpace = false;
     for (const auto &gap : model.rangeRects(first.end, last.start)) {
         for (int x = gap.left(); x <= gap.right(); ++x) {
@@ -309,6 +313,20 @@ int main(int argc, char **argv) {
     require(model.wordAt({0, 0}).text.isEmpty(), "Margin selected a word");
     require(model.wordAt({-1, 100}).text.isEmpty(), "Outside viewport selected a word");
     require(model.go(model.pages() - 1), "Cannot navigate to the chapter boundary");
+    const auto pageEnd = model.annotationPageEdges();
+    require(!pageEnd.continuesBefore && !pageEnd.continuesAfter,
+            "A separate short spine section must block selection turns at both ends");
+    const int sectionPage = model.page();
+    require(model.go(sectionPage - 1) && !model.annotationPageEdges().continuesAfter,
+            "Selection must stop before the next spine section");
+    require(model.go(1) && model.annotationPageEdges().continuesBefore && model.annotationPageEdges().continuesAfter,
+            "Ordinary paragraph boundaries must allow selection to continue across pages");
+    require(model.go(sectionPage), "Cannot restore the section page");
+    require(pageEnd.last.text == "again" && !pageEnd.last.punctuation,
+            "Backward page extension must select the last word, not its trailing full stop");
+    const auto wordEnd = model.annotationGeometry(pageEnd.last.start, pageEnd.last.end).end;
+    require(QPoint::dotProduct(pageEnd.end.first - wordEnd.first, wordEnd.outward) > 0,
+            "The physical page boundary must remain beyond the final punctuation");
     found.clear();
     for (int y = 0; y < 180; y += 10)
         for (int x = 0; x < 1072; x += 12) {

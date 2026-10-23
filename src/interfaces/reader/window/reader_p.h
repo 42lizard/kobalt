@@ -11,6 +11,7 @@
 #include "interfaces/reader_window.h"
 #include "interfaces/reader_interface.h"
 #include "reading/reading_book.h"
+#include "reading/appearance_settings.h"
 #include "reading/reader_session.h"
 #include "reading/bookmark_session.h"
 #include "reading/highlight_session.h"
@@ -97,16 +98,20 @@ private:
     int savedNativePage = -1, savedNativePages = -1;
     void buildReadingPage();
     void buildAnnotations();
-    void enterAnnotations(bool persistent = true);
-    bool markingSelection() const { return annotationMode || annotationMarking; }
+    void enterAnnotations();
     void leaveAnnotations();
     void finishAnnotations();
     void annotationTap(QPoint point);
+    void loadAnnotationDragEdges();
+    int annotationDragPageDirection(QPoint point) const;
     bool beginAnnotationDrag(QPoint point, int boundary);
     void moveAnnotationDrag(QPoint point);
     void finishAnnotationDrag(bool cancelled);
     void requestAnnotationDrag();
     void resolveAnnotationDraft(std::function<void()> after = {}, std::function<void()> reject = {});
+    void resolveAnnotationTokens(kobalt::AnnotationToken start, kobalt::AnnotationToken end,
+                                bool startPolicy, bool endPolicy, std::function<void()> after = {},
+                                std::function<void()> reject = {});
     void prepareAnnotation(bool leave = false, std::function<void()> after = {});
     void setAnnotationBoundary(kobalt::AnnotationToken token, bool start);
     void clearAnnotationDraft();
@@ -145,7 +150,7 @@ private:
     bool minimalAnnotationMode() const {
         return preferences.value("minimal_annotation_mode").toBool(false);
     }
-    bool annotationMode = false, annotationMarking = false, annotationSaving = false, annotationShowActionsPending = false,
+    bool annotationMode = false, annotationSaving = false, annotationShowActionsPending = false,
          annotationAdjusting = false, annotationDirty = false;
     QString annotationStart, annotationEnd, annotationEditing, annotationFrame, annotationViewportFrame;
     kobalt::AnnotationToken annotationStartWord, annotationEndWord;
@@ -157,6 +162,9 @@ private:
     QVector<QRect> draftHighlightRects, savedHighlightRects;
     kobalt::AnnotationGeometry draftHighlightGeometry;
     bool annotationDragging = false, annotationDragPending = false, annotationDragReleased = false;
+    bool annotationHandleDragging = false, annotationDragAwaitingRelease = false, annotationDragLoadingEdges = false;
+    int annotationDragTurn = 0;
+    kobalt::AnnotationPageEdges annotationDragEdges;
     int annotationDragBoundary = -1;
     QPoint annotationDragPoint, annotationDragOrigin;
     ReaderMarkupRequest annotationRequest;
@@ -222,8 +230,7 @@ private:
     kobalt::ui::Panel *general = nullptr;
     std::unique_ptr<kobalt::LightControls> light;
     kobalt::LightPanel *lightPopup = nullptr;
-    QCheckBox *darkOption, *inheritTextLayoutOption, *animationOption, *edgeLightOption, *denseGraphOption,
-        *inheritHeaderFooterOption;
+    QCheckBox *darkOption, *inheritTextLayoutOption, *animationOption, *edgeLightOption, *denseGraphOption;
     QCheckBox *automaticOpeningOption = nullptr, *minimalAnnotationOption = nullptr, *hideTabLabelsOption = nullptr;
     QPushButton *autoRotateOption;
     QCheckBox *hideStatusOption = nullptr;
@@ -436,7 +443,7 @@ private:
                               *navigationBarButton = nullptr;
     QPointer<kobalt::ui::ModalOverlay> pageNavigationPopup, tapZonesPopup, navigationBarPopup, menuViewPopup;
     kobalt::ui::CaptionButton *menuViewButton = nullptr;
-    int settingsColumnSpacing = 100;
+    int settingsColumnSpacing = defaultColumnSpacingPercent;
     int settingsWordSpacing = 100;
     int settingsTracking = 0;
     QString settingsWidowsOrphans = "publisher";

@@ -49,16 +49,17 @@ bool HighlightSession::sync() {
         positions << h.start << h.end;
     }
     QPointer<HighlightSession> guard(this);
-    model_.bookmarkPages(
+    model_.bookmarkLocations(
         positions,
-        [guard, key, count = positions.size(), generation = generation_](QVector<int> pages) {
+        [guard, key, count = positions.size(), generation = generation_](BookmarkLocations locations) {
             if (!guard || guard->lookup_ != key) {
                 return;
             }
             guard->lookup_.clear();
-            if (guard->generation_ == generation && guard->layout() == key && pages.size() == count) {
+            if (guard->generation_ == generation && guard->layout() == key && locations.pages.size() == count) {
                 guard->layout_ = key;
-                guard->pages_ = std::move(pages);
+                guard->pages_ = std::move(locations.pages);
+                guard->order_ = std::move(locations.order);
             }
             if (guard->changed) {
                 guard->changed();

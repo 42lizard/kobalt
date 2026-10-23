@@ -1,6 +1,40 @@
 // Filled outlines from the checked Phosphor SVGs.
 // Each shape is a filled outline on a 256 unit canvas.
 static bool phosphorGeometry(const QString &name, QPainterPath &path) {
+    if (name == QStringLiteral("arrow-down-right")) {
+        QPainterPath strokes;
+        strokes.moveTo(64, 64);
+        strokes.lineTo(192, 192);
+        strokes.moveTo(192, 88);
+        strokes.lineTo(192, 192);
+        strokes.lineTo(88, 192);
+        QPainterPathStroker outline;
+        outline.setWidth(16);
+        outline.setCapStyle(Qt::RoundCap);
+        outline.setJoinStyle(Qt::RoundJoin);
+        path = outline.createStroke(strokes);
+        return true;
+    }
+    if (name == QStringLiteral("sort-ascending")) {
+        QPainterPath strokes;
+        strokes.moveTo(48, 64);
+        strokes.lineTo(184, 64);
+        strokes.moveTo(48, 128);
+        strokes.lineTo(120, 128);
+        strokes.moveTo(48, 192);
+        strokes.lineTo(104, 192);
+        strokes.moveTo(184, 112);
+        strokes.lineTo(184, 208);
+        strokes.moveTo(144, 168);
+        strokes.lineTo(184, 208);
+        strokes.lineTo(224, 168);
+        QPainterPathStroker outline;
+        outline.setWidth(16);
+        outline.setCapStyle(Qt::RoundCap);
+        outline.setJoinStyle(Qt::RoundJoin);
+        path = outline.createStroke(strokes);
+        return true;
+    }
     if (name == QStringLiteral("arrow-left")) {
         path.setFillRule(Qt::WindingFill);
         path.moveTo(224, 128);
@@ -81,6 +115,29 @@ static bool phosphorGeometry(const QString &name, QPainterPath &path) {
         path.lineTo(136, 144);
         path.lineTo(178.67, 176);
         path.closeSubpath();
+        return true;
+    }
+    if (name == QStringLiteral("book-bookmark")) {
+        QPainterPath strokes;
+        strokes.moveTo(48, 224);
+        strokes.lineTo(48, 56);
+        strokes.cubicTo(48, 42.7451660041, 58.7451660041, 32, 72, 32);
+        strokes.lineTo(208, 32);
+        strokes.lineTo(208, 192);
+        strokes.lineTo(72, 192);
+        strokes.cubicTo(58.7451660041, 192, 48, 202.745166004, 48, 216);
+        strokes.moveTo(48, 224);
+        strokes.lineTo(192, 224);
+        strokes.moveTo(112, 32);
+        strokes.lineTo(112, 128);
+        strokes.lineTo(144, 104);
+        strokes.lineTo(176, 128);
+        strokes.lineTo(176, 32);
+        QPainterPathStroker outline;
+        outline.setWidth(16);
+        outline.setCapStyle(Qt::RoundCap);
+        outline.setJoinStyle(Qt::RoundJoin);
+        path = outline.createStroke(strokes);
         return true;
     }
     if (name == QStringLiteral("book-open")) {

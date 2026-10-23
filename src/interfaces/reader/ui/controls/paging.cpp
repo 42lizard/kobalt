@@ -10,6 +10,28 @@
 
 namespace kobalt::ui {
 namespace m = metrics;
+namespace {
+class ContinuationHint final : public InterfaceLabel {
+public:
+    using InterfaceLabel::InterfaceLabel;
+    QSize sizeHint() const override {
+        const auto label = InterfaceLabel::sizeHint();
+        return {label.width() + px(12) + px(28), qMax(label.height(), int(px(28)))};
+    }
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setFont(font());
+        const auto ink = palette().color(QPalette::WindowText);
+        painter.setPen(ink);
+        const int textWidth = interfaceTextWidth(text(), font()), gap = px(12), icon = px(28);
+        const int left = (width() - textWidth - gap - icon) / 2;
+        drawInterfaceText(painter, QRect(left, 0, textWidth, height()), text(), Qt::AlignLeft | Qt::AlignVCenter);
+        paintOpeningIcon(painter, ControlIcon::ArrowDownRight,
+                         QRect(left + textWidth + gap, (height() - icon) / 2, icon, icon), ink);
+    }
+};
+}
 PagerBar::PagerBar(QWidget *parent, const QString &prefix) : QWidget(parent) {
     setAttribute(Qt::WA_OpaquePaintEvent);
     counter = new ui::InterfaceLabel(this);
@@ -25,7 +47,7 @@ PagerBar::PagerBar(QWidget *parent, const QString &prefix) : QWidget(parent) {
     previous->setRule(Qt::RightEdge);
     next->setRule(Qt::LeftEdge);
     setFixedHeight(m::chrome::actionHeight);
-    continuationHint = new ui::InterfaceLabel(strings::get("common.more_next_page"), parent ? parent : this);
+    continuationHint = new ContinuationHint(strings::get("common.more_next_page"), parent ? parent : this);
     continuationHint->setObjectName(prefix + "ContinuationHint");
     continuationHint->setTextFormat(Qt::PlainText);
     continuationHint->setAlignment(Qt::AlignCenter);

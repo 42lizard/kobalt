@@ -7,6 +7,10 @@
   "license": "MIT",
   "files": [
     {
+      "file": "arrow-down-right.svg",
+      "sha256": "2d974b8c8a4e546b160f11954bfdd5a103ce7f5fab3619c61f48e923efe197e5"
+    },
+    {
       "file": "arrow-left.svg",
       "sha256": "3c2001cf957d182fc54927e4b286cc8cf66dd97830f441ca2650d42a63a9006a"
     },
@@ -17,6 +21,10 @@
     {
       "file": "bluetooth.svg",
       "sha256": "b7acd2d97b06217902bfe61cafd4dda5432a0823ebee5cca8a26175efab46b91"
+    },
+    {
+      "file": "book-bookmark.svg",
+      "sha256": "ca4cd8a5383e6863699fcb5c30d6568f9b4a5948a43c94afb6c9a9142c966f16"
     },
     {
       "file": "book-open.svg",
@@ -141,6 +149,10 @@
     {
       "file": "selection.svg",
       "sha256": "5fff68fdc60d81f1855302416481dc69fe9f0abfbb353d3bc43f2c24150ab8d4"
+    },
+    {
+      "file": "sort-ascending.svg",
+      "sha256": "a9791208ad848f553cc7eb38a6adaf3dedcbb5922841dd05c683d123fd6272f6"
     },
     {
       "file": "sun.svg",

@@ -4,6 +4,8 @@
 #include "interfaces/reader/ui/controls/paging.h"
 #include "interfaces/reader/ui/controls/panels.h"
 #include <QDateTime>
+#include <QPointer>
+#include "interfaces/reader/ui/dialogs/modals.h"
 #include <functional>
 
 namespace kobalt {
@@ -13,6 +15,9 @@ struct BookmarkRow {
     int page = -1; // Zero-based, or -1 when the position no longer resolves.
     bool current = false;
     int endPage = -1;
+    QString style = {};
+    QString color = QStringLiteral("gray");
+    int sourceOrder = -1;
 };
 
 // The Bookmarks list covers the header's action row with its own bar, like
@@ -22,6 +27,9 @@ public:
     explicit BookmarkList(QWidget *parent);
     void showBookmarks(QVector<BookmarkRow> rows);
     void showAnnotations(QVector<BookmarkRow> rows);
+    void setSortOrder(const QString &order);
+    QString sortOrder() const { return order; }
+    std::function<void(const QString &)> sortRequested;
     void setExcerptFont(const QString &family);
     bool annotationsShown() const {
         return annotations;
@@ -35,12 +43,20 @@ protected:
     void resizeEvent(QResizeEvent *) override;
 
 private:
+    void showItems(QVector<BookmarkRow> list, bool annotationTab);
+    void sortItems();
     void arrange();
     void redraw();
     int pageCount() const;
     QVector<BookmarkRow> items;
     QVector<QPushButton *> buttons, removes;
     QPushButton *bookmarksTab, *annotationsTab;
+    ui::CellButton *sortButton;
+    QPointer<ui::ModalOverlay> sortPopup;
+    void openSort();
+    void closeSort();
+    QVector<int> pageStarts, itemHeights, excerptLines;
+    QString order = QStringLiteral("position");
     bool annotations = false;
     QString excerptFamily;
     int listTop() const;

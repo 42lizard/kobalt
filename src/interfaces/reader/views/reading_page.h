@@ -74,6 +74,7 @@ public:
     void setAnnotationInputEnabled(bool enabled);
     void setAnnotationHandles(const AnnotationGeometry &geometry);
     QRect annotationHandleRect(bool start) const;
+    QRegion annotationHandleHitRegion() const;
     // Boundary -1 starts a new drag; 0 and 1 move the source start and end.
     std::function<bool(QPoint, int)> annotationDragStarted;
     std::function<void(QPoint)> annotationDragMoved;

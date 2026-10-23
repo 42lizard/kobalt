@@ -295,6 +295,19 @@ QRect ReadingPage::annotationHandleRect(bool start) const {
                  QSize(2 * radius + 1, 2 * radius + 1));
 }
 
+QRegion ReadingPage::annotationHandleHitRegion() const {
+    QRegion region;
+    const int radius = m::selection::handleHitRadius;
+    for (const auto &handle : annotationHandles) {
+        if (handle.visible) {
+            const QPoint center = handle.center + QPoint(0, topHeight());
+            region += QRegion(QRect(center - QPoint(radius, radius), QSize(2 * radius + 1, 2 * radius + 1)),
+                              QRegion::Ellipse);
+        }
+    }
+    return region;
+}
+
 void ReadingPage::setAnnotationHandles(const AnnotationGeometry &geometry) {
     QRegion dirty;
     for (int i = 0; i < 2; ++i) {

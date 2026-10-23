@@ -268,9 +268,9 @@ void Reader::openSettings() {
     avoidWastefulStylingOption->setChecked(model->state().value("avoid_wasteful_styling").toBool(true));
     auto *displaySettings = static_cast<SettingsPanel *>(general);
     displaySettings->landscapeColumnsOption->setChecked(preferences.value("two_columns_landscape").toBool(false));
-    settingsColumnSpacing = preferences.value("column_spacing_percent").toInt(100);
+    settingsColumnSpacing = preferences.value("column_spacing_percent").toInt(defaultColumnSpacingPercent);
     displaySettings->columnSpacingButton->setEnabled(displaySettings->landscapeColumnsOption->isChecked());
-    displaySettings->columnSpacingButton->setCaption(QString::number(settingsColumnSpacing / 100.0, 'f', 1) + QChar(0x00d7));
+    displaySettings->columnSpacingButton->setCaption(SettingsPanel::columnSpacingLabel(settingsColumnSpacing));
     settingsWordSpacing = model->state().value("word_spacing").toInt(100);
     settingsTracking = model->state().value("justification_tracking").toInt(0);
     settingsWidowsOrphans = model->state().value("widows_orphans").toString("publisher");
@@ -280,7 +280,6 @@ void Reader::openSettings() {
     linkIndicatorOption->setChecked(preferences.value("show_link_indicator").toBool(false));
     edgeLightOption->setChecked(preferences.value("edge_light_gestures").toBool(true));
     denseGraphOption->setChecked(preferences.value("dense_stats_chart").toBool(false));
-    inheritHeaderFooterOption->setChecked(preferences.value(appearance::inheritHeaderFooterKey).toBool(true));
     showSleepScreen();
     showPageNavigation();
     showTapZones();
@@ -322,16 +321,12 @@ void Reader::fitAppearance() {
 bool Reader::writePreferences(const QJsonObject &next) {
     auto global = appearance::globalPreferences(next);
     appearance::rememberTextLayout(global, model->state());
-    const auto previous = storage::readJson(book->paths().preferences());
+    appearance::rememberPageMargins(global, model->state());
     if (!writeJson(book->paths().preferences(), global)) {
         showSettingsWriteError();
         return false;
     }
-    if (book->saveLayoutPreferences(next))
-        return true;
-    writeJson(book->paths().preferences(), previous);
-    showSettingsWriteError();
-    return false;
+    return true;
 }
 
 void Reader::applySettings() {
@@ -371,7 +366,6 @@ void Reader::applySettings() {
     next["dense_stats_chart"] = denseGraphOption->isChecked();
     next.remove(pageNavigation::barVisibleKey);
     next["minimal_annotation_mode"] = minimalAnnotationOption->isChecked();
-    next[appearance::inheritHeaderFooterKey] = inheritHeaderFooterOption->isChecked();
     next["screen_refresh"] = kobalt::screenRefreshValue(screenRefreshMode);
     if (services.desktopUi) {
         next["native_hide_status_bar"] = hideStatusOption->isChecked();

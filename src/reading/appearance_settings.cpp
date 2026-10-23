@@ -3,40 +3,31 @@
 
 namespace kobalt::appearance {
 QJsonObject readerPreferences(const QJsonObject &global, const QJsonObject &book) {
-    auto result = global;
+    auto result = globalPreferences(global);
     if (!result.contains("bold_reading") && result.contains("bionic_reading")) {
         result["bold_reading"] = result.value("bionic_reading");
     }
     result.remove("bionic_reading");
     result.remove("smooth_images");
     result.remove("heavier_interface_text");
-    for (const auto *key : layoutKeys)
-        if (book.contains(key))
-            result[key] = book.value(key);
-    // A book with no header and footer of its own, old or new, starts with
-    // the preset of the book read last.
-    bool chromeSaved = false;
+    bool globalChrome = false;
     for (const auto *key :
          {"header_footer", "show_header", "show_footer", "header_text_size", "footer_text_size", "show_clock"}) {
-        chromeSaved = chromeSaved || book.contains(key);
+        globalChrome = globalChrome || result.contains(key);
     }
-    if (!chromeSaved) {
-        if (!global.value(inheritHeaderFooterKey).toBool(true)) {
-            result["header_footer"] = QStringLiteral("default");
-        } else if (global.value(lastPresetKey).isString()) {
-            result["header_footer"] = global.value(lastPresetKey);
-        }
+    const bool globalRotation = result.contains("orientation") || result.contains("auto_rotate");
+    for (const auto *key : layoutKeys) {
+        const bool rotation = qstrcmp(key, "orientation") == 0 || qstrcmp(key, "auto_rotate") == 0;
+        if (!result.contains(key) && book.contains(key) && !(rotation ? globalRotation : globalChrome))
+            result[key] = book.value(key);
     }
     return result;
 }
 QJsonObject globalPreferences(QJsonObject preferences) {
-    // No saved last preset means Kobalt, so a profile that only uses Kobalt never saves one.
-    const auto preset = preferences.value("header_footer");
-    if (preset.isString() && (preferences.contains(lastPresetKey) || preset.toString() != "default")) {
-        preferences[lastPresetKey] = preset;
-    }
-    for (const auto *key : layoutKeys)
-        preferences.remove(key);
+    if (!preferences.contains("header_footer") && preferences.value(lastPresetKey).isString())
+        preferences["header_footer"] = preferences.value(lastPresetKey);
+    preferences.remove(lastPresetKey);
+    preferences.remove(inheritHeaderFooterKey);
     preferences.remove("smooth_images");
     preferences.remove("heavier_interface_text");
     return preferences;
@@ -46,7 +37,19 @@ QJsonObject bookDefaults(const QJsonObject &preferences) {
     defaults.remove("font_face");
     applyFontDefault(defaults, preferences);
     defaults["two_columns_landscape"] = preferences.value("two_columns_landscape").toBool(false);
-    defaults["column_spacing_percent"] = qBound(100, preferences.value("column_spacing_percent").toInt(100), 300);
+    defaults["column_spacing_percent"] =
+        qBound(100, preferences.value("column_spacing_percent").toInt(defaultColumnSpacingPercent), 300);
+    // Prefer the global physical margins. Before migration, the last text
+    // snapshot supplies the user's latest margins and their original density.
+    const auto margins = preferences.value(pageMarginsKey).toObject();
+    const auto legacy = preferences.value(lastTextLayoutKey).toObject();
+    const int legacyPpi = qMax(1, legacy.value("reading_ppi").toInt(readingPpi.load()));
+    for (const auto *key : marginKeys) {
+        const int design = margins.value(key).toInt(legacy.value(key).isDouble()
+                              ? qRound(legacy.value(key).toDouble() * 300 / legacyPpi)
+                              : marginDesign(defaults.value(key).toInt()));
+        defaults[key] = readingPixels(qBound(0, design, 120));
+    }
     defaults["word_spacing"] = preferences.value("word_spacing").toInt(100);
     defaults["justification_tracking"] = preferences.value("justification_tracking").toInt(0);
     defaults["widows_orphans"] = preferences.value("widows_orphans").toString("publisher");
@@ -63,13 +66,9 @@ QJsonObject bookDefaults(const QJsonObject &preferences) {
         }
     }
     if (ppi > 0 && ppi != readingPpi.load()) {
-        for (const auto *key : {"font_pixels", "margin_pixels", "top_margin_pixels", "bottom_margin_pixels"}) {
-            if (last.value(key).isDouble()) {
-                defaults[key] = qRound(
-                    qBound(0.0, last.value(key).toDouble() * readingPpi.load() / ppi,
-                           double(qstrcmp(key, "font_pixels") == 0 ? maximumFontPixels() : maximumMarginPixels())));
-            }
-        }
+        if (last.value("font_pixels").isDouble())
+            defaults["font_pixels"] = qRound(qBound(0.0, last.value("font_pixels").toDouble() * readingPpi.load() / ppi,
+                                                   double(maximumFontPixels())));
     }
     return defaults;
 }
@@ -84,10 +83,12 @@ void applyBookDefaults(QJsonObject &saved, const QJsonObject &defaults) {
         }
     }
     applyFontDefault(saved, defaults);
+    for (const auto *key : marginKeys)
+        saved[key] = defaults.value(key);
     // Settings choices replace stale book values.
     saved["columns"] = 1;
     saved["two_columns_landscape"] = defaults.value("two_columns_landscape").toBool(false);
-    saved["column_spacing_percent"] = defaults.value("column_spacing_percent").toInt(100);
+    saved["column_spacing_percent"] = defaults.value("column_spacing_percent").toInt(defaultColumnSpacingPercent);
     saved["word_spacing"] = defaults.value("word_spacing").toInt(100);
     saved["justification_tracking"] = defaults.value("justification_tracking").toInt(0);
     saved["widows_orphans"] = defaults.value("widows_orphans").toString("publisher");
@@ -104,6 +105,14 @@ void rememberTextLayout(QJsonObject &preferences, const QJsonObject &state) {
     }
     last["reading_ppi"] = readingPpi.load();
     preferences[lastTextLayoutKey] = last;
+}
+void rememberPageMargins(QJsonObject &preferences, const QJsonObject &state) {
+    auto margins = preferences.value(pageMarginsKey).toObject();
+    for (const auto *key : marginKeys)
+        if (state.value(key).isDouble())
+            margins[key] = qBound(0, marginDesign(state.value(key).toInt()), 120);
+    if (!margins.isEmpty())
+        preferences[pageMarginsKey] = margins;
 }
 void copy(QJsonObject &to, const QJsonObject &from) {
     for (const auto *key : keys)

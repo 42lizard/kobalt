@@ -11,7 +11,11 @@
 #include "interfaces/reader/ui/style/styles.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include <QLocale>
+#include "ui/highlight_paint.h"
+#include "interfaces/reader/ui/controls/options.h"
 #include <QPainter>
+#include <algorithm>
+#include <climits>
 
 namespace kobalt {
 namespace c = ui::metrics::chrome;
@@ -82,7 +86,81 @@ BookmarkList::BookmarkList(QWidget *parent) : Panel(parent) {
         if (tabRequested)
             tabRequested(true);
     });
+    sortButton = new ui::CellButton(ui::ControlIcon::Sort, this);
+    sortButton->setObjectName("rrMarksSort");
+    sortButton->setAccessibleName(strings::get("marks.sort_title"));
+    sortButton->setRule(Qt::LeftEdge);
+    connect(sortButton, &QPushButton::clicked, this, [this] { openSort(); });
     hide();
+}
+void BookmarkList::setSortOrder(const QString &value) {
+    const auto valid = value == "newest" || value == "oldest" ? value : QStringLiteral("position");
+    if (order == valid)
+        return;
+    order = valid;
+    page = 0;
+    sortItems();
+    arrange();
+    redraw();
+}
+void BookmarkList::closeSort() {
+    if (!sortPopup)
+        return;
+    sortPopup->hide();
+    sortPopup->deleteLater();
+    sortPopup.clear();
+}
+void BookmarkList::openSort() {
+    if (sortPopup)
+        return;
+    sortPopup = new ui::ModalOverlay(this);
+    sortPopup->setObjectName("rrMarksSortPopup");
+    sortPopup->setGeometry(rect());
+    sortPopup->setDimmed(true);
+    sortPopup->dismissed = [this] { closeSort(); };
+    auto *card = sortPopup->card();
+    card->rows()->setContentsMargins(2, 2, 2, 2);
+    card->rows()->setSpacing(0);
+    card->rows()->addSpacing(ui::metrics::notice::cardMargins.top());
+    auto *title = card->title(strings::get("marks.sort_title"));
+    title->setContentsMargins(c::inset, 0, c::inset, 0);
+    card->rows()->addSpacing(ui::metrics::notice::cardMargins.bottom());
+    auto *options = new ui::RadioList(card);
+    options->setMinimumRowHeight(c::listActionHeight);
+    options->setTopDivider(true);
+    const QStringList values{"position", "newest", "oldest"};
+    const QStringList keys{"marks.sort_position", "marks.sort_newest", "marks.sort_oldest"};
+    for (int i = 0; i < values.size(); ++i) {
+        options->add("rrMarksSort_" + values[i], strings::get(keys[i].toLatin1().constData()),
+                     strings::get((keys[i] + "_description").toLatin1().constData()));
+        if (order == values[i])
+            options->setCurrent(i);
+    }
+    options->chosen = [this, values](int index) {
+        setSortOrder(values[index]);
+        closeSort();
+        if (sortRequested)
+            sortRequested(order);
+    };
+    card->rows()->addWidget(options);
+    const int cardWidth = qMin<int>(ui::metrics::notice::cardWidth, width() - 2 * ui::metrics::notice::sideClearance);
+    options->setFixedHeight(options->heightForWidth(cardWidth - 4));
+    card->fitToWidth(cardWidth);
+    sortPopup->centerCard();
+    sortPopup->show();
+    sortPopup->raise();
+}
+void BookmarkList::sortItems() {
+    std::stable_sort(items.begin(), items.end(), [this](const BookmarkRow &a, const BookmarkRow &b) {
+        if (order != "position" && a.created != b.created) {
+            if (!a.created.isValid() || !b.created.isValid())
+                return a.created.isValid();
+            return order == "newest" ? a.created > b.created : a.created < b.created;
+        }
+        if (a.page != b.page)
+            return (a.page < 0 ? INT_MAX : a.page) < (b.page < 0 ? INT_MAX : b.page);
+        return (a.sourceOrder < 0 ? INT_MAX : a.sourceOrder) < (b.sourceOrder < 0 ? INT_MAX : b.sourceOrder);
+    });
 }
 void BookmarkList::setExcerptFont(const QString &family) {
     if (excerptFamily == family) {
@@ -110,34 +188,28 @@ int BookmarkList::rowHeight() const {
                                           : qMax(metrics.height(), metrics.tightBoundingRect(sample).height());
     const int lineHeight = qMax(excerptHeight, QFontMetrics(ui::interfaceFont(c::labelText)).height());
     return qMax(int(ui::metrics::list::threeLines),
-                2 * int(ui::metrics::list::lineInset) + 3 * lineHeight + int(ui::metrics::control::border));
+                2 * int(ui::metrics::list::lineInset) + 4 * lineHeight + int(ui::metrics::control::border));
 }
 int BookmarkList::pageCount() const {
-    return qMax(1, (int(items.size()) + rows - 1) / rows);
+    return qMax(1, int(pageStarts.size()));
 }
 int BookmarkList::listTop() const {
     return c::actionHeight + strip::stripHeight;
 }
 void BookmarkList::showAnnotations(QVector<BookmarkRow> list) {
-    const bool sameTab = annotations && isVisible();
-    const int previousPage = page;
-    showBookmarks(std::move(list));
-    annotations = true;
-    page = sameTab ? previousPage : 0;
-    redraw();
+    showItems(std::move(list), true);
 }
 void BookmarkList::showBookmarks(QVector<BookmarkRow> list) {
-    annotations = false;
-    // Keep the list page when the same list comes back after a removal.
-    const bool reopening = !isVisible();
+    showItems(std::move(list), false);
+}
+void BookmarkList::showItems(QVector<BookmarkRow> list, bool annotationTab) {
+    const bool reopening = !isVisible() || annotations != annotationTab;
+    annotations = annotationTab;
     items = std::move(list);
-    arrange();
-    if (reopening) {
+    sortItems();
+    if (reopening)
         page = 0;
-        for (int i = 0; i < items.size(); ++i)
-            if (items[i].current)
-                page = i / rows;
-    }
+    arrange();
     redraw();
     show();
     raise();
@@ -154,24 +226,56 @@ void BookmarkList::paintEvent(QPaintEvent *event) {
                      ui::dividerColor(this));
 }
 void BookmarkList::arrange() {
-    const int first = page * rows, top = listTop(), available = height() - top, itemHeight = rowHeight();
-    // Leave room for the pager only when the list needs more than one page.
-    rows = qMax(1, available / itemHeight);
-    if (items.size() > rows)
-        rows = qMax(1, (available - c::actionHeight) / itemHeight);
-    page = first / rows;
+    const int first = pageStarts.value(page, 0), top = listTop(), available = qMax(1, height() - top);
+    const auto font = excerptFont();
+    const int lineHeight = ui::px(44);
+    const int textLineHeight = ui::needsPrivateText(QStringLiteral("Mg"), font)
+        ? ui::measurePrivateTextLayout(QStringLiteral("Mg"), font).lineHeight : QFontMetrics(font).lineSpacing();
+    const int textWidth = qMax(1, width() - c::cellWidth - 2 * ui::metrics::list::inset);
+    itemHeights.clear();
+    excerptLines.clear();
+    int total = 0;
+    for (const auto &item : items) {
+        const int count = qBound(1, (ui::wrappedInterfaceTextHeight(item.excerpt, font, textWidth) + textLineHeight - 1) / qMax(1, textLineHeight), 2);
+        const int itemHeight = qMax(int(ui::metrics::list::threeLines),
+            2 * int(ui::metrics::list::lineInset) + (count + 2) * lineHeight + int(ui::px(12)) + int(ui::metrics::control::border));
+        excerptLines.append(count);
+        itemHeights.append(itemHeight);
+        total += itemHeight;
+    }
+    const int capacity = total > available ? qMax(1, available - c::actionHeight) : available;
+    pageStarts = {0};
+    int used = 0;
+    for (int i = 0; i < items.size(); ++i) {
+        if (used > 0 && used + itemHeights[i] > capacity) {
+            pageStarts.append(i);
+            used = 0;
+        }
+        used += itemHeights[i];
+    }
+    page = 0;
+    while (page + 1 < pageStarts.size() && pageStarts[page + 1] <= first)
+        ++page;
+    rows = (page + 1 < pageStarts.size() ? pageStarts[page + 1] : items.size()) - pageStarts[page];
     const int barHeight = c::actionHeight - c::heavyRule;
-    const int tabWidth = qMax(1, (width() - c::cellWidth) / 2);
+    const int tabWidth = qMax(1, (width() - 2 * c::cellWidth) / 2);
     close->setGeometry(0, 0, c::cellWidth, barHeight);
     annotationsTab->setGeometry(c::cellWidth, 0, tabWidth, barHeight);
-    bookmarksTab->setGeometry(c::cellWidth + tabWidth, 0, qMax(1, width() - c::cellWidth - tabWidth), barHeight);
+    bookmarksTab->setGeometry(c::cellWidth + tabWidth, 0, qMax(1, width() - 2 * c::cellWidth - tabWidth), barHeight);
     listHeader->setGeometry(0, c::actionHeight, width(), ui::metrics::list::headerHeight);
+    sortButton->setGeometry(width() - c::cellWidth, 0, c::cellWidth, barHeight);
+    if (sortPopup) {
+        sortPopup->setGeometry(rect());
+        sortPopup->centerCard();
+    }
     pager->setGeometry(0, height() - c::actionHeight, width(), c::actionHeight);
+    const int itemHeight = rowHeight();
     empty->setGeometry(c::inset, top + itemHeight / 2, qMax(1, width() - 2 * c::inset), itemHeight / 2);
     emptyHint->setGeometry(2 * c::inset, top + itemHeight, qMax(1, width() - 4 * c::inset), itemHeight);
 }
 void BookmarkList::redraw() {
-    const int itemHeight = rowHeight();
+    const int first = pageStarts.value(page, 0);
+    rows = (page + 1 < pageStarts.size() ? pageStarts[page + 1] : items.size()) - first;
     bookmarksTab->setChecked(!annotations);
     annotationsTab->setChecked(annotations);
     empty->setText(strings::get(annotations ? "annotations.empty" : "bookmarks.empty"));
@@ -182,9 +286,11 @@ void BookmarkList::redraw() {
     pageHeading->setVisible(!items.isEmpty());
     listHeader->setCaptions(strings::get(annotations ? "annotations.summary" : "bookmarks.summary").arg(items.size()),
                             items.isEmpty() ? QString() : strings::get("chapter_contents.page"));
-    pager->setVisible(items.size() > rows);
+    pager->setVisible(pageCount() > 1);
     pager->setPage(page, pageCount(), {}, true);
-    const int used = listTop() + qMin(rows, qMax(0, int(items.size()) - page * rows)) * rowHeight();
+    int used = listTop();
+    for (int i = first; i < first + rows; ++i)
+        used += itemHeights.value(i);
     pager->setBlankArea({c::inset, used, width() - 2 * c::inset, pager->y() - used});
     while (buttons.size() < qMin(rows, int(items.size()))) {
         const int row = buttons.size();
@@ -195,12 +301,12 @@ void BookmarkList::redraw() {
         buttons.append(button);
         removes.append(remove);
         connect(button, &QPushButton::clicked, this, [this, row] {
-            const int index = page * rows + row;
+            const int index = pageStarts.value(page, 0) + row;
             if (index < items.size() && items[index].page >= 0 && selected)
                 selected(items[index].position);
         });
         connect(remove, &QPushButton::clicked, this, [this, row] {
-            const int index = page * rows + row;
+            const int index = pageStarts.value(page, 0) + row;
             if (index < items.size()) {
                 if (removeRequested) {
                     removeRequested(items[index].position);
@@ -212,8 +318,9 @@ void BookmarkList::redraw() {
     for (const auto &item : items)
         lastPage = qMax(lastPage, item.page);
     const int numberWidth = ui::interfaceTextWidth(QString::number(lastPage + 1), ui::interfaceFont(c::captionText));
+    int y = listTop();
     for (int row = 0; row < buttons.size(); ++row) {
-        const int index = page * rows + row;
+        const int index = pageStarts.value(page, 0) + row;
         const bool shown = row < rows && index < items.size();
         buttons[row]->setVisible(shown);
         removes[row]->setVisible(shown);
@@ -221,7 +328,7 @@ void BookmarkList::redraw() {
         if (!shown)
             continue;
         const auto &item = items[index];
-        const int y = listTop() + row * itemHeight;
+        const int itemHeight = itemHeights[index];
         auto *button = buttons[row];
         button->setObjectName(QString(annotations ? "rrAnnotation%1" : "rrBookmark%1").arg(index));
         removes[row]->setObjectName(QString(annotations ? "rrAnnotationRemove%1" : "rrBookmarkRemove%1").arg(index));
@@ -235,15 +342,23 @@ void BookmarkList::redraw() {
         itemRow->setDetailFont(excerptFont());
         itemRow->setMetadataFont(ui::interfaceFont(c::captionText));
         itemRow->setTitle(item.chapter);
+        itemRow->setTitlePixels(ui::px(24));
+        itemRow->setTitleGap(ui::px(12));
+        itemRow->setDetailLines(excerptLines[index]);
         itemRow->setDetail(item.excerpt);
-        itemRow->setCaption(item.created.isValid() ? QLocale().toString(item.created.toLocalTime().date(), "d MMM yyyy")
-                                                   : QString());
+        itemRow->setDetailHighlight(annotations ? (item.style.isEmpty() ? QStringLiteral("shaded") : item.style) : QString(),
+                                    ui::highlightTint(item.color), ui::px(44));
+        QStringList metadata;
+        if (item.created.isValid())
+            metadata << QLocale().toString(item.created.toLocalTime(), "d MMM yyyy, HH:mm");
+        itemRow->setCaption(metadata.join(QStringLiteral(" · ")));
         itemRow->setAccessory(
             ui::ListRow::Caption{item.page >= 0 ? (annotations && item.endPage > item.page
                                                        ? QString("%1–%2").arg(item.page + 1).arg(item.endPage + 1)
                                                        : QString::number(item.page + 1))
                                                 : QString(),
                                  numberWidth});
+        y += itemHeight;
     }
 }
 }

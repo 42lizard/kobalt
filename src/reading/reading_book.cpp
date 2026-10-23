@@ -214,19 +214,6 @@ bool ReadingBook::saveDictionaryChoice(const QString &id) {
     dictionaryChoice_ = previous;
     return false;
 }
-bool ReadingBook::saveLayoutPreferences(const QJsonObject &preferences) {
-    QJsonObject next;
-    for (const auto *key : appearance::layoutKeys)
-        if (preferences.contains(key))
-            next[key] = preferences.value(key);
-    const auto previous = layoutPreferences_;
-    layoutPreferences_ = next;
-    QJsonObject snapshot;
-    if (checkpoint(&snapshot))
-        return true;
-    layoutPreferences_ = previous;
-    return false;
-}
 bool ReadingBook::checkpoint(QJsonObject *snapshot) {
     saveSpeed();
     auto state = model->state();
@@ -243,24 +230,31 @@ bool ReadingBook::checkpoint(QJsonObject *snapshot) {
     state["sync_pending"] = reconciliation.pending();
     state["native_writeback_error"] = nativeWritebackError;
     *snapshot = state;
-    auto persisted = state;
+    auto checkpoint = state;
     if (model->temporaryTypography())
-        appearance::copy(persisted, model->persistentState());
-    if (persisted == savedCheckpoint)
+        appearance::copy(checkpoint, model->persistentState());
+    if (checkpoint == savedCheckpoint)
         return true;
+    auto persisted = checkpoint;
+    for (const auto *key : appearance::layoutKeys)
+        persisted.remove(key);
+    for (const auto *key : appearance::marginKeys)
+        persisted.remove(key);
     const bool saved = storage::writeJson(statePath, persisted);
     if (saved) {
-        savedCheckpoint = persisted;
         if (!model->temporaryTypography()) {
             const auto settings = storage::readJsonFile(paths_.preferences());
             if (settings.status == storage::ReadStatus::Ok || settings.status == storage::ReadStatus::Missing) {
                 auto next = settings.object;
                 appearance::rememberTextLayout(next, state);
+                appearance::rememberPageMargins(next, state);
                 if (next != settings.object && !storage::writeJson(paths_.preferences(), next)) {
-                    diagnostic("last-text-layout-unsaved", {}, false);
+                    diagnostic("appearance-settings-unsaved", {}, false);
+                    return false;
                 }
             }
         }
+        savedCheckpoint = checkpoint;
     } else {
         diagnostic("local-save-failed");
     }

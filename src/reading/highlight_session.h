@@ -26,6 +26,7 @@ public:
     bool resolved() const;
     int page(int index) const;
     int endPage(int index) const;
+    int sourceOrder(int index) const { return resolved() ? order_.value(index * 2, -1) : -1; }
     // Empty id creates a distinct passage. Existing IDs replace that passage.
     // Ranges may touch, but cannot overlap another saved passage.
     // Completion is always called while this session lives, false on stale work.
@@ -47,7 +48,7 @@ private:
     std::function<QString()> layout;
     std::unique_ptr<HighlightStore> store_;
     QString layout_, lookup_, error_;
-    QVector<int> pages_;
+    QVector<int> pages_, order_;
     quint64 generation_ = 0;
     bool loadFailed_ = false;
 };

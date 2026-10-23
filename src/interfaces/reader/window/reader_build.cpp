@@ -91,20 +91,14 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
         kobalt::diagnostic("settings-unreadable", {{"status", kobalt::storage::readStatusName(savedSettings.status)}},
                            false);
     preferences = appearance::readerPreferences(savedSettings.object, book->layoutPreferences());
-    // The next new book starts with this book's appearance. A damaged settings
-    // file is left for the next settings save to replace.
-    const auto openedPreset = kobalt::headerfooter::presetValue(kobalt::headerfooter::select(preferences).preset);
-    // No saved last preset means Kobalt, so a profile that only uses Kobalt never writes one.
-    const auto lastPreset = savedSettings.object.value(appearance::lastPresetKey)
-                                .toString(kobalt::headerfooter::presetValue(kobalt::headerfooter::Preset::Default));
+    // Migrate layout once into the shared profile. A damaged settings file is
+    // left for the next explicit settings save to replace.
     const bool settingsReadable = savedSettings.status == kobalt::storage::ReadStatus::Ok ||
                                   savedSettings.status == kobalt::storage::ReadStatus::Missing;
     if (settingsReadable && !model->temporaryTypography()) {
-        auto global = savedSettings.object;
-        if (lastPreset != openedPreset) {
-            global[appearance::lastPresetKey] = openedPreset;
-        }
+        auto global = appearance::globalPreferences(preferences);
         appearance::rememberTextLayout(global, model->state());
+        appearance::rememberPageMargins(global, model->state());
         if (global != savedSettings.object && !writeJson(book->paths().preferences(), global)) {
             kobalt::diagnostic("last-appearance-unsaved", {}, false);
         }
@@ -632,6 +626,15 @@ void Reader::buildOverlays() {
     choices = new ChoiceScreen(this);
     choices->hide();
     bookmarkList = new kobalt::BookmarkList(this);
+    bookmarkList->setSortOrder(preferences.value("marks_sort").toString("position"));
+    bookmarkList->sortRequested = [this](const QString &order) {
+        auto next = preferences;
+        next["marks_sort"] = order;
+        if (writePreferences(next))
+            preferences = next;
+        else
+            bookmarkList->setSortOrder(preferences.value("marks_sort").toString("position"));
+    };
     bookmarkList->selected = [this](const QString &position) {
         if (bookmarkList->annotationsShown()) {
             for (const auto &item : highlights->highlights()) {
@@ -1028,7 +1031,6 @@ void Reader::buildSettings() {
     animationOption = settings->animationOption;
     edgeLightOption = settings->edgeLightOption;
     denseGraphOption = settings->denseGraphOption;
-    inheritHeaderFooterOption = settings->inheritHeaderFooterOption;
     sleepScreenButton = settings->sleepScreenButton;
     pageNavigationButton = settings->pageNavigationButton;
     tapZonesButton = settings->tapZonesButton;
@@ -1046,7 +1048,7 @@ void Reader::buildSettings() {
     connect(settings->columnSpacingButton, &QPushButton::clicked, this, [this, settings] {
         settings->showColumnSpacingChoices(settingsColumnSpacing, [this, settings](int percent) {
             settingsColumnSpacing = percent;
-            settings->columnSpacingButton->setCaption(QString::number(percent / 100.0, 'f', 1) + QChar(0x00d7));
+            settings->columnSpacingButton->setCaption(SettingsPanel::columnSpacingLabel(percent));
         });
     });
     connect(settings->wordSpacingButton, &QPushButton::clicked, this, [this, settings] {

@@ -85,7 +85,6 @@ public:
     const QJsonObject &layoutPreferences() const {
         return layoutPreferences_;
     }
-    bool saveLayoutPreferences(const QJsonObject &preferences);
     const QString &dictionaryChoice() const {
         return dictionaryChoice_;
     }

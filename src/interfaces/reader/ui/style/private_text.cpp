@@ -1,6 +1,9 @@
 #include "private_text.h"
+#include "interfaces/reader/ui/controls/text.h"
 
 #include "fonts.h"
+#include "theme.h"
+#include "ui/highlight_paint.h"
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
 
@@ -799,7 +802,7 @@ QSize PrivateTextLabel::minimumSizeHint() const {
     return needsPrivateText(text(), font()) ? QSize() : QLabel::minimumSizeHint();
 }
 void PrivateTextLabel::paintEvent(QPaintEvent *event) {
-    if (!needsPrivateText(text(), font())) {
+    if (!needsPrivateText(text(), font()) && !(wordWrap() && maximumLines > 0)) {
         QLabel::paintEvent(event);
         return;
     }
@@ -808,6 +811,16 @@ void PrivateTextLabel::paintEvent(QPaintEvent *event) {
     painter.setPen(palette().color(QPalette::WindowText));
     const auto visual =
         QStyle::visualAlignment(text().isRightToLeft() ? Qt::RightToLeft : Qt::LeftToRight, alignment());
-    drawInterfaceText(painter, rect(), text(), visual);
+    if (wordWrap()) {
+        QVector<QRect> rectangles;
+        drawWrappedInterfaceText(painter, rect(), text(), visual, maximumLines, lineSpacing,
+                                  highlightStyle.isEmpty() ? nullptr : &rectangles);
+        QRegion region;
+        for (const auto &rectangle : rectangles)
+            region += rectangle;
+        if (!highlightStyle.isEmpty())
+            paintHighlightMark(painter, rectangles, region, highlightColor, highlightStyle, darkTheme(this));
+    } else
+        drawInterfaceText(painter, rect(), text(), visual);
 }
 }

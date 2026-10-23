@@ -88,6 +88,14 @@ struct AnnotationToken : WordSelection {
     bool punctuation = false;
 };
 
+struct AnnotationPageEdges {
+    AnnotationToken first, last;
+    SelectionEndpoint start, end;
+    int columns = 1;
+    bool vertical = false;
+    bool continuesBefore = false, continuesAfter = false;
+};
+
 // All engine calls stay on one owning thread. Images own their pixels.
 class ReaderModel {
 public:
@@ -154,11 +162,12 @@ public:
     int comparePlatformPosition(const PositionCodec &codec, const QString &location, QString *error) const;
     // The page of each position in the current layout, or -1 where a
     // position no longer resolves.
-    QVector<int> pagesOf(const QStringList &positions, bool rangeEndpoints = false) const;
+    QVector<int> pagesOf(const QStringList &positions, bool rangeEndpoints = false, QVector<int> *sourceOrder = nullptr) const;
     // The start position of a page and its first words.
     QString pageStart(int page) const;
     QString pageExcerpt(int page) const;
     WordSelection wordAt(QPoint point);
+    AnnotationPageEdges annotationPageEdges();
     AnnotationToken annotationTokenAt(QPoint point);
     AnnotationToken annotationDragTokenAt(QPoint point, const QString &boundary, bool start);
     // Resolves and orders source boundaries without changing pagination or position.

@@ -20,7 +20,8 @@ protected:
 };
 int wrappedInterfaceTextHeight(const QString &text, const QFont &font, int width);
 void drawWrappedInterfaceText(QPainter &painter, const QRect &bounds, const QString &text,
-                              Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop);
+                              Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop, int maximumLines = 0,
+                              int lineSpacing = 0, QVector<QRect> *lineRectangles = nullptr);
 // Uses the same font backend and wrapping as WholeLineLabel.
 qreal excerptTextHeight(const QString &html, const QFont &font, int width);
 // Search excerpts end between complete lines, even when their context wraps.

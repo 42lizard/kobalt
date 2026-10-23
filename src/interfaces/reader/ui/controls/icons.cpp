@@ -43,11 +43,16 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
     };
     // Phosphor has no vertical swipe gesture, and the device drawings show
     // the side buttons, so these stay Kobalt's own artwork.
-    if (icon == ControlIcon::OneColumn || icon == ControlIcon::TwoColumns) {
+    if (icon == ControlIcon::ArrowDownRight) {
         result.canvas = 256;
         result.filled = true;
-        phosphorGeometry(icon == ControlIcon::OneColumn ? QStringLiteral("text-align-justify")
-                                                       : QStringLiteral("text-columns"), path);
+        phosphorGeometry(QStringLiteral("arrow-down-right"), path);
+    } else if (icon == ControlIcon::OneColumn || icon == ControlIcon::TwoColumns || icon == ControlIcon::Sort) {
+        result.canvas = 256;
+        result.filled = true;
+        phosphorGeometry(icon == ControlIcon::Sort ? QStringLiteral("sort-ascending")
+                         : icon == ControlIcon::OneColumn ? QStringLiteral("text-align-justify")
+                                                         : QStringLiteral("text-columns"), path);
     } else if (icon == ControlIcon::SelectionStart || icon == ControlIcon::SelectionEnd) {
         const bool start = icon == ControlIcon::SelectionStart;
         const int caret = start ? 12 : 52;
@@ -156,7 +161,7 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
                                             "text-aa",
                                             "dots-three",
                                             "bug",
-                                            "bookmark-simple",
+                                            "book-bookmark",
                                             "lock",
                                             "file-x",
                                             "link",
@@ -312,7 +317,8 @@ void paintOpeningIcon(QPainter &painter, ControlIcon icon, const QRectF &bounds,
 }
 QIcon controlIcon(ControlIcon icon, QColor color, bool sideButtons) {
     if (int(icon) < 0 || (int(icon) > int(ControlIcon::System) && icon != ControlIcon::PreviousChapter &&
-                          icon != ControlIcon::NextChapter))
+                          icon != ControlIcon::NextChapter && icon != ControlIcon::Sort &&
+                          icon != ControlIcon::ArrowDownRight))
         return {};
     return QIcon(new VectorIconEngine(icon, color, sideButtons));
 }

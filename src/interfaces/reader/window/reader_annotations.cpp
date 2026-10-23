@@ -23,7 +23,9 @@ void Reader::paintAnnotationDraft() {
                    draftHighlightGeometry.vertical);
     auto geometry = draftHighlightGeometry;
     geometry.rectangles = draftHighlightRects;
-    page->setAnnotationHandles(geometry);
+    page->setAnnotationHandles(annotationMode ? geometry : AnnotationGeometry{});
+    annotationPopover->setInputExclusions(page->annotationHandleHitRegion().translated(
+        page->mapTo(this, QPoint()) - annotationPopover->pos()));
 }
 
 void Reader::buildAnnotations() {
@@ -44,14 +46,13 @@ void Reader::buildAnnotations() {
     annotationPopover->hide();
 }
 
-void Reader::enterAnnotations(bool persistent) {
+void Reader::enterAnnotations() {
     if (model->busy() || !highlights->writable() || appearanceEdit.panelOpen() || general->isVisible()) {
         return;
     }
     dismissLookup();
     dismissControls();
-    annotationMode = annotationMode || persistent;
-    annotationMarking = !annotationMode;
+    annotationMode = true;
     page->setAnnotationInputEnabled(true);
     syncMarkupRequest();
     syncAnnotations();
@@ -60,7 +61,7 @@ void Reader::enterAnnotations(bool persistent) {
 void Reader::leaveAnnotations() {
     const bool discardSelection = !annotationStart.isEmpty() || !annotationEditing.isEmpty();
     annotationMode = false;
-    annotationMarking = false;
+    annotationDragAwaitingRelease = false;
     draftHighlightGeometry = {};
     page->setAnnotationHandles({});
     page->setAnnotationInputEnabled(true);
@@ -242,7 +243,7 @@ void Reader::annotationActionsFor(const QVector<AnnotationAction> &actions, QRec
 
 void Reader::clearAnnotationDraft() {
     dismissLookup(true);
-    annotationMarking = false;
+    annotationDragAwaitingRelease = false;
     draftHighlightGeometry = {};
     page->setAnnotationHandles({});
     ++annotationEpoch;
@@ -300,6 +301,7 @@ void Reader::annotationTap(QPoint point) {
 
 bool Reader::beginAnnotationDrag(QPoint point, int boundary) {
     if (annotationSaving || model->busy() || lifecycleHidden || closing || services.suspended() ||
+        (boundary >= 0 && !annotationMode) ||
         (topControls->isVisible() && !annotationMenuSelectionEnabled()))
         return false;
     if (topControls->isVisible())
@@ -312,21 +314,106 @@ bool Reader::beginAnnotationDrag(QPoint point, int boundary) {
     annotationDragging = true;
     annotationDragPending = annotationDragReleased = false;
     annotationDragBoundary = boundary;
+    annotationHandleDragging = boundary >= 0;
+    annotationDragTurn = 0;
+    annotationDragEdges = {};
+    annotationDragAwaitingRelease = false;
     annotationDragOrigin = annotationDragPoint = point;
-    requestAnnotationDrag();
+    if (annotationHandleDragging)
+        loadAnnotationDragEdges();
+    else
+        requestAnnotationDrag();
     return true;
 }
 
+void Reader::loadAnnotationDragEdges() {
+    annotationDragLoadingEdges = true;
+    annotationDragPending = true;
+    const auto epoch = annotationEpoch;
+    QPointer<Reader> guard(this);
+    model->annotationPageEdges([guard, epoch](AnnotationPageEdges edges) {
+        if (!guard || guard->annotationEpoch != epoch || !guard->annotationDragging)
+            return;
+        guard->annotationDragLoadingEdges = false;
+        guard->annotationDragEdges = edges;
+        const int direction = std::exchange(guard->annotationDragTurn, 0);
+        guard->annotationDragPending = false;
+        if (edges.first.text.isEmpty() || edges.last.text.isEmpty()) {
+            guard->annotationDragging = false;
+            return;
+        }
+        if (!direction) {
+            guard->requestAnnotationDrag();
+            return;
+        }
+        // Complete this gesture at the adjacent page boundary. Further movement
+        // belongs to the old press until the user releases and grabs a handle again.
+        guard->annotationDragPending = true;
+        const auto token = direction > 0 ? edges.first : edges.last;
+        const bool start = guard->annotationDragBoundary == 0;
+        guard->resolveAnnotationTokens(start ? token : guard->annotationStartWord,
+            start ? guard->annotationEndWord : token,
+            start ? !token.punctuation : guard->annotationStartPolicy,
+            start ? guard->annotationEndPolicy : !token.punctuation,
+            [guard] {
+                guard->annotationDragging = guard->annotationDragPending = false;
+                guard->annotationDragAwaitingRelease = !guard->annotationDragReleased;
+                if (guard->annotationDragReleased && !guard->annotationMode)
+                    guard->showAnnotationActions();
+            }, [guard, direction] {
+                // An adjacent saved highlight is a boundary, never an overlapping draft.
+                guard->annotationDragging = guard->annotationDragPending = false;
+                guard->model->turn(-direction);
+            });
+    });
+}
+
+int Reader::annotationDragPageDirection(QPoint point) const {
+    const auto &edges = annotationDragEdges;
+    if (edges.first.text.isEmpty() || edges.last.text.isEmpty())
+        return 0;
+    const auto before = [&](const SelectionEndpoint &edge, const AnnotationToken &token, bool start) {
+        if (!edge.visible || token.rectangles.isEmpty())
+            return false;
+        const auto rect = start ? token.rectangles.first() : token.rectangles.last();
+        const int tolerance = ui::px(8);
+        if (edges.columns > 1 && ((point.x() < page->width() / 2) != (rect.center().x() < page->width() / 2)))
+            return false;
+        if (edges.vertical) {
+            // Vertical lines progress in the direction between the terminal words.
+            const int flow = edges.last.rectangles.last().center().x() >= edges.first.rectangles.first().center().x() ? 1 : -1;
+            if ((point.x() - rect.center().x()) * flow * (start ? -1 : 1) > rect.width() / 2 + tolerance)
+                return true;
+        } else if (start ? point.y() < rect.top() - tolerance : point.y() > rect.bottom() + tolerance) {
+            return true;
+        }
+        const QPoint middle = (edge.first + edge.last) / 2;
+        const bool onLine = edges.vertical ? point.x() >= rect.left() && point.x() <= rect.right()
+                                          : point.y() >= rect.top() && point.y() <= rect.bottom();
+        return onLine && QPoint::dotProduct(point - middle, edge.outward) > tolerance;
+    };
+    if (before(edges.start, edges.first, true))
+        return -1;
+    if (before(edges.end, edges.last, false))
+        return 1;
+    return 0;
+}
+
 void Reader::moveAnnotationDrag(QPoint point) {
-    if (!annotationDragging)
+    // Ordinary lookup keeps the word where the hold began. The page still owns
+    // the gesture, so movement and release cannot become a page turn.
+    if (!annotationDragging || !annotationMode)
         return;
     annotationDragPoint = point;
     requestAnnotationDrag();
 }
 
 void Reader::finishAnnotationDrag(bool cancelled) {
-    if (!annotationDragging)
+    if (!annotationDragging) {
+        if (std::exchange(annotationDragAwaitingRelease, false) && !cancelled && !annotationMode)
+            showAnnotationActions();
         return;
+    }
     if (cancelled) {
         annotationDragging = annotationDragPending = false;
         ++annotationEpoch;
@@ -340,6 +427,35 @@ void Reader::finishAnnotationDrag(bool cancelled) {
 void Reader::requestAnnotationDrag() {
     if (!annotationDragging || annotationDragPending || model->busy() || lifecycleHidden || services.suspended())
         return;
+    if (annotationDragTurn || (annotationHandleDragging && annotationDragEdges.first.text.isEmpty()))
+        return;
+    if (annotationHandleDragging) {
+        const int direction = annotationDragPageDirection(annotationDragPoint);
+        if (direction != 0) {
+            if (!(direction > 0 ? annotationDragEdges.continuesAfter : annotationDragEdges.continuesBefore)) {
+                const auto token = direction > 0 ? annotationDragEdges.last : annotationDragEdges.first;
+                const bool start = annotationDragBoundary == 0;
+                annotationDragPending = true;
+                QPointer<Reader> guard(this);
+                const auto stopped = [guard] {
+                    if (!guard)
+                        return;
+                    guard->annotationDragging = guard->annotationDragPending = false;
+                    guard->annotationDragAwaitingRelease = !guard->annotationDragReleased;
+                };
+                resolveAnnotationTokens(start ? token : annotationStartWord, start ? annotationEndWord : token,
+                    start ? !token.punctuation : annotationStartPolicy,
+                    start ? annotationEndPolicy : !token.punctuation, stopped, stopped);
+                return;
+            }
+            annotationDragTurn = direction;
+            annotationDragPending = true;
+            if (model->turn(direction))
+                return;
+            annotationDragTurn = 0;
+            annotationDragPending = false;
+        }
+    }
     if (annotationDragBoundary == -2) {
         if (annotationDragReleased) {
             annotationDragging = false;
@@ -372,7 +488,7 @@ void Reader::requestAnnotationDrag() {
                 guard->requestAnnotationDrag();
             } else if (guard->annotationDragReleased) {
                 guard->annotationDragging = false;
-                if (!guard->markingSelection() && !guard->annotationStart.isEmpty()) {
+                if (!guard->annotationMode && !guard->annotationStart.isEmpty()) {
                     if (guard->annotationStartWord.start != guard->annotationEndWord.start || guard->selectionLinkPoint().x() >= 0)
                         guard->showAnnotationActions();
                     else
@@ -441,19 +557,28 @@ void Reader::requestAnnotationDrag() {
 }
 
 void Reader::resolveAnnotationDraft(std::function<void()> after, std::function<void()> reject) {
+    resolveAnnotationTokens(annotationStartWord, annotationEndWord, annotationStartPolicy, annotationEndPolicy,
+                            after, [after, reject] {
+                                if (reject)
+                                    reject();
+                                if (after)
+                                    after();
+                            });
+}
+
+void Reader::resolveAnnotationTokens(AnnotationToken start, AnnotationToken end, bool startPolicy, bool endPolicy,
+                                    std::function<void()> after, std::function<void()> reject) {
     const auto epoch = annotationEpoch;
     QPointer<Reader> guard(this);
     model->annotationRange(
-        annotationStartWord.start, annotationStartWord.end, annotationEndWord.start, annotationEndWord.end,
-        [guard, epoch, after, reject](TextRange range) {
+        start.start, start.end, end.start, end.end,
+        [guard, epoch, after, reject, start, end](TextRange range) {
             if (!guard || guard->annotationEpoch != epoch || guard->lifecycleHidden ||
                 guard->services.suspended())
                 return;
             if (range.text.isEmpty()) {
                 if (reject)
                     reject();
-                if (after)
-                    after();
                 return;
             }
             QVector<QPair<QString, QString>> others;
@@ -464,17 +589,18 @@ void Reader::resolveAnnotationDraft(std::function<void()> after, std::function<v
             // Validate before publishing the draft or moving either handle.
             // Reject jumps across saved passages as well as moves into them.
             guard->model->intersectingRanges(range.start, range.end, others,
-                [guard, epoch, range, after, reject](QVector<int> hits) {
+                [guard, epoch, range, after, reject, start, end](QVector<int> hits) {
                     if (!guard || guard->annotationEpoch != epoch || guard->lifecycleHidden ||
                         guard->services.suspended())
                         return;
                     if (!hits.isEmpty()) {
                         if (reject)
                             reject();
-                        if (after)
-                            after();
                         return;
                     }
+                    guard->annotationStartWord = start;
+                    guard->annotationEndWord = end;
+                    guard->annotationDirty = true;
                     if (range.chosenStart != guard->annotationStartWord.start) {
                         std::swap(guard->annotationStartWord, guard->annotationEndWord);
                         std::swap(guard->annotationStartPolicy, guard->annotationEndPolicy);
@@ -502,7 +628,7 @@ void Reader::resolveAnnotationDraft(std::function<void()> after, std::function<v
                             after();
                     });
                 });
-        }, annotationEndPolicy, annotationStartPolicy);
+        }, endPolicy, startPolicy);
 }
 
 void Reader::prepareAnnotation(bool leave, std::function<void()> after) {
@@ -518,7 +644,7 @@ void Reader::prepareAnnotation(bool leave, std::function<void()> after) {
                 return;
             }
             guard->annotationSaving = false;
-            if (!guard->markingSelection() || guard->annotationSaveRevision != transaction) {
+            if (!guard->annotationMode || guard->annotationSaveRevision != transaction) {
                 return;
             }
             if (range.text.isEmpty()) {
@@ -563,7 +689,7 @@ void Reader::showAnnotationActions() {
     bounds.translate(0, page->topHeight());
     if (bounds.isEmpty())
         bounds = topControls->geometry();
-    if (!markingSelection()) {
+    if (!annotationMode) {
         QVector<AnnotationAction> actions{
             {"rrSelectionLookup", ui::ControlIcon::Dictionary, strings::get("reader.link_dictionary"), [this] {
                 annotationPopover->hide();
@@ -574,7 +700,7 @@ void Reader::showAnnotationActions() {
                 // before the replacement menu deletes it.
                 annotationPopover->hide();
                 qt::later(0, this, [this] {
-                    enterAnnotations(false);
+                    enterAnnotations();
                     if (!topControls->isVisible())
                         showAnnotationActions();
                 });
@@ -633,7 +759,7 @@ void Reader::saveAnnotation(bool leave, std::function<void()> after) {
                 return;
             }
             guard->annotationSaving = false;
-            if (!guard->markingSelection() || guard->annotationSaveRevision != transaction) {
+            if (!guard->annotationMode || guard->annotationSaveRevision != transaction) {
                 guard->annotationShowActionsPending = false;
                 guard->annotationFrame.clear();
                 guard->syncAnnotations();
@@ -646,7 +772,6 @@ void Reader::saveAnnotation(bool leave, std::function<void()> after) {
                 return;
             }
             guard->annotationDirty = false;
-            guard->annotationMarking = false;
             guard->annotationSelectedColor = guard->annotationColor;
             guard->annotationSelectedStyle = guard->annotationStyle;
             guard->annotationShowActionsPending = false;
@@ -716,7 +841,9 @@ void Reader::syncAnnotationControls() {
         !searchPanel->isVisible() && !dictionaryPanel->isVisible() && !lightPopup->isVisible();
     const bool selectionEnabled = annotationMenuSelectionEnabled();
     page->setAnnotationInputEnabled(readingOnly || dictionaryPanel->isVisible() || selectionEnabled);
-    page->setAnnotationHandles(draftHighlightGeometry);
+    page->setAnnotationHandles(annotationMode ? draftHighlightGeometry : AnnotationGeometry{});
+    annotationPopover->setInputExclusions(page->annotationHandleHitRegion().translated(
+        page->mapTo(this, QPoint()) - annotationPopover->pos()));
 }
 
 void Reader::syncMarkupRequest() {
@@ -811,6 +938,13 @@ void Reader::syncAnnotations() {
         annotationActionAnchor = {};
         annotationPopover->hide();
     }
+    if (annotationDragTurn && annotationDragging && !annotationDragLoadingEdges) {
+        annotationDragLoadingEdges = true;
+        qt::later(0, this, [this] {
+            if (annotationDragging && annotationDragTurn && !model->busy())
+                loadAnnotationDragEdges();
+        });
+    }
     syncMarkupRequest();
     const QString tintFrame = frame + (colorAnnotations() ? ":color" : ":mono");
     const auto imageKey = page->image.cacheKey();
@@ -826,7 +960,7 @@ void Reader::syncAnnotations() {
         }
     }
     const auto &markup = displayed->markup();
-    const bool canShowActions = markingSelection() && isVisible() && !lifecycleHidden && !services.suspended();
+    const bool canShowActions = annotationMode && isVisible() && !lifecycleHidden && !services.suspended();
     const bool showActions = canShowActions && annotationShowActionsPending;
     const bool unchangedMarkup = annotationFrame != tintFrame && markup.request == annotationRequest;
     if ((annotationImageKey != imageKey || annotationPresentationReady || unchangedMarkup) &&
@@ -843,7 +977,7 @@ void Reader::syncAnnotations() {
         draftHighlightRects = matchingDraft ? markup.draft.rectangles : QVector<QRect>{};
         draftHighlightGeometry = matchingDraft ? markup.draft : AnnotationGeometry{};
         page->installAnnotationFrame(draftHighlightRects, markup.saved, draftHighlightGeometry.vertical,
-                                     &draftHighlightGeometry);
+                                     annotationMode ? &draftHighlightGeometry : nullptr);
         highlights->sync();
         if (showActions) {
             annotationShowActionsPending = false;
@@ -912,6 +1046,9 @@ QVector<BookmarkRow> Reader::annotationRows() const {
         const auto &item = items[i];
         BookmarkRow row{item.id, item.chapter, item.text, item.created, highlights->page(i), false};
         row.endPage = highlights->endPage(i);
+        row.style = item.style;
+        row.color = item.color;
+        row.sourceOrder = highlights->sourceOrder(i);
         rows.append(row);
     }
     return rows;
@@ -942,7 +1079,7 @@ void Reader::editAnnotation(const QString &id, bool navigate) {
             continue;
         }
         bookmarkList->hide();
-        enterAnnotations(false);
+        enterAnnotations();
         annotationEditing = id;
         annotationColorChosen = annotationStyleChosen = false;
         annotationColor = item.color;
