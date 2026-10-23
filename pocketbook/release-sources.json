@@ -1,0 +1,8 @@
+{
+  "pocketbook-sdk-qt6": {
+    "url": "https://codeload.github.com/fstanis/pocketbook-sdk-qt6/tar.gz/754e436c7c24b4e2695154e2efffbf7447b4130e",
+    "sha256": "547a506d7bc80db327230e75f93e35c204674395188700b9c0931e7736cd4e8c",
+    "file": "pocketbook-sdk-qt6.tar.gz",
+    "description": "PocketBook Qt 6 SDK build recipes and CMake helpers"
+  }
+}

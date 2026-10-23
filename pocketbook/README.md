@@ -124,11 +124,18 @@ The standalone buildchain was validated from an independent clone on an ARM64
 Docker host, mounting only this checkout and the firmware file. The complete
 build/package command, host reading workflow, offline ARM workflow, ten Python
 build/package/registration checks and all 108 host regression groups passed.
-The SDK base provides AMD64 and ARM64 images; AMD64 and Podman builds have not
-been exercised. Kobo build entry points are unchanged; no new Kobo cross-build
+The SDK base provides AMD64 and ARM64 images. The complete standalone build,
+package checks, host EPUB workflow and offline ARM workflow also passed on a
+Linux AMD64 Docker host. Podman has not been exercised. Kobo build entry points
+are unchanged; no new Kobo cross-build
 or physical PocketBook acceptance run was performed for the tooling move.
 
-This buildchain does not publish a release or install onto a device automatically.
+Local builds do not publish releases or install onto a device automatically.
+On this branch, GitHub Actions builds PocketBook only. Branch pushes produce
+one-day artifacts; tags such as `v1.0-beta.3-pocketbook.1` produce a tested package,
+corresponding source and a draft release. Set `VERSION` and the matching changelog
+entry before tagging. Firmware is downloaded and verified during CI but never
+uploaded. See [CI and tagged releases](../docs/development.md#ci-and-tagged-releases).
 The combined package includes GPL/AGPL dependencies. Use Kobalt's
 [corresponding-source procedure](../docs/development.md#ci-and-tagged-releases)
 when distributing binaries; the SDK recipe and firmware requirements must stay

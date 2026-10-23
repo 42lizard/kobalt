@@ -1,133 +1,105 @@
-name: Build and release
+name: PocketBook build and release
 
 on:
   push:
-    branches: [main, develop]
-    tags: ['v*']
+    branches: [pocketbook-port]
+    tags: ['v*-pocketbook.*']
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: kobalt-${{ github.workflow }}-${{ github.ref }}
+  group: pocketbook-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   CONTAINER_ENGINE: docker
+  PYTHONUNBUFFERED: '1'
   KOBALT_RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
 
 jobs:
-  validation:
-    runs-on: ubuntu-24.04
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - id: version
-        run: echo "version=$(bash platforms/ci/version.sh)" >> "$GITHUB_OUTPUT"
-      - name: Check release helpers
-        run: bash platforms/ci/test.sh
-
-  build-kobo:
-    needs: validation
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [qt5, qt6]
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Build and verify package
-        env:
-          TARGET: ${{ matrix.target }}
-          KOBALT_RELEASE_VERSION: ${{ needs.validation.outputs.version }}
-        run: bash platforms/ci/build.sh "$TARGET"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: kobalt-${{ matrix.target }}
-          path: build/release/*
-          if-no-files-found: error
-          compression-level: 0
-
-  build-android:
-    needs: validation
+  build-pocketbook:
+    if: >-
+      github.ref == 'refs/heads/pocketbook-port' ||
+      (startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-pocketbook.'))
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - name: Decode release keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      - name: Check release tooling
         run: |
-          test -n "$KEYSTORE_BASE64" || { echo 'Missing ANDROID_KEYSTORE_BASE64'; exit 1; }
-          umask 077
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/kobalt-release.keystore"
-      - name: Build, sign and verify release APK
+          mkdir -p build
+          python3 -m unittest discover -s tests/tooling -p 'test_*release*.py'
+      - name: Validate release notes and source version
+        if: startsWith(github.ref, 'refs/tags/')
         env:
-          KOBALT_RELEASE_VERSION: ${{ needs.validation.outputs.version }}
-          KOBALT_ANDROID_VERSION_CODE: ${{ github.run_number }}
-          KOBALT_ANDROID_KEYSTORE: ${{ runner.temp }}/kobalt-release.keystore
-          KOBALT_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KOBALT_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KOBALT_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          KOBALT_ANDROID_CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
-        run: bash platforms/ci/build.sh android
-      - name: Remove keystore
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          test "$(cat VERSION)" = "$RELEASE_TAG"
+          python3 tools/draft_release.py --target pocketbook --notes-only --tag "$RELEASE_TAG" --repository "$RELEASE_REPOSITORY"
+      - uses: actions/cache@v6
+        with:
+          path: .cache/kobalt
+          key: pocketbook-sources-${{ runner.os }}-${{ hashFiles('dependencies/manifest.json') }}
+      - name: Download and verify official firmware
+        run: python3 tools/fetch_pocketbook_firmware.py
+      - name: Build and test PocketBook
+        shell: bash
+        run: |
+          set -o pipefail
+          ./build-pocketbook.sh --firmware "$PWD/build/firmware/SWUPDATE.BIN" --jobs 4 --test 2>&1 | tee build/pocketbook-build.log
+      - name: Restore ownership of container outputs
         if: always()
-        run: rm -f "$RUNNER_TEMP/kobalt-release.keystore"
+        run: sudo chown -R "$(id -u):$(id -g)" build .cache vendor
+      - name: Stage tested package
+        run: |
+          mkdir -p build/release
+          cp build/pocketbook/Kobalt-PB743K3.zip build/pocketbook/pocketbook.json build/release/
+      - name: Collect corresponding source and dependency archives
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python3 tools/release_sources.py --target pocketbook
       - uses: actions/upload-artifact@v7
         with:
-          name: kobalt-android
+          name: pocketbook-package
           path: build/release/*
           if-no-files-found: error
           compression-level: 0
-
-  archive-source:
-    needs: validation
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Assemble verified source bundle
-        env:
-          KOBALT_RELEASE_VERSION: ${{ needs.validation.outputs.version }}
-        run: bash platforms/ci/source-archive.sh
+          retention-days: 1
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
-          name: kobalt-source
-          path: build/release/*
-          if-no-files-found: error
-          compression-level: 0
+          name: pocketbook-tests
+          path: |
+            build/pocketbook-build.log
+            build/pocketbook/arm-runtime-test/*.png
+            build/pocketbook/host/app/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 1
 
   release-draft:
-    needs: [validation, build-kobo, build-android, archive-source]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: build-pocketbook
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
-          pattern: kobalt-*
-          merge-multiple: true
+          name: pocketbook-package
           path: build/release
-      - name: Create or update draft release
+      - name: Create or update PocketBook release draft
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          KOBALT_RELEASE_VERSION: ${{ needs.validation.outputs.version }}
-        run: bash platforms/ci/draft-release.sh
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: python3 tools/draft_release.py --target pocketbook --tag "$RELEASE_TAG" --repository "$RELEASE_REPOSITORY"
