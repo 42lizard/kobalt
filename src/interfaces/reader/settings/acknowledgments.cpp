@@ -128,24 +128,24 @@ Acknowledgments::Acknowledgments(QWidget *parent) : QFrame(parent) {
     back->setObjectName("rrAcknowledgmentsBack");
     back->setRule(Qt::RightEdge);
     back->setAccessibleName(strings::get("common.back"));
-    title = new QLabel(this);
+    title = new ui::InterfaceLabel(this);
     title->setObjectName("rrAcknowledgmentsTitle");
     title->setTextFormat(Qt::PlainText);
     ui::readerStyle(title, styles::brand(c::titleText) + "background:transparent;");
-    section = new QLabel(this);
+    section = new ui::InterfaceLabel(this);
     section->setObjectName("rrAcknowledgmentsSection");
     ui::captionLabel(section);
-    detail = new QLabel(this);
+    detail = new ui::InterfaceLabel(this);
     detail->setObjectName("rrAcknowledgmentsDetail");
     ui::captionLabel(detail);
     detail->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     // The GNU GPL and AGPL ask an interactive program to state its license and
     // that it has no warranty. The Kobalt entry below holds the license texts.
-    intro = new QLabel(
+    intro = new ui::InterfaceLabel(
         strings::get("acknowledgments.kobalt_is_distributed_under_the_gnu_agpl_v3_without_any_warranty") + ' ' +
             strings::get("acknowledgments.thanks_to_the_open_source_projects_that_make_this_reader_possible"),
         this);
-    description = new QLabel(this);
+    description = new ui::InterfaceLabel(this);
     description->setObjectName("rrLicenseDescription");
     for (auto *label : {intro, description}) {
         label->setWordWrap(true);
@@ -154,13 +154,13 @@ Acknowledgments::Acknowledgments(QWidget *parent) : QFrame(parent) {
     ui::readerStyle(intro,
                     styles::font(c::descriptionText) + "background:transparent;color:palette(placeholder-text);");
     ui::readerStyle(description, styles::font(c::labelText) + "background:transparent;");
-    version = new QLabel(this);
+    version = new ui::InterfaceLabel(this);
     version->setObjectName("rrLicenseVersion");
     ui::captionLabel(version);
-    license = new QLabel(this);
+    license = new ui::InterfaceLabel(this);
     license->setObjectName("rrLicenseName");
     ui::captionLabel(license);
-    url = new QLabel(this);
+    url = new ui::InterfaceLabel(this);
     url->setObjectName("rrLicenseUrl");
     url->setTextFormat(Qt::PlainText);
     ui::readerStyle(url, styles::caption(c::numberText));

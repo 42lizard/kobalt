@@ -14,9 +14,11 @@
 
 - Android remembers your reading speed across books and app sessions. Time estimates start with a rough pace, marked with `≈`, and adapt as you read.
 
+- Save passages with Annotate in the reading menu. Tap a start word, then another word and choose Highlight to here to save a passage across pages. Tap the start word again and choose Highlight word to save one word. Tap a saved highlight to adjust or delete it. Color displays offer yellow, green, blue, pink and gray. The Annotations tab beside Bookmarks lists saved passages for navigation or removal. Each annotation menu offers Stop highlighting; Minimal annotation mode in Controls hides the annotation bar.
+
 - Choose how to turn pages in Settings > Controls > Page navigation: swipes and taps, taps only, swipes only or hardware page turn buttons only on devices with page buttons. The middle tap zone always opens the menu. Controls sits below Display with a hand icon and also contains the frontlight gesture setting.
 
-- Choose Left / right, Top / bottom or One-handed in Settings > Controls > Tap zones. One-handed taps turn forward and swipes turn either way. The center zone always opens the menu. Settings options now have section headings.
+- Choose Left / right, Reversed, Top / bottom or One-handed in Settings > Controls > Tap zones. Reversed taps go forward on the left and back on the right. One-handed taps turn forward and swipes turn either way. The center zone always opens the menu. Settings options now have section headings.
 
 - Follow Kobo warmth schedule in the Light panel uses the bedtime set in Kobo settings. It keeps Kobo's automatic warmth setting on first open. Manual warmth adjustments turn it off; check it again to resume the schedule.
 
@@ -31,6 +33,10 @@
 - After jumping to a bookmark, "Return to page" is now offered to take you back to where you came from when you navigated to the bookmark.
 
 ### What's fixed
+
+- The cover sleep screen uses black borders in both light and dark mode.
+
+- On Kobo, opening a book upside down avoids turning upright first. Sleep and wake keep the reading orientation on the same axis, and enabling Both uses the latest sensor reading. Closing a book gives Kobo the current sensor reading before Home repaints, so Home follows the held orientation without another movement. Closing a sleeping book still restores Kobo's opening orientation. Rotation freezes as soon as sleep is requested and ignores sensor changes until wake.
 
 - Inherited paragraph indentation no longer reverses at some text sizes.
 

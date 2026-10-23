@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/icons.h"
 #include "interfaces/reader/ui/controls/paging.h"
@@ -126,6 +127,19 @@ void LinkPanel::refresh() {
     pages->setPage(text->page(), text->pages());
 }
 
+namespace {
+class WebsiteAddressScrollArea final : public QScrollArea {
+public:
+    explicit WebsiteAddressScrollArea(QWidget *parent) : QScrollArea(parent) {}
+
+    QSize minimumSizeHint() const override {
+        // The dialog supplies the viewport size. Keep native scrollbar hints
+        // out of the card's minimum-size calculation.
+        return QSize(0, 0);
+    }
+};
+}
+
 WebsiteDialog::WebsiteDialog(QWidget *parent)
     : ui::ChoiceModal(parent, {" ", strings::get("link_panel.browser_confirmation"), {}},
                       {strings::get("common.cancel"), "rrLinkNo"},
@@ -138,7 +152,7 @@ WebsiteDialog::WebsiteDialog(QWidget *parent)
     content->rows()->removeWidget(address);
     address->setMinimumHeight(0);
     address->setMaximumHeight(QWIDGETSIZE_MAX);
-    scroll = new QScrollArea(content);
+    scroll = new WebsiteAddressScrollArea(content);
     scroll->setObjectName("rrBrowserUrlScroll");
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
@@ -150,7 +164,7 @@ WebsiteDialog::WebsiteDialog(QWidget *parent)
     ui::readerStyle(address, ui::styles::font(c::descriptionText));
     scroll->setWidget(address);
     content->rows()->insertWidget(1, scroll);
-    error = new QLabel(strings::get("link_panel.browser_unavailable"), content);
+    error = new ui::InterfaceLabel(strings::get("link_panel.browser_unavailable"), content);
     error->setObjectName("rrBrowserError");
     error->setWordWrap(true);
     error->setAlignment(Qt::AlignCenter);

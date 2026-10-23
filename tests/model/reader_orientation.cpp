@@ -1,4 +1,5 @@
 #include "platform/api/reader_orientation.h"
+#include "orientation_sensor.h"
 
 #include <QCoreApplication>
 #include <QEventLoop>
@@ -11,26 +12,8 @@
 
 using namespace kobalt;
 namespace {
-class Backend : public QSensorBackend {
-public:
-    QOrientationReading reading;
-    explicit Backend(QSensor *sensor) : QSensorBackend(sensor) {
-        setReading(&reading);
-    }
-    void start() override {}
-    void stop() override {}
-    void sample(QOrientationReading::Orientation value) {
-        reading.setOrientation(value);
-        newReadingAvailable();
-    }
-};
-class Factory : public QSensorBackendFactory {
-public:
-    Backend *backend = nullptr;
-    QSensorBackend *createBackend(QSensor *sensor) override {
-        return backend = new Backend(sensor);
-    }
-};
+using test::Backend;
+using test::Factory;
 void require(bool condition, const char *message) {
     if (!condition) {
         std::fprintf(stderr, "%s\n", message);
@@ -42,6 +25,255 @@ void settle() {
     QTimer::singleShot(300, &loop, &QEventLoop::quit);
     loop.exec();
 }
+class Fixture {
+public:
+    QOrientationSensor sensor;
+    QList<Qt::ScreenOrientation> turns;
+    QList<bool> ownership;
+    ReaderOrientation rotation{&sensor,
+                               [this](Qt::ScreenOrientation value) {
+                                   turns.append(value);
+                               },
+                               [this](bool owned) {
+                                   ownership.append(owned);
+                               }};
+    Backend *backend;
+    explicit Fixture(Factory &factory, bool borrowed = true) {
+        sensor.setIdentifier("kobalt-lock-test");
+        require(sensor.connectToBackend(), "Connect test sensor");
+        backend = factory.backend;
+        if (borrowed) {
+            require(sensor.start(), "Start borrowed sensor");
+        }
+    }
+    void sample(QOrientationReading::Orientation value) {
+        backend->sample(value);
+        settle();
+    }
+};
+void checkSleepRequest(Factory &factory) {
+    Fixture f(factory);
+    f.backend->sample(QOrientationReading::TopUp);
+    f.rotation.start(Qt::PortraitOrientation);
+    f.backend->sample(QOrientationReading::TopDown);
+    f.rotation.freeze();
+    settle();
+    require(f.turns == QList<Qt::ScreenOrientation>{Qt::PortraitOrientation}, "Sleep request cancels pending rotation");
+    f.sample(QOrientationReading::TopDown);
+    require(f.turns.size() == 1, "Sleep request ignores samples before the sleep view is ready");
+    f.rotation.stop(true);
+    f.sample(QOrientationReading::TopDown);
+    require(f.sensor.reading()->orientation() == QOrientationReading::TopUp,
+            "Sleep does not leak sensor samples to Nickel");
+    f.rotation.start(Qt::PortraitOrientation);
+    settle();
+    require(f.turns.last() == Qt::PortraitOrientation, "Wake ignores samples received during sleep");
+    f.sample(QOrientationReading::TopDown);
+    require(f.turns.last() == Qt::InvertedPortraitOrientation, "Fresh awake samples resume rotation");
+    f.rotation.stop();
+    f.sample(QOrientationReading::TopDown);
+    require(f.sensor.reading()->orientation() == QOrientationReading::TopDown,
+            "Final close releases the sensor filter");
+}
+void checkNativeHandoff(Factory &factory) {
+    Fixture f(factory);
+    f.backend->sample(QOrientationReading::TopUp);
+    auto nativeShown = Qt::PortraitOrientation;
+    int nativeNotifications = 0;
+    QObject::connect(&f.sensor, &QSensor::readingChanged, [&] {
+        ++nativeNotifications;
+        const auto reading = f.sensor.reading()->orientation();
+        if (reading == QOrientationReading::TopUp) {
+            nativeShown = Qt::PortraitOrientation;
+        } else if (reading == QOrientationReading::TopDown) {
+            nativeShown = Qt::InvertedPortraitOrientation;
+        }
+    });
+    f.rotation.start(Qt::PortraitOrientation);
+    f.sample(QOrientationReading::TopDown);
+    require(nativeNotifications == 0, "Reader does not notify native rotation while active");
+    f.rotation.stop();
+    require(nativeNotifications == 1 && nativeShown == Qt::InvertedPortraitOrientation,
+            "Close gives native rotation the current reading without another movement");
+    require(f.sensor.reading()->timestamp() == f.backend->reading.timestamp(), "Native handoff keeps sample timestamp");
+    f.rotation.stop();
+    require(nativeNotifications == 1, "Repeated close does not repeat the native notification");
+    f.backend->sample(QOrientationReading::TopUp);
+    require(nativeNotifications == 2 && nativeShown == Qt::PortraitOrientation,
+            "Native rotation continues after handoff");
+    f.rotation.start(Qt::PortraitOrientation);
+    f.sample(QOrientationReading::TopDown);
+    f.rotation.freeze();
+    f.rotation.stop(true);
+    const auto count = nativeNotifications;
+    f.rotation.stop();
+    require(nativeNotifications == count, "Closing asleep does not replay a sensor turn into the sleep screen");
+}
+void checkOpening(Factory &factory) {
+    for (const auto lock : {Qt::PortraitOrientation, Qt::LandscapeOrientation}) {
+        const auto inverted = Qt::ScreenOrientation(int(lock) * 4);
+        const auto reading =
+            lock == Qt::PortraitOrientation ? QOrientationReading::TopDown : QOrientationReading::RightUp;
+        Fixture f(factory);
+        f.rotation.configure({{"orientation", int(lock)}});
+        f.backend->sample(reading);
+        f.rotation.start(inverted);
+        settle();
+        require(f.turns == QList<Qt::ScreenOrientation>{inverted}, "Opening inverted does not turn away and back");
+        f.rotation.stop();
+        f.backend->sample(QOrientationReading::Undefined);
+        f.turns.clear();
+        f.rotation.start(inverted);
+        settle();
+        require(f.turns == QList<Qt::ScreenOrientation>{inverted},
+                "Undefined sensor keeps permitted shown orientation");
+    }
+    Fixture f(factory);
+    f.rotation.configure({});
+    f.backend->sample(QOrientationReading::LeftUp);
+    f.rotation.start(Qt::LandscapeOrientation);
+    settle();
+    require(f.turns == QList<Qt::ScreenOrientation>{Qt::PortraitOrientation}, "Opening obeys the portrait lock");
+}
+void checkSleepLifecycle(Factory &factory) {
+    for (const bool borrowed : {false, true}) {
+        for (const auto opening : {Qt::PortraitOrientation, Qt::InvertedPortraitOrientation, Qt::LandscapeOrientation,
+                                   Qt::InvertedLandscapeOrientation}) {
+            const bool portrait = opening == Qt::PortraitOrientation || opening == Qt::InvertedPortraitOrientation;
+            const auto opposite = Qt::ScreenOrientation(int(opening) < 4 ? int(opening) * 4 : int(opening) / 4);
+            const auto sample = opposite == Qt::PortraitOrientation           ? QOrientationReading::TopUp
+                                : opposite == Qt::InvertedPortraitOrientation ? QOrientationReading::TopDown
+                                : opposite == Qt::LandscapeOrientation        ? QOrientationReading::LeftUp
+                                                                              : QOrientationReading::RightUp;
+            Fixture f(factory, borrowed);
+            f.rotation.configure({{"orientation", int(portrait ? Qt::PortraitOrientation : Qt::LandscapeOrientation)}});
+            f.rotation.start(opening);
+            f.sample(sample);
+            for (int cycle = 0; cycle < 2; ++cycle) {
+                f.turns.clear();
+                f.rotation.stop(true);
+                f.rotation.stop(true);
+                require(f.turns.isEmpty(), "Repeated sleep handoff keeps the same-axis orientation");
+                require(f.sensor.isActive() == borrowed, "Sleep stops only a reader-started sensor");
+                f.rotation.start(Qt::PortraitOrientation);
+                settle();
+                require(f.turns == QList<Qt::ScreenOrientation>{opposite},
+                        "Wake keeps orientation without a new sample");
+            }
+            f.turns.clear();
+            f.rotation.stop();
+            f.rotation.stop();
+            require(f.turns == QList<Qt::ScreenOrientation>{opening}, "Closing after repeated wake restores opening");
+            require(f.ownership == QList<bool>{true, false, true, false, true, false},
+                    "Ownership follows active intervals");
+        }
+    }
+    Fixture f(factory);
+    f.rotation.start(Qt::PortraitOrientation);
+    f.sample(QOrientationReading::TopDown);
+    f.rotation.stop(true);
+    f.turns.clear();
+    f.rotation.stop();
+    f.rotation.stop();
+    require(f.turns == QList<Qt::ScreenOrientation>{Qt::PortraitOrientation},
+            "Closing while asleep restores opening once");
+    f.rotation.start(Qt::LandscapeOrientation);
+    f.rotation.stop();
+    require(f.turns.last() == Qt::LandscapeOrientation, "A new book captures its own opening orientation");
+    f.rotation.configure({{"auto_rotate", true}});
+    f.rotation.start(Qt::PortraitOrientation);
+    f.sample(QOrientationReading::LeftUp);
+    f.turns.clear();
+    f.rotation.stop(true);
+    require(f.turns == QList<Qt::ScreenOrientation>{Qt::PortraitOrientation},
+            "Quarter-turn sleep restores native geometry");
+    f.rotation.start(Qt::PortraitOrientation);
+    settle();
+    f.rotation.stop();
+    require(f.turns.last() == Qt::PortraitOrientation, "Quarter-turn sleep keeps the original restoration target");
+    f.backend->sample(QOrientationReading::LeftUp);
+    f.rotation.start(Qt::LandscapeOrientation);
+    f.sample(QOrientationReading::TopUp);
+    f.rotation.stop(true);
+    f.turns.clear();
+    f.rotation.start(Qt::PortraitOrientation);
+    settle();
+    f.rotation.stop();
+    require(f.turns == QList<Qt::ScreenOrientation>{Qt::LandscapeOrientation, Qt::LandscapeOrientation},
+            "Quarter-turn sleep and wake retain a landscape opening orientation");
+    QList<Qt::ScreenOrientation> turns;
+    {
+        QOrientationSensor sensor;
+        sensor.setIdentifier("kobalt-lock-test");
+        ReaderOrientation rotation(&sensor, [&](Qt::ScreenOrientation value) {
+            turns.append(value);
+        });
+        rotation.start(Qt::PortraitOrientation);
+        factory.backend->sample(QOrientationReading::TopDown);
+        settle();
+        rotation.stop(true);
+        turns.clear();
+    }
+    require(turns == QList<Qt::ScreenOrientation>{Qt::PortraitOrientation},
+            "Destruction while asleep restores opening");
+}
+void checkPendingReadingAtSleep(Factory &factory) {
+    Fixture f(factory);
+    f.backend->sample(QOrientationReading::TopUp);
+    f.rotation.start(Qt::PortraitOrientation);
+    f.rotation.setBlocked(true);
+    f.backend->sample(QOrientationReading::TopDown);
+    f.rotation.stop(true);
+    f.turns.clear();
+    f.rotation.start(Qt::PortraitOrientation);
+    f.rotation.setBlocked(false);
+    settle();
+    require(f.turns == QList<Qt::ScreenOrientation>{Qt::PortraitOrientation},
+            "Wake does not deliver a turn cancelled by sleep");
+    f.turns.clear();
+    f.rotation.setAutomatic(true);
+    settle();
+    require(f.turns.isEmpty(), "Enabling Auto after wake does not replay a turn cancelled by sleep");
+}
+
+void checkLatestReading(Factory &factory) {
+    Fixture f(factory);
+    f.backend->sample(QOrientationReading::TopUp);
+    f.rotation.start(Qt::PortraitOrientation);
+    f.sample(QOrientationReading::TopDown);
+    require(f.sensor.reading()->orientation() == QOrientationReading::TopUp,
+            "Rejected samples leave sensor cache stale");
+    f.rotation.stop(true);
+    f.backend->sample(QOrientationReading::TopUp);
+    f.turns.clear();
+    f.rotation.start(Qt::PortraitOrientation);
+    settle();
+    require(f.turns == QList<Qt::ScreenOrientation>{Qt::InvertedPortraitOrientation}, "Wake ignores sleep samples");
+    f.sample(QOrientationReading::TopUp);
+    require(f.turns.last() == Qt::PortraitOrientation, "Wake follows a fresh awake sample");
+    f.sample(QOrientationReading::TopDown);
+    f.rotation.stop(true);
+    f.backend->sample(QOrientationReading::LeftUp);
+    f.turns.clear();
+    f.rotation.start(Qt::PortraitOrientation);
+    settle();
+    require(f.turns == QList<Qt::ScreenOrientation>{Qt::InvertedPortraitOrientation},
+            "Wake rejects a fresh sample outside lock");
+    f.sample(QOrientationReading::LeftUp);
+    f.turns.clear();
+    f.rotation.setAutomatic(true);
+    settle();
+    require(f.turns == QList<Qt::ScreenOrientation>{Qt::LandscapeOrientation},
+            "Auto follows the latest rejected sample");
+    f.rotation.setAutomatic(false);
+    f.sample(QOrientationReading::RightUp);
+    f.sample(QOrientationReading::FaceUp);
+    f.turns.clear();
+    f.rotation.setAutomatic(true);
+    settle();
+    require(f.turns.isEmpty(), "Flat latest sample cancels an older direction when Auto is enabled");
+}
+
 }
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
@@ -95,5 +327,11 @@ int main(int argc, char **argv) {
     ReaderOrientation manual(nullptr, [](Qt::ScreenOrientation) {});
     manual.configure({{"orientation", int(Qt::InvertedLandscapeOrientation)}});
     require(manual.manual() == Qt::InvertedLandscapeOrientation, "Sensorless manual preference preserved");
-    std::puts("PASS: sensor locks, migration, flat readings, debounce and blocked delivery");
+    checkSleepRequest(factory);
+    checkNativeHandoff(factory);
+    checkOpening(factory);
+    checkSleepLifecycle(factory);
+    checkLatestReading(factory);
+    checkPendingReadingAtSleep(factory);
+    std::puts("PASS: sensor locks, opening, sleep/wake/close lifecycle, latest readings and sensor ownership");
 }

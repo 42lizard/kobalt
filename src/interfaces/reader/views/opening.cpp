@@ -46,10 +46,10 @@ public:
         setFont(ui::interfaceFont());
         // The card stylesheet otherwise uses the application font on Qt 6.
         ui::readerStyle(this, ui::styles::reader());
-        brand = new QLabel(strings::get("app.wordmark"), this);
+        brand = new ui::InterfaceLabel(strings::get("app.wordmark"), this);
         brand->setObjectName("rrOpeningBrand");
         brand->setAlignment(Qt::AlignCenter);
-        label = new QLabel(strings::get("opening.loading"), this);
+        label = new ui::InterfaceLabel(strings::get("opening.loading"), this);
         label->setObjectName("rrOpeningLabel");
         label->setAlignment(Qt::AlignCenter);
         progress = new QProgressBar(this);
@@ -62,7 +62,7 @@ public:
             "QProgressBar{border:0;padding:0;margin:0;min-height:0;background:palette(midlight);} QProgressBar::chunk{background:palette(window-text);}");
         // Font capitalization does not reach this dialog's labels, so set the
         // caption's capitals in the text itself.
-        hint = new QLabel(QLocale().toUpper(strings::get("opening.may_take_a_while")), this);
+        hint = new ui::InterfaceLabel(QLocale().toUpper(strings::get("opening.may_take_a_while")), this);
         hint->setObjectName("rrOpeningHint");
         hint->setAlignment(Qt::AlignCenter);
         hint->hide();
@@ -77,7 +77,7 @@ public:
         cancel->setAccessibleName(strings::get("common.cancel"));
         cancel->setVisible(!embedded);
         connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
-        detail = new QLabel(this);
+        detail = new ui::InterfaceLabel(this);
         detail->setObjectName("rrOpeningDetail");
         detail->setAlignment(Qt::AlignCenter);
         detail->setWordWrap(true);

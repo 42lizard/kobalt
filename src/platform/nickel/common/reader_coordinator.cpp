@@ -98,7 +98,9 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
         homeAfterClose = false;
         authorization->setBlocked(true);
         timer.stop();
-        if (run.reader) {
+        if (busy) {
+            disposeForTransition([] {});
+        } else if (run.reader) {
             // The browser owns the screen while this reader is already
             // hidden. Keep its saved position without creating a sleep cover.
             if (BrowserHandoff::activeFor(run.reader))
@@ -109,20 +111,24 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
             disposeForTransition([] {});
     };
     lifecycle->sleepViewReady = [this] {
-        if (run.reader)
+        if (run.reader && !busy) {
             run.reader->sleepViewReady();
+        }
     };
     lifecycle->beforeWake = [this] {
-        if (run.reader)
+        if (run.reader && !busy) {
             run.reader->prepareWake();
+        }
     };
     lifecycle->cancelWake = [this] {
-        if (run.reader)
+        if (run.reader && !busy) {
             run.reader->cancelWake();
+        }
     };
     lifecycle->wake = [this] {
-        if (lifecycle->draining)
+        if (lifecycle->draining || busy) {
             return;
+        }
         authorization->setBlocked(false);
         timer.start();
         if (run.reader || run.model) {
@@ -155,7 +161,7 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
         authorization->setBlocked(true);
         timer.stop();
         prepareUsbTransition(
-            run.reader, cleanupCallbacks,
+            busy ? nullptr : run.reader.data(), cleanupCallbacks,
             [this] {
                 kobalt::diagnostic("usb-release-start");
                 disposeForTransition([] {});
@@ -172,7 +178,7 @@ ReaderCoordinator::ReaderCoordinator(ReaderEnvironment &environment, Coordinator
         // Revocation can dispose the reader while its bookmark is being
         // exported. Keep the shutdown continuation with the shared drain.
         cleanupCallbacks.append(std::move(ready));
-        if (run.reader)
+        if (run.reader && !busy)
             run.reader->prepareShutdown([this] {
                 disposeForTransition([] {});
             });
@@ -531,6 +537,12 @@ void ReaderCoordinator::release(bool endAuthorization) {
 }
 
 void ReaderCoordinator::cancelOpening() {
+    if (run.reader && busy) {
+        disposeForTransition([this] {
+            status("cancelled");
+        });
+        return;
+    }
     release();
     status("cancelled");
 }
@@ -605,7 +617,7 @@ void ReaderCoordinator::poll() {
 #endif
     if (lifecycle->blocked() || lifecycle->draining)
         return;
-    if (run.reader) {
+    if (run.reader && !busy) {
         const bool hide = kobalt::NativeLifecycle::suspended();
         if (hide && run.reader->isVisible())
             run.reader->sleepReader();
@@ -711,7 +723,6 @@ void ReaderCoordinator::showReader() {
         return;
     }
     run.opening.reset();
-    busy = false;
     auto book = std::make_unique<kobalt::ReadingBook>(
         std::move(run.model), run.statePath, environment_.paths, run.identity, run.expectedHash,
         kobalt::nickel::makeReadingBridge(run.identity, std::move(run.nativeProgress)), run.baseline, run.diskBaseline);
@@ -765,17 +776,32 @@ void ReaderCoordinator::showReader() {
             });
         });
     };
-    run.reader->showFullScreen();
-    // Showing the window paints it synchronously but also defers widget
-    // updates. Finish those before removing the loader so its exposure
-    // and the completed reading page share one compositor submission.
-    for (auto *widget : run.reader->findChildren<QWidget *>())
-        QCoreApplication::sendPostedEvents(widget, QEvent::UpdateLater);
-    QCoreApplication::sendPostedEvents(run.reader, QEvent::UpdateLater);
-    QCoreApplication::sendPostedEvents(run.reader, QEvent::UpdateRequest);
-    hideLoading();
-    run.openingTimings["total_ms"] = run.openingTimer.elapsed();
-    status("reading");
+    const auto epoch = generation;
+    QPointer<ReaderCoordinator> guard(this);
+    QPointer<ReaderWindow> reader(run.reader);
+    const auto lease = run.sourceLease;
+    reader->preparePresentation([guard, reader, epoch, lease](bool ready) {
+        if (!guard || !reader || guard->generation != epoch || guard->run.reader != reader ||
+            guard->run.sourceLease != lease) {
+            return;
+        }
+        if (!ready || guard->lifecycle->blocked() || kobalt::NativeLifecycle::suspended() || !lease ||
+            lease->revoked() || !guard->sameBook()) {
+            guard->disposeForTransition([] {});
+            return;
+        }
+        guard->busy = false;
+        reader->showFullScreen();
+        // Finish deferred widget paints before removing the opening view.
+        for (auto *widget : reader->findChildren<QWidget *>()) {
+            QCoreApplication::sendPostedEvents(widget, QEvent::UpdateLater);
+        }
+        QCoreApplication::sendPostedEvents(reader, QEvent::UpdateLater);
+        QCoreApplication::sendPostedEvents(reader, QEvent::UpdateRequest);
+        guard->hideLoading();
+        guard->run.openingTimings["total_ms"] = guard->run.openingTimer.elapsed();
+        guard->status("reading");
+    });
 }
 
 ReaderCoordinator::~ReaderCoordinator() = default;

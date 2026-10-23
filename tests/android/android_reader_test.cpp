@@ -1,4 +1,7 @@
 #include "platform/android/reader.h"
+#include "platform/android/canvas.h"
+#include "platform/android/refresh.h"
+#include <QDynamicPropertyChangeEvent>
 #include "host_services.h"
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
@@ -6,6 +9,9 @@
 #include "interfaces/reader/views/reading_page.h"
 #include "reading/reading_density.h"
 #include "storage/reader_storage.h"
+#include "storage/highlight_store.h"
+#include "engine/crengine/engine_activity.h"
+#include "engine/crengine/reader_model.h"
 #include "support/strings.h"
 
 #include <QLabel>
@@ -21,6 +27,17 @@
 #include <QPushButton>
 
 using namespace kobalt;
+class RefreshFlagTrace final : public QObject {
+public:
+    QStringList changes;
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() == QEvent::DynamicPropertyChange &&
+            static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName() == "boox_text_frame") {
+            changes.append(object->property("boox_text_frame").toBool() ? "text" : "ordinary");
+        }
+        return false;
+    }
+};
 class AndroidReaderTest : public QObject {
     Q_OBJECT
     std::unique_ptr<AssetBundle> assets;
@@ -31,6 +48,7 @@ class AndroidReaderTest : public QObject {
     QString placeholder;
     storage::Paths paths;
     bool suspended = false;
+    bool holdPresentation = false;
     QString fixture(const char *name = "text.epub") const {
         return QString::fromUtf8(qgetenv("KOBALT_FIXTURES")) + '/' + QString::fromLatin1(name);
     }
@@ -51,9 +69,13 @@ private slots:
         paths = storage::Paths{temporary->path() + "/config"};
         paths.stateReport = temporary->path() + "/state.json";
         suspended = false;
+        holdPresentation = false;
         reader = std::make_unique<android::ReaderController>(
             paths, fonts, placeholder,
             [this] {
+                if (holdPresentation) {
+                    engineActivity().pause(true);
+                }
                 auto services = test::hostReaderServices();
                 services.suspended = [this] {
                     return suspended;
@@ -63,6 +85,7 @@ private slots:
             [](Qt::ScreenOrientation) {});
     }
     void cleanup() {
+        engineActivity().pause(false);
         reader->close();
         QTRY_VERIFY_WITH_TIMEOUT(reader->idle(), 15000);
         reader.reset();
@@ -91,6 +114,66 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 15000);
         reader->window()->checkpoint();
         QCOMPARE(storage::readJson(paths.bookState(identity)).value("position"), saved.value("position"));
+    }
+    void savedPresentationCanBeRetiredWhilePending_data() {
+        QTest::addColumn<bool>("replace");
+        QTest::newRow("close") << false;
+        QTest::newRow("replace") << true;
+    }
+    void savedPresentationCanBeRetiredWhilePending() {
+        QFETCH(bool, replace);
+        QSignalSpy opened(reader.get(), &android::ReaderController::opened);
+        reader->open(fixture(), {1264, 1680});
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 15000);
+        reader->window()->checkpoint();
+        const auto identity = QUrl::fromLocalFile(fixture()).toString();
+        const auto state = storage::readJson(paths.bookState(identity));
+        const auto fingerprint = state.value("fingerprint").toString().toLatin1();
+        QVERIFY(!fingerprint.isEmpty());
+        HighlightStore store(paths.annotations(), identity, fingerprint, "fixture");
+        QVERIFY(store.load());
+        QFile source(fixture());
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        ReaderModel model(fonts);
+        QString error;
+        QVERIFY2(model.open(source.readAll(), {1264, 1680}, {}, &error), qPrintable(error));
+        WordSelection word;
+        for (int y = 0; y < 600 && word.text.isEmpty(); y += 10) {
+            for (int x = 0; x < 1264 && word.text.isEmpty(); x += 12) {
+                word = model.wordAt({x, y});
+            }
+        }
+        QVERIFY(!word.text.isEmpty());
+        store.setHighlights({{"pending", word.start, word.end, word.text, {}, QDateTime::currentDateTimeUtc()}});
+        QVERIFY(store.save());
+        reader->close();
+        QTRY_VERIFY_WITH_TIMEOUT(reader->idle(), 15000);
+        holdPresentation = true;
+        struct Resume {
+            ~Resume() {
+                engineActivity().pause(false);
+            }
+        } resume;
+        reader->open(fixture(), {1264, 1680});
+        QTRY_VERIFY_WITH_TIMEOUT(reader->window(), 15000);
+        QPointer<ReaderWindow> pending(reader->window());
+        QCOMPARE(opened.count(), 1);
+        QVERIFY(!pending->isVisible());
+        holdPresentation = false;
+        if (replace) {
+            reader->open(fixture("word-counts.epub"), {1264, 1680});
+        } else {
+            reader->close();
+        }
+        engineActivity().pause(false);
+        QTRY_VERIFY_WITH_TIMEOUT(!pending, 15000);
+        if (replace) {
+            QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 15000);
+            QCOMPARE(reader->path(), fixture("word-counts.epub"));
+        } else {
+            QTRY_VERIFY_WITH_TIMEOUT(reader->idle(), 15000);
+            QCOMPARE(opened.count(), 1);
+        }
     }
     void statsUsesSharedCountAfterReopening() {
         QSignalSpy opened(reader.get(), &android::ReaderController::opened);
@@ -151,6 +234,7 @@ private slots:
         QTest::qWait(80);
         QCOMPARE(readingTime(), paused);
         suspended = false;
+        holdPresentation = false;
         qApp->applicationStateChanged(Qt::ApplicationActive);
         const auto resumed = readingTime();
         QTest::qSleep(80);
@@ -173,10 +257,76 @@ private slots:
         window->checkpoint();
         QCOMPARE(storage::readJson(paths.stateReport).value("session_reading_ms").toDouble(-1), 0.0);
         suspended = false;
+        holdPresentation = false;
         qApp->applicationStateChanged(Qt::ApplicationActive);
         QTest::qSleep(80);
         window->checkpoint();
         QVERIFY(storage::readJson(paths.stateReport).value("session_reading_ms").toDouble() > 0);
+    }
+    void pageButtonRetainsTextRefreshUntilCanvasDelivery() {
+        QVERIFY(QDir().mkpath(paths.directory));
+        QVERIFY(storage::writeJson(paths.preferences(), {{"screen_refresh", "manual"}}));
+        QSignalSpy opened(reader.get(), &android::ReaderController::opened);
+        reader->open(fixture(), {1264, 1680});
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 15000);
+        QPointer<ReaderWindow> window(reader->window());
+        QVERIFY(window);
+        android::WidgetCanvas canvas(nullptr);
+        canvas.resize(1264, 1680);
+        canvas.setContent(window);
+        struct Detach {
+            QPointer<ReaderWindow> window;
+            ~Detach() {
+                if (window && window->graphicsProxyWidget())
+                    window->graphicsProxyWidget()->setWidget(nullptr);
+            }
+        } detach{window};
+        canvas.fitContent();
+        window->show();
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(window->readyForPresentation());
+        auto *page = window->findChild<ReadingPage *>("rrPage");
+        QVERIFY(page);
+        QTRY_VERIFY(!page->image.isNull());
+        QCOMPARE(page->image.text("kobalt.animation_text_only"), QString("true"));
+        QTest::qWait(100);
+        RefreshFlagTrace trace;
+        window->installEventFilter(&trace);
+        QVector<android::RefreshFrame> frames;
+        QStringList phases;
+        canvas.framePreparing = [&](const QRegion &damage) {
+            phases.append("metadata");
+            android::prepareRefreshFrame(window, canvas.viewport(), damage, [&](const android::RefreshFrame &frame) {
+                frames.append(frame);
+                return true;
+            });
+        };
+        canvas.framePainted = [&](const QRegion &) {
+            phases.append("painted");
+        };
+        for (int turn = 0; turn < 3; ++turn) {
+            frames.clear();
+            trace.changes.clear();
+            phases.clear();
+            const auto before = page->image.cacheKey();
+            window->pageButton(1);
+            QTRY_VERIFY(page->image.cacheKey() != before);
+            QTest::qWait(100);
+            bool deliveredText = false;
+            for (const auto &frame : frames)
+                deliveredText = deliveredText || frame.text;
+            QVERIFY2(deliveredText, qPrintable("Flag sequence: " + trace.changes.join(", ")));
+            QVERIFY(!phases.isEmpty());
+            QCOMPARE(phases.size() % 2, 0);
+            for (int i = 0; i < phases.size(); i += 2) {
+                QCOMPARE(phases[i], QString("metadata"));
+                QCOMPARE(phases[i + 1], QString("painted"));
+            }
+        }
+        canvas.framePreparing = {};
+        canvas.framePainted = {};
+        QCoreApplication::processEvents();
     }
     void logicalPageButtonsKeepRtlOrderAndInputGuards() {
         QSignalSpy opened(reader.get(), &android::ReaderController::opened);

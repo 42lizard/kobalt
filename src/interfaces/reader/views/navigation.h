@@ -25,24 +25,24 @@ class PageScrubber;
 struct ToolbarComposition {
     ui::Panel *panel = nullptr;
     QLayout *rows = nullptr;
-    QPushButton *exitAction = nullptr, *settings = nullptr, *bookmarks = nullptr;
+    QPushButton *exitAction = nullptr, *settings = nullptr, *bookmarks = nullptr, *annotate = nullptr;
     QLabel *clock = nullptr, *session = nullptr, *battery = nullptr;
     ui::BluetoothIndicator *bluetooth = nullptr;
     QPushButton *formattingWarning = nullptr;
+    QPushButton *search = nullptr;
 };
-enum class NavigationDestination { Chapters, Text, Layout, Light, Stats, Search };
+enum class NavigationDestination { Chapters, Seek, Text, Layout, Light, Stats, Search };
 struct NavigationState {
     QWidget *footer, *appearance, *stats, *chapters;
     bool chaptersOpen, visible, enabled, lightAvailable;
     int active;
     QString returnLabel;
-    QString pageCount;
     QVector<QWidget *> topActions;
     QWidget *settings, *light;
-    // Stats stays open above the tabs whenever the controls are, and has no tab.
-    bool statsPinned = false;
     QString returnNote;
     bool scrubberVisible = true;
+    int defaultView = -1;
+    bool hideTabLabels = false;
 };
 }
 
@@ -57,8 +57,9 @@ public:
     void setPanelOpen(bool open);
     void setTextFace(const QString &face);
     void setReturnLabel(const QString &label, const QString &note);
-    void setStatsTab(bool shown);
     void setLightTab(bool shown);
+    void setDefaultView(int destination);
+    void setLabelsHidden(bool hidden);
     std::function<void()> returnRequested;
     std::function<void()> stayRequested;
     int navigationHeight() const;
@@ -118,14 +119,17 @@ private:
     ui::PageScrubber *scrubber = nullptr;
     bool statusVisible = true;
     BottomNavigation *bar;
-    QLabel *pageCount;
     ui::Panel *toolbar;
     QLayout *toolbarRows;
-    QWidget *exitAction, *rules, *settings, *bookmarks, *upperEdge, *lowerEdge;
+    QWidget *exitAction, *rules, *settings, *bookmarks, *annotate, *upperEdge, *lowerEdge;
     QLabel *clock, *session, *battery;
     ui::BluetoothIndicator *bluetooth;
     QPushButton *formattingWarning;
-    QString sessionStyle, settingsStyle, bookmarksStyle, formattingWarningStyle;
+    QPushButton *search;
+    QString searchStyle;
+    ui::ButtonPaintMode searchPaint = ui::ButtonPaintMode::Native;
+    QString sessionStyle, settingsStyle, bookmarksStyle, annotateStyle, formattingWarningStyle;
+    ui::ButtonPaintMode annotatePaint = ui::ButtonPaintMode::Native;
     ui::ButtonPaintMode settingsPaint = ui::ButtonPaintMode::Native, bookmarksPaint = ui::ButtonPaintMode::Native,
                         formattingWarningPaint = ui::ButtonPaintMode::Native;
 };

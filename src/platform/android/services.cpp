@@ -1,5 +1,6 @@
 #include "services.h"
 #include "runtime.h"
+#include "light.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include <QGuiApplication>
 #include <QDesktopServices>
@@ -10,52 +11,6 @@
 
 namespace kobalt::android {
 namespace {
-class Light final : public LightControls {
-public:
-    bool initialize() override {
-        return false;
-    }
-    bool hasWarmth() const override {
-        return false;
-    }
-    int warmth() const override {
-        return 0;
-    }
-    int warmthMinimum() const override {
-        return 0;
-    }
-    int warmthMaximum() const override {
-        return 0;
-    }
-    int warmthStep() const override {
-        return 1;
-    }
-    bool automaticWarmth() const override {
-        return false;
-    }
-    int setWarmth(int) override {
-        return 0;
-    }
-    bool saveWarmth() override {
-        return false;
-    }
-    bool setAutomaticWarmth(bool) override {
-        return false;
-    }
-    bool beginGesture() override {
-        return false;
-    }
-    int setGestureLevel(int) override {
-        return 0;
-    }
-    void finishGesture(bool) override {}
-    int brightness() const override {
-        return 0;
-    }
-    bool gesturing() const override {
-        return false;
-    }
-};
 class Dictionary final : public DictionaryService {
 public:
     QVector<DictionaryChoice> choices() const override {
@@ -103,6 +58,9 @@ public:
 }
 ReaderHostServices readerServices() {
     ReaderHostServices result;
+    result.colorDisplay = [] {
+        return true;
+    };
     result.systemRotation = true;
     result.browserAvailable = [] {
         return true;
@@ -146,14 +104,14 @@ ReaderHostServices readerServices() {
         return QGuiApplication::applicationState() != Qt::ApplicationActive;
     };
     result.lightAvailable = [] {
-        return false;
+        return lightAvailable();
     };
     result.animationsAvailable = [] {
         return false;
     };
     result.cancelAnimation = [] {};
     result.light = [](QWidget *) {
-        return std::make_unique<Light>();
+        return std::make_unique<Light>(lightValue);
     };
     result.dictionary = [] {
         return std::make_unique<Dictionary>();

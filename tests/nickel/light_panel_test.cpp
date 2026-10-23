@@ -278,6 +278,7 @@ private slots:
         light.warmthEnabled = true;
         kobalt::LightPanel panel(light, &parent);
         QVERIFY(panel.open());
+        QApplication::processEvents();
         for (const auto *name : {"rrAutomaticBrightness", "rrAutomaticWarmth"}) {
             auto *option = dynamic_cast<kobalt::ui::DescribedOption *>(panel.findChild<QCheckBox *>(name));
             QVERIFY(option && option->isVisible());

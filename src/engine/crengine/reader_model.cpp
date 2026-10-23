@@ -310,7 +310,8 @@ QVector<ReadingFont> ReaderModel::fontCatalog() {
         if (faces.contains(font.family))
             result.append(font);
     for (const auto &family : faces) {
-        if (family != "Noto Serif" && !family.startsWith("Noto Serif CJK "))
+        if (family != "Noto Serif" && family != monospaceFontFace && family != mathFontFace &&
+            !family.startsWith("Noto Serif CJK "))
             continue;
         bool present = false;
         for (const auto &font : result)
@@ -320,7 +321,10 @@ QVector<ReadingFont> ReaderModel::fontCatalog() {
         QStringList files;
         for (const auto &file : fonts_.fallbackFiles) {
             const auto name = QFileInfo(file).fileName();
-            if (family == "Noto Serif" ? name.startsWith("NotoSerif-") : name == "NotoSerifCJK-Regular.ttc") {
+            if ((family == "Noto Serif" && name.startsWith("NotoSerif-")) ||
+                (family == monospaceFontFace && name.startsWith("IBMPlexMono-")) ||
+                (family == mathFontFace && name.startsWith("NotoSansMath-")) ||
+                (family.startsWith("Noto Serif CJK ") && name == "NotoSerifCJK-Regular.ttc")) {
                 files.append(file);
             }
         }
@@ -427,6 +431,10 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     if (!validAlignment(alignment_))
         alignment_ = "publisher";
     const auto faces = fontFaces();
+    for (size_t index = 0; index < fallbackFaces_.size(); ++index) {
+        const auto family = saved.value(appearance::fallbackFontKeys[index]).toString();
+        fallbackFaces_[index] = faces.contains(family) ? family : QString();
+    }
     defaultFace_ = saved.value("default_font_face").toString(defaultFontFace);
     if (!faces.contains(defaultFace_))
         defaultFace_ = defaultFontFace;
@@ -638,6 +646,12 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     const auto bionic = settings.value("bold_reading").toString(bionic_);
     const auto face = settings.value("font_face").toString(face_);
     const auto defaultFace = settings.value("default_font_face").toString(defaultFace_);
+    auto fallbackFaces = fallbackFaces_;
+    for (size_t index = 0; index < fallbackFaces.size(); ++index) {
+        fallbackFaces[index] = settings.value(appearance::fallbackFontKeys[index]).toString(fallbackFaces[index]);
+        if (!fallbackFaces[index].isEmpty() && !fontFaces().contains(fallbackFaces[index]))
+            return false;
+    }
     const auto axis = fontWeightAxis(readingFonts, face);
     const int requestedAxisWeight = settings.value("font_weight").toInt(axisWeight_);
     const int axisWeight =
@@ -667,9 +681,9 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     const bool bionicChanged = bionic != bionic_;
     // Outline thickness changes pixels only. Keep the formatted page and its anchors.
     const bool thicknessChanged = weight != weight_;
-    const bool styled = avoidWastefulStyling != avoidWastefulStyling_ || bionicChanged || axisChanged ||
-                        opticalChanged || pixels != pixels_ || spacing != spacing_ || face != face_ ||
-                        defaultFace != defaultFace_ || margin != margin_ || topMargin != topMargin_ ||
+    const bool styled = fallbackFaces != fallbackFaces_ || avoidWastefulStyling != avoidWastefulStyling_ ||
+                        bionicChanged || axisChanged || opticalChanged || pixels != pixels_ || spacing != spacing_ ||
+                        face != face_ || defaultFace != defaultFace_ || margin != margin_ || topMargin != topMargin_ ||
                         bottomMargin != bottomMargin_ || alignment != alignment_ || hyphenation != hyphenation_;
     const bool resized = size != size_;
     if (!styled && !resized && weight == weight_ && dark == darkMode_ && hideNonlinear == hideNonlinearFragments_)
@@ -680,6 +694,7 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     spacing_ = spacing;
     face_ = face;
     defaultFace_ = defaultFace;
+    fallbackFaces_ = fallbackFaces;
     margin_ = margin;
     topMargin_ = topMargin;
     bottomMargin_ = bottomMargin;
@@ -758,16 +773,24 @@ bool ReaderModel::setHyphenation(const QString &mode) {
     return applyAppearance(kobalt::qt::object({{"hyphenation", mode}}));
 }
 void ReaderModel::applyPublisherFontFallbacks() {
-    const bool useFallbacks = face_.isEmpty() && embeddedFontCount() == 0;
-    const auto sansFace = fontFaces().contains(publisherSansFontFace) ? publisherSansFontFace : "IBM Plex Sans";
-    const auto families =
-        useFallbacks ? QString("|%1|%2|||%3|%4||").arg(defaultFontFace, sansFace, monospaceFontFace, mathFontFace)
-                     : QString("|||||%1|%2||").arg(monospaceFontFace, mathFontFace);
+    const bool publisher = face_.isEmpty();
+    const bool useDefaults = publisher && embeddedFontCount() == 0;
+    const auto defaultSans = fontFaces().contains(publisherSansFontFace) ? publisherSansFontFace : "IBM Plex Sans";
+    // The first field is empty so named publisher and embedded fonts keep precedence.
+    // Explicit family choices also resolve generic CSS in books with embedded fonts.
+    const auto serif = publisher ? (fallbackFaces_[0].isEmpty() ? (useDefaults ? QString(defaultFontFace) : QString())
+                                                                : fallbackFaces_[0])
+                                 : QString();
+    const auto sans =
+        publisher ? (fallbackFaces_[1].isEmpty() ? (useDefaults ? QString(defaultSans) : QString()) : fallbackFaces_[1])
+                  : QString();
+    const auto mono = fallbackFaces_[2].isEmpty() ? QString(monospaceFontFace) : fallbackFaces_[2];
+    const auto families = QString("|%1|%2|||%3|%4||").arg(serif, sans, mono, mathFontFace);
     auto properties = LVCreatePropsContainer();
     properties->setString(PROP_FONT_FAMILY_FACES, lString8(families.toUtf8().constData()));
     engine_->propsApply(properties);
-    const auto fallback = QString::fromLatin1(defaultFontFace);
-    engine_->setDefaultFontFace(lString8((face_.isEmpty() ? fallback : face_).toUtf8().constData()));
+    const auto fallback = fallbackFaces_[0].isEmpty() ? QString(defaultFontFace) : fallbackFaces_[0];
+    engine_->setDefaultFontFace(lString8((publisher ? fallback : face_).toUtf8().constData()));
 }
 void ReaderModel::applyStyleSheet() {
     QString overrides;
@@ -1173,6 +1196,9 @@ QJsonObject ReaderModel::state() const {
                                {"line_spacing_version", 1},
                                {"font_face", face_},
                                {"default_font_face", defaultFace_},
+                               {"serif_font_face", fallbackFaces_[0]},
+                               {"sans_font_face", fallbackFaces_[1]},
+                               {"monospace_font_face", fallbackFaces_[2]},
                                {"margin_pixels", margin_},
                                {"top_margin_pixels", topMargin_},
                                {"bottom_margin_pixels", bottomMargin_},

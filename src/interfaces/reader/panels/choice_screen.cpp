@@ -28,7 +28,7 @@ using platform::textRefresh;
 namespace {
 class FontCell final : public ui::Button {
 public:
-    explicit FontCell(QWidget *parent) : ui::Button(parent), detail(new QLabel(this)) {
+    explicit FontCell(QWidget *parent) : ui::Button(parent), detail(new ui::InterfaceLabel(this)) {
         detail->setAttribute(Qt::WA_TransparentForMouseEvents);
         detail->setAlignment(Qt::AlignCenter);
         detail->setWordWrap(true);
@@ -159,7 +159,7 @@ ChoiceScreen::ChoiceScreen(QWidget *parent) : kobalt::ui::Panel(parent), navigat
     setObjectName("rrChoices");
     fontHeader = new ui::Panel(this, ui::Edges(Qt::TopEdge));
     fontHeader->setEdgeWidth(m::chrome::heavyRule);
-    fontTitle = new QLabel(strings::get("reader.font"), fontHeader);
+    fontTitle = new ui::InterfaceLabel(strings::get("reader.font"), fontHeader);
     fontTitle->setObjectName("rrFontTitle");
     readerStyle(fontTitle, styles::font(m::text::body, true) + "background:transparent;");
     auto *close = new ui::CellButton(ui::ControlIcon::Close, fontHeader);
@@ -189,7 +189,7 @@ ChoiceScreen::ChoiceScreen(QWidget *parent) : kobalt::ui::Panel(parent), navigat
     fontSectionBar = new ui::Panel(this);
     fontSectionBar->setObjectName("rrFontSectionBar");
     fontSectionBar->setFill(QPalette::Midlight);
-    fontSection = new QLabel(fontSectionBar);
+    fontSection = new ui::InterfaceLabel(fontSectionBar);
     fontSection->setObjectName("rrFontSection");
     fontSection->setFont(ui::captionFont(ui::px(18)));
     readerStyle(fontSection, styles::caption() + "background:transparent;");

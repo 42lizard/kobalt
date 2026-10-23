@@ -22,6 +22,24 @@ inline QPointF mousePosition(const QMouseEvent *event, bool global = false) {
     return global ? event->screenPos() : event->localPos();
 #endif
 }
+struct TouchContact {
+    int id;
+    QPointF position;
+    bool released;
+};
+inline QVector<TouchContact> touchContacts(const QTouchEvent *event) {
+    QVector<TouchContact> contacts;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    for (const auto &point : event->points()) {
+        contacts.append({point.id(), point.position(), point.state() == QEventPoint::State::Released});
+    }
+#else
+    for (const auto &point : event->touchPoints()) {
+        contacts.append({point.id(), point.pos(), point.state() == Qt::TouchPointReleased});
+    }
+#endif
+    return contacts;
+}
 inline QVector<QPointF> touchPositions(const QTouchEvent *event, bool global = false) {
     QVector<QPointF> positions;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)

@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 INVENTORY = ROOT / 'tests/native-ui/correctness_checklist.json'
 SOURCES = {'reader-window': 'tests/native-ui/reader_test.cpp',
            'reader-window-device': 'tests/native-ui/reader_test.cpp',
-           'desktop-window': 'tests/desktop/window_test.cpp'}
+           'desktop-window': 'tests/desktop/window_test.cpp',
+           'nickel-touch-input': 'tests/nickel/touch_input_test.cpp'}
 SHARDS = {'reader-window': {f'reader-window-{index}' for index in range(12)},
           'desktop-window': {f'desktop-window-{index}' for index in range(8)} |
                             {f'desktop-window-books-{index}' for index in range(5)}}

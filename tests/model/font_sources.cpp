@@ -19,6 +19,15 @@ static void expect(bool value, const char *message) {
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     expect(argc == 3, "supply a bundled font fixture and a book");
+    const QVector<ReadingFont> unordered{
+        {"Zeta", {}, FontOrigin::Recommended, false, {}, {}},  {"Personal", {}, FontOrigin::Sideloaded, false, {}, {}},
+        {"Alpha", {}, FontOrigin::Recommended, false, {}, {}}, {"Libron", {}, FontOrigin::Recommended, false, {}, {}},
+        {"System", {}, FontOrigin::BuiltIn, false, {}, {}},    {"Mono", {}, FontOrigin::Interface, false, {}, {}}};
+    const auto ordered = orderedReadingFonts(unordered);
+    const QStringList expectedOrder{"Libron", "Alpha", "Zeta", "System", "Personal", "Mono"};
+    for (int index = 0; index < ordered.size(); ++index)
+        expect(ordered[index].family == expectedOrder[index],
+               "font pickers share source groups and Libron-first ordering");
     QTemporaryDir temporary;
     expect(temporary.isValid(), "temporary directory");
     const auto root = temporary.path();
@@ -66,6 +75,12 @@ int main(int argc, char **argv) {
         if (font.family == systemFamily) {
             registered = font.origin == FontOrigin::BuiltIn && font.files == sources.systemFiles;
         }
+    }
+    for (const auto *family : {monospaceFontFace, mathFontFace}) {
+        bool previewable = false;
+        for (const auto &font : model.fontCatalog())
+            previewable |= font.family == family && !font.files.isEmpty();
+        expect(previewable, "bundled fallback family has files for its font-name preview");
     }
     expect(registered, "engine registers the prepared font as built-in");
     QFile book(QString::fromLocal8Bit(argv[2]));

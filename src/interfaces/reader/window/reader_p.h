@@ -6,6 +6,7 @@
 #include "interfaces/reader/ui/controls/sliders.h"
 #include "interfaces/reader/ui/controls/page_scrubber.h"
 #include "interfaces/reader/ui/controls/panels.h"
+#include "interfaces/reader/ui/controls/mode_banner.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/theme.h"
 #include "interfaces/reader_window.h"
@@ -13,6 +14,7 @@
 #include "reading/reading_book.h"
 #include "reading/reader_session.h"
 #include "reading/bookmark_session.h"
+#include "reading/highlight_session.h"
 #include "interfaces/reader/views/reading_page.h"
 #include "interfaces/reader/panels/choice_screen.h"
 #include "interfaces/reader/panels/chapter_graph.h"
@@ -43,6 +45,8 @@
 #include <functional>
 #include <memory>
 
+class QVBoxLayout;
+
 namespace kobalt::reader {
 // Input and accessibility target only. The cached header image supplies its
 // pixels and invalidates only the part whose text changed.
@@ -60,6 +64,7 @@ public:
     void refresh();
     void refreshRenderNotice();
     bool readyForPresentation() const override;
+    void preparePresentation(std::function<void(bool)> finished) override;
     void checkpoint() override;
     void prepareUsb(std::function<void()> finished) override;
     void prepareShutdown(std::function<void()> finished) override;
@@ -92,6 +97,62 @@ private:
     QString savedNativeAnchor;
     int savedNativePage = -1, savedNativePages = -1;
     void buildReadingPage();
+    void buildAnnotations();
+    void enterAnnotations();
+    void leaveAnnotations();
+    void finishAnnotations();
+    void annotationTap(QPoint point);
+    void prepareAnnotation(bool leave = false, std::function<void()> after = {});
+    void setAnnotationBoundary(kobalt::AnnotationToken token, bool start);
+    void clearAnnotationDraft();
+    void syncAnnotationHint();
+    void layoutAnnotationHeader();
+    void saveAnnotation(bool leave = false, std::function<void()> after = {});
+    void showAnnotationActions();
+    void updateAnnotationRects(bool showActions = false);
+    void paintAnnotationDraft();
+    void syncAnnotations();
+    void syncMarkupRequest();
+    void finishAnnotationPresentation();
+    void editAnnotation(const QString &id, bool navigate = true);
+    void showSavedAnnotation(const QString &id, QRect anchor, bool navigate = false);
+    void showAnnotationMatches(QVector<QString> ids, QRect anchor, int page = 0);
+    void removeAnnotation(const QString &id);
+    QVector<kobalt::BookmarkRow> annotationRows() const;
+    struct AnnotationAction {
+        QString name;
+        kobalt::ui::ControlIcon icon;
+        QString label;
+        std::function<void()> run;
+    };
+    void annotationActionsFor(const QVector<AnnotationAction> &actions, QRect anchor, bool includeStop = true,
+                              const QString &paletteColor = {}, std::function<void(QString)> colorChanged = {});
+    bool colorAnnotations() const {
+        return services.colorDisplay && services.colorDisplay();
+    }
+    QString annotationColor = "yellow", annotationSelectedColor = "yellow";
+    bool annotationColorChosen = false;
+    bool minimalAnnotationMode() const {
+        return preferences.value("minimal_annotation_mode").toBool(false);
+    }
+    bool annotationMode = false, annotationSaving = false, annotationShowActionsPending = false,
+         annotationAdjusting = false, annotationDirty = false;
+    QString annotationStart, annotationEnd, annotationEditing, annotationFrame, annotationViewportFrame;
+    kobalt::AnnotationToken annotationStartWord, annotationEndWord;
+    bool annotationStartPolicy = false, annotationEndPolicy = false;
+    QString annotationChosenStart, annotationChosenEnd;
+    QRect annotationActionAnchor;
+    quint64 annotationSaveRevision = 0;
+    quint64 annotationEpoch = 0, savedHighlightEpoch = 0;
+    QVector<QRect> draftHighlightRects, savedHighlightRects;
+    bool draftHighlightVertical = false;
+    ReaderMarkupRequest annotationRequest;
+    qint64 annotationImageKey = 0;
+    bool annotationPresentationCapture = false;
+    std::function<void(bool)> annotationPresentationReady;
+    kobalt::ui::Panel *annotationHeader = nullptr;
+    kobalt::ui::ModalOverlay *annotationPopover = nullptr;
+    kobalt::ui::ModeBanner *annotationHint = nullptr;
     void startClockTimer();
     void buildToolbar();
     void buildBottomControls();
@@ -151,10 +212,10 @@ private:
     std::unique_ptr<kobalt::LightControls> light;
     kobalt::LightPanel *lightPopup = nullptr;
     QCheckBox *darkOption, *inheritTextLayoutOption, *animationOption, *edgeLightOption, *denseGraphOption,
-        *pinStatsOption, *inheritHeaderFooterOption;
-    QCheckBox *automaticOpeningOption = nullptr, *navigationBarOption = nullptr;
+        *inheritHeaderFooterOption;
+    QCheckBox *automaticOpeningOption = nullptr, *minimalAnnotationOption = nullptr, *hideTabLabelsOption = nullptr;
     QPushButton *autoRotateOption;
-    QCheckBox *hideStatusOption = nullptr, *hideDeviceOptionsOption = nullptr;
+    QCheckBox *hideStatusOption = nullptr;
     bool hideNativeStatus() const;
     QJsonObject preferences;
     QLabel *settingsError;
@@ -170,7 +231,8 @@ private:
     bool applyingText = false, closing = false;
     kobalt::ChoiceScreen *choices = nullptr;
     kobalt::ChapterGraph *chapterGraph = nullptr;
-    bool pinStats = false, pinnedStatsOpen = false;
+    bool seekOpen = false;
+    void openSeek();
     kobalt::Acknowledgments *acknowledgments;
     QStackedWidget *panels;
     QLabel *previewLabel;
@@ -235,7 +297,14 @@ private:
     void openSearch();
     kobalt::LinkPanel *linkPanel = nullptr;
     QPointer<kobalt::ui::ModalOverlay> linkDialog;
-    QPointer<kobalt::ui::ModalOverlay> fontDefaultDialog;
+    QPointer<kobalt::ui::ModalOverlay> fontDefaultDialog, settingsFontPopup;
+    QJsonObject settingsFontFaces;
+    QString settingsDefaultFontFace;
+    QString settingsUiFontFace, settingsUiMonoFontFace, settingsHeaderFooterFontFace;
+    int settingsHeaderFooterWeight = 2;
+    void applyInterfaceFonts();
+    void showSettingsFonts();
+    void openSettingsFont(const QString &key);
     QPushButton *linkReturn = nullptr;
     bool linkReturnAvailable = false;
     struct LinkVisit {
@@ -282,8 +351,8 @@ private:
     void updateMenuStatus();
     void updateReadingStats();
     void configureNavigation();
+    void activateNavigation(kobalt::NavigationDestination destination);
     QRect panelBounds(int panelHeight) const;
-    bool statsPinned() const;
     void syncNavigation();
     void syncStatusBoundary();
     bool statusBoundaryPending = false;
@@ -306,6 +375,9 @@ private:
     void showPageNavigation();
     void openPageNavigation();
     void closePageNavigation();
+    void showMenuView();
+    void openMenuView();
+    void closeMenuView();
     void showNavigationBarButtons();
     void openNavigationBarButtons();
     void closeNavigationBarButtons();
@@ -350,7 +422,8 @@ private:
     QPointer<kobalt::ui::ModalOverlay> sleepPopup;
     kobalt::ui::CaptionButton *pageNavigationButton = nullptr, *tapZonesButton = nullptr,
                               *navigationBarButton = nullptr;
-    QPointer<kobalt::ui::ModalOverlay> pageNavigationPopup, tapZonesPopup, navigationBarPopup;
+    QPointer<kobalt::ui::ModalOverlay> pageNavigationPopup, tapZonesPopup, navigationBarPopup, menuViewPopup;
+    kobalt::ui::CaptionButton *menuViewButton = nullptr;
     static QString refreshExplanation(kobalt::ScreenRefresh mode);
     static QString refreshLabel(kobalt::ScreenRefresh mode);
     void showScreenRefresh();
@@ -358,6 +431,7 @@ private:
     void openScreenRefresh();
     // Declared after book, so it is destroyed before the session it borrows.
     std::unique_ptr<kobalt::BookmarkSession> bookmarks;
+    std::unique_ptr<kobalt::HighlightSession> highlights;
     QString layoutKey() const;
     void syncBookmarks();
     kobalt::BookmarkList *bookmarkList = nullptr;

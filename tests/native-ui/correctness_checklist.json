@@ -31,10 +31,17 @@
     {
       "id": "toolbar-panels",
       "platform": "native",
-      "expected": "Panels compose correctly, switch without stale menus, and overflow closes the active panel.",
+      "expected": "Panels compose correctly, switch without stale menus, and overflow closes the active panel. Repeated overflow-to-fit transitions preserve visible focus and content ownership. Settings pagination keeps every row reachable and retains the page when measured again.",
       "assertions": [
         "reader-window:navigationCompositionAndRelease",
-        "reader-window:overflowClosesCurrentPanel"
+        "reader-window:overflowClosesCurrentPanel",
+        "reader-window:appearanceOverflowRestoresFocus",
+        "reader-window:settingsPaginationReachesEveryTab",
+        "reader-window:navigationThumbnailsDefaultAndPersist",
+        "reader-window:defaultMenuViews",
+        "reader-window:sideThumbnailsUseSmoothSampling",
+        "reader-window:pageThumbnailsIncludeSavedHighlights",
+        "desktop-window:settingsPaginationReachesCanvas"
       ],
       "captures": [
         "reading",
@@ -49,10 +56,20 @@
     {
       "id": "modal-input",
       "platform": "native",
-      "expected": "Visible enabled input reaches its control; hidden, disabled and covered controls do not activate. Modal dismissal and bounds survive both themes and resize.",
+      "expected": "Visible enabled input reaches its control; hidden, disabled and covered controls do not activate. Modal dismissal and bounds survive both themes and resize. Qt5 fallback activates mouse-only controls inside ordinary scroll viewports once, preserves intentional touch owners and scrollbar movement, and cancels dragged, canceled or multi-touch taps.",
       "assertions": [
         "reader-window:canvasInputRespectsModalBarrier",
-        "reader-window:settingsDefaultsDraft"
+        "reader-window:settingsDefaultsDraft",
+        "reader-window:settingsFontChoicesPageAndCancel",
+        "reader-window:settingsFallbackFontsPersistAndRollback",
+        "reader-window:settingsRailFitsSixInchLandscape",
+        "nickel-touch-input:scrollChildTapActivatesOnce",
+        "nickel-touch-input:checkboxTapPersistsOnce",
+        "nickel-touch-input:movedGestureDoesNotActivate",
+        "nickel-touch-input:cancellationDoesNotActivate",
+        "nickel-touch-input:intentionalTouchOwnerIsPreserved",
+        "nickel-touch-input:nativeMouseDoesNotClickTwice",
+        "nickel-touch-input:scrollBarDragRemainsAvailable"
       ],
       "captures": []
     },
@@ -104,10 +121,11 @@
     {
       "id": "search",
       "platform": "native",
-      "expected": "Empty, paged, missing and stale results behave correctly; choosing a result can return to the initial passage.",
+      "expected": "Empty, paged, missing and stale results behave correctly; search resumes after layout changes, and closing or replacing a query cancels its pending results; choosing a result can return to the initial passage.",
       "assertions": [
         "reader-window:searchAndBookmark",
         "reader-window:staleSearchReplyIgnored",
+        "reader-window:searchSurvivesReflow",
         "reader-window:searchResultThenReturnToStart"
       ],
       "captures": [
@@ -142,9 +160,11 @@
     {
       "id": "bookmarks",
       "platform": "native",
-      "expected": "Adding, inspecting, canceling and confirming removal update the isolated saved store; reopened lists and readers retain the result.",
+      "expected": "Adding, inspecting, canceling and confirming removal update the isolated saved store; an open list receives a delayed saved bookmark without changing the Annotations tab; open rows receive resolved page numbers after reflow; reopened lists and readers retain the result.",
       "assertions": [
         "reader-window:searchAndBookmark",
+        "reader-window:bookmarkAddedWhileListOpen",
+        "reader-window:bookmarkListUpdatesAfterReflow",
         "reader-window:bookmarkToggleAndFailedSave",
         "reader-window:bookmarksMergeAfterLayoutChange",
         "reader-window:exitThroughReaderAndReopen"
@@ -196,15 +216,19 @@
     {
       "id": "settings",
       "platform": "native",
-      "expected": "All settings tabs, defaults, absent capabilities and compact measurement retain their presentation and behavior. Refresh choices update their caption, dismiss correctly and persist when settings closes, including after reopening the book.",
+      "expected": "All settings tabs, defaults, absent capabilities and compact measurement retain their presentation and behavior. Refresh choices update their caption, dismiss correctly and persist when settings closes, including Every page after reopening the book. Every page flashes only accepted turns in both directions, replaces page animations and leaves book-edge gestures unchanged.",
       "assertions": [
         "reader-window:settingsPageComposition",
         "reader-window:settingsContentMeasurement",
         "reader-window:settingsWithoutDictionaryDownloads",
         "reader-window:settingsDefaultsDraft",
-        "desktop-window:hiddenDeviceOptionsKeepCompactRows",
+        "reader-window:settingsFontChoicesPageAndCancel",
+        "reader-window:settingsFallbackFontsPersistAndRollback",
+        "reader-window:settingsRailFitsSixInchLandscape",
+        "desktop-window:settingsCategoriesKeepCompactRows",
         "desktop-window:settingsRowsDrawBottomBorders",
-        "reader-window:screenRefreshChoicePersistsAndDismisses"
+        "reader-window:screenRefreshChoicePersistsAndDismisses",
+        "reader-window:everyPageRefreshFollowsAcceptedTurns"
       ],
       "captures": [
         "settings"
@@ -626,14 +650,13 @@
     "settings": {
       "scenes": [
         "about",
-        "advanced",
+        "styling",
         "dictionaries-book",
         "dictionaries-other",
         "dictionary-remove-confirmation",
         "display",
         "restore-confirmation",
-        "screen-refresh",
-        "stats"
+        "screen-refresh"
       ]
     },
     "stats": {

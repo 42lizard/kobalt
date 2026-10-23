@@ -1,14 +1,19 @@
 #pragma once
+#include <QPainterPath>
 #include "interfaces/reader/ui/style/metrics.h"
 #include "reading/header_footer.h"
 #include "ui/brightness_gesture.h"
 #include <QWidget>
 #include <QImage>
 #include <QTimer>
+#include <QRegion>
+#include <QElapsedTimer>
+#include <QHash>
 #include <array>
 #include <functional>
 #include <tuple>
 class QPainter;
+class QTouchEvent;
 
 namespace kobalt {
 class ReadingPage : public QWidget {
@@ -63,10 +68,23 @@ public:
     std::function<bool(bool)> lightStarted;
     std::function<void(double)> lightChanged;
     std::function<void(bool)> lightFinished;
+    static QRegion annotationContour(const QVector<QRect> &rectangles, bool vertical = false);
+    static QPainterPath annotationUnderline(const QVector<QRect> &rectangles, bool vertical = false);
+    bool annotationContains(QPoint point) const {
+        return draftContour.contains(point);
+    }
+    void annotate(const QVector<QRect> &draft, const QVector<QRect> &saved, const QVector<QRect> &candidate = {},
+                  bool vertical = false);
+    void setAnnotationColors(const QVector<QPair<QVector<QRect>, QString>> &groups);
+    // Install destination markup without queuing a separate overlay paint.
+    // refreshContent consumes its old and new damage with the page image.
+    void installAnnotationFrame(const QVector<QRect> &draft, const QVector<QPair<QVector<QRect>, QString>> &saved,
+                                bool vertical = false);
     void mark(const QVector<QRect> &rectangles);
     void revealLinks(const QVector<QRect> &rectangles);
     std::function<void(QPoint)> tapped;
     std::function<void(int)> swiped;
+    std::function<void()> annotationRequested;
     ReadingPage(QWidget *parent, std::function<void()> cancelAnimation);
     // Copy the cached page and chrome without widget layout or backing-store work.
     QImage snapshot(bool sleeping = false) const;
@@ -87,11 +105,12 @@ protected:
 
 private:
     std::function<void()> cancelAnimation;
-    // The last field is the interface text weight: a change draws the strips again.
+    // Text weight and family changes draw the strips again.
     using Slots = std::array<headerfooter::Content, 3>;
-    using HeaderState = std::tuple<Slots, std::array<headerfooter::Field, 3>, bool, bool, int, int, qint64, int>;
-    using FooterState =
-        std::tuple<Slots, std::array<headerfooter::Field, 3>, QString, bool, bool, qreal, int, int, qint64, int>;
+    using HeaderState =
+        std::tuple<Slots, std::array<headerfooter::Field, 3>, bool, bool, int, int, qint64, int, QString>;
+    using FooterState = std::tuple<Slots, std::array<headerfooter::Field, 3>, QString, bool, bool, qreal, int, int,
+                                   qint64, int, QString>;
     Slots stripSlots(bool footer) const;
     std::array<headerfooter::Field, 3> stripFields(bool footer) const;
     void paintSlots(QPainter &painter, const QRect &bounds, bool footer, bool sleeping = false) const;
@@ -109,9 +128,21 @@ private:
     void paintContents(QPainter &painter, bool sleeping = false) const;
     int headerRightWidth() const;
     QTimer holdTimer;
-    QVector<QRect> selection, revealedLinks;
+    QVector<QRect> selection, revealedLinks, draftAnnotations, savedAnnotations, candidateAnnotations;
+    QRegion draftContour, annotationColorRegion;
+    QPainterPath draftUnderline, candidateUnderline;
+    bool annotationVertical = false, installingAnnotationFrame = false;
+    QRegion annotationFrameDamage;
+    void damageAnnotations(const QRegion &dirty);
+    QVector<QPair<QVector<QRect>, QString>> annotationColorGroups;
+    QVector<QPair<QRegion, QColor>> annotationTints;
     QVector<QRect> revealedOutlines;
     bool tracking = false, moved = false, consumed = false;
+    QElapsedTimer touchClock;
+    QHash<int, QPointF> touchOrigins;
+    bool multipleTouch = false, annotationTouch = false, rightPressed = false, rightMoved = false;
+    bool annotationCenter(QPointF point) const;
+    bool annotationTouchEvent(QTouchEvent *event);
     QPointF origin, latest;
     kobalt::ui::BrightnessGesture brightnessGesture;
     void updatePointer();

@@ -12,6 +12,7 @@ struct BookmarkRow {
     QDateTime created;
     int page = -1; // Zero-based, or -1 when the position no longer resolves.
     bool current = false;
+    int endPage = -1;
 };
 
 // The Bookmarks list covers the header's action row with its own bar, like
@@ -19,7 +20,13 @@ struct BookmarkRow {
 class BookmarkList : public ui::Panel {
 public:
     explicit BookmarkList(QWidget *parent);
-    void showBookmarks(QVector<BookmarkRow> rows, const QString &position);
+    void showBookmarks(QVector<BookmarkRow> rows);
+    void showAnnotations(QVector<BookmarkRow> rows);
+    void setExcerptFont(const QString &family);
+    bool annotationsShown() const {
+        return annotations;
+    }
+    std::function<void(bool)> tabRequested;
     std::function<void(const QString &)> selected, removeRequested;
     std::function<void()> back;
 
@@ -33,7 +40,13 @@ private:
     int pageCount() const;
     QVector<BookmarkRow> items;
     QVector<QPushButton *> buttons, removes;
-    QLabel *title, *position, *summary, *pageHeading, *empty, *emptyHint;
+    QPushButton *bookmarksTab, *annotationsTab;
+    bool annotations = false;
+    QString excerptFamily;
+    int listTop() const;
+    int rowHeight() const;
+    QFont excerptFont() const;
+    QLabel *summary, *pageHeading, *empty, *emptyHint;
     ui::ListHeader *listHeader;
     ui::CellButton *close;
     ui::PagerBar *pager;

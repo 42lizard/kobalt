@@ -55,8 +55,11 @@ public:
         return accessory;
     }
     void setTitlePixels(int pixels);
+    void setDetailFont(const QFont &font);
+    void setMetadataFont(const QFont &font);
     QPushButton *addAction(const QString &name, const QString &accessibleName);
     void setActionRule(bool value);
+    void setActionIcon(ControlIcon icon);
     QSize sizeHint() const override;
     QLabel *titleLabel() const {
         return title;
@@ -86,6 +89,7 @@ protected:
 private:
     void arrange();
     void syncLabelStyles();
+    void setLabelFont(PrivateTextLabel *label, int index, const QFont &font);
     void observeParent();
     PrivateTextLabel *title = nullptr, *detail = nullptr, *caption = nullptr, *leading = nullptr, *trailing = nullptr;
     QPushButton *action = nullptr;

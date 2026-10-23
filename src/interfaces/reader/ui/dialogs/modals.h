@@ -30,13 +30,21 @@ private:
     QImage artworkImage;
 };
 
-// The transparent input barrier keeps the reading page unchanged. Only the
-// opaque card needs a refresh when a modal appears or disappears.
+// The input barrier can dim the background for settings choices. Transparent
+// overlays keep local refreshes for progress and anchored reading tools.
 class ModalOverlay : public QWidget {
 public:
     explicit ModalOverlay(QWidget *parent);
     PopupCard *card() const {
         return content;
+    }
+    // Nonblocking anchored menus receive input only over their card and arrow.
+    // Page gestures and controls outside those pixels remain available.
+    void setInputBarrier(bool enabled);
+    // Dimming covers the parent only while this overlay blocks input.
+    void setDimmed(bool enabled);
+    bool inputBarrier() const {
+        return blocksInput;
     }
     void centerCard();
     void fitCard();
@@ -53,12 +61,15 @@ public:
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
     void resizeEvent(QResizeEvent *) override;
+    void paintEvent(QPaintEvent *) override;
     void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     bool focusNextPrevChild(bool next) override;
 
 private:
+    void updateInputRegion();
+    bool blocksInput = true, dimmed = false;
     PopupCard *content;
     QWidget *pointer;
     QRect anchor;

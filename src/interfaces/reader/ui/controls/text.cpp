@@ -11,6 +11,7 @@
 #include <QImage>
 #include <QGlyphRun>
 #include <QPainter>
+#include <QStyle>
 #include <QPainterPath>
 #include <QTextBlock>
 #include <QTextBoundaryFinder>
@@ -134,6 +135,78 @@ QVector<ExcerptLine> privateExcerptLines(const QTextDocument &document, const QF
     }
     return lines;
 }
+}
+namespace {
+QString interfaceHtml(const QString &text) {
+    return text.toHtmlEscaped().replace('\n', "<br/>");
+}
+}
+int wrappedInterfaceTextHeight(const QString &text, const QFont &font, int width) {
+    if (!needsPrivateText(text, font))
+        return QFontMetrics(font).boundingRect(QRect(0, 0, qMax(1, width), 0), Qt::TextWordWrap, text).height();
+    return qCeil(excerptTextHeight(interfaceHtml(text), font, qMax(1, width)));
+}
+void drawWrappedInterfaceText(QPainter &painter, const QRect &bounds, const QString &text, Qt::Alignment alignment) {
+    if (!needsPrivateText(text, painter.font())) {
+        painter.drawText(bounds, alignment | Qt::TextWordWrap, text);
+        return;
+    }
+    QTextDocument document;
+    document.setDefaultFont(painter.font());
+    document.setDocumentMargin(0);
+    document.setHtml(interfaceHtml(text));
+    const auto lines = privateExcerptLines(document, painter.font(), bounds.width());
+    const qreal height = lines.isEmpty() ? 0 : lines.last().top + lines.last().height;
+    const qreal top = bounds.y() + (alignment & Qt::AlignVCenter  ? (bounds.height() - height) / 2
+                                    : alignment & Qt::AlignBottom ? bounds.height() - height
+                                                                  : 0);
+    painter.save();
+    painter.setClipRect(bounds, Qt::IntersectClip);
+    for (const auto &line : lines) {
+        auto rendered = renderPrivateText(line.text, painter.font());
+        if (rendered.image.isNull())
+            continue;
+        QPainter color(&rendered.image);
+        color.setCompositionMode(QPainter::CompositionMode_SourceIn);
+        color.fillRect(rendered.image.rect(), painter.pen().color());
+        color.end();
+        const auto visual = QStyle::visualAlignment(line.direction, alignment);
+        const qreal x = bounds.x() + (visual & Qt::AlignHCenter ? (bounds.width() - line.advance) / 2
+                                      : visual & Qt::AlignRight ? bounds.width() - line.advance
+                                                                : 0);
+        painter.drawImage(QPointF(x + rendered.origin.x(), top + line.top + line.ascent + rendered.origin.y()),
+                          rendered.image);
+    }
+    painter.restore();
+}
+int InterfaceLabel::heightForWidth(int width) const {
+    if (!wordWrap() || !needsPrivateText(text(), font()))
+        return QLabel::heightForWidth(width);
+    const auto margins = contentsMargins();
+    return wrappedInterfaceTextHeight(text(), font(), width - margins.left() - margins.right() - 2 * margin()) +
+           margins.top() + margins.bottom() + 2 * margin();
+}
+QSize InterfaceLabel::sizeHint() const {
+    if (!needsPrivateText(text(), font()))
+        return QLabel::sizeHint();
+    const auto margins = contentsMargins();
+    auto size = measurePrivateTextSize(text(), font());
+    size += QSize(margins.left() + margins.right() + 2 * margin(), margins.top() + margins.bottom() + 2 * margin());
+    return size;
+}
+void InterfaceLabel::paintEvent(QPaintEvent *event) {
+    if (!needsPrivateText(text(), font()) || text().isEmpty() || textFormat() == Qt::RichText) {
+        QLabel::paintEvent(event);
+        return;
+    }
+    QPainter painter(this);
+    painter.setFont(font());
+    painter.setPen(palette().color(isEnabled() ? QPalette::WindowText : QPalette::Mid));
+    const QRect bounds = contentsRect().adjusted(margin(), margin(), -margin(), -margin());
+    if (wordWrap())
+        drawWrappedInterfaceText(painter, bounds, text(), alignment());
+    else
+        drawInterfaceText(painter, bounds, text(), alignment());
 }
 qreal excerptTextHeight(const QString &html, const QFont &font, int width) {
     QTextDocument document;
@@ -449,16 +522,26 @@ void SampleLabel::paintEvent(QPaintEvent *event) {
 }
 // Some fonts report an x-height that does not match their glyphs. Measure
 // capitals as well as lowercase so small x-heights do not inflate font names.
-qreal halfSpacedWidth(const QFontMetrics &metrics, const QString &text) {
-    return qt::textWidth(metrics, text) - text.count(' ') * qt::textWidth(metrics, QStringLiteral(" ")) / 2.0;
+qreal halfSpacedWidth(const QFont &font, const QString &text) {
+    return interfaceTextWidth(text, font) - text.count(' ') * interfaceTextWidth(QStringLiteral(" "), font) / 2.0;
 }
-void drawHalfSpaced(QPainter &painter, qreal x, const QRect &bounds, const QString &text) {
-    const auto metrics = painter.fontMetrics();
-    const qreal baseline = bounds.y() + (bounds.height() - metrics.height()) / 2.0 + metrics.ascent();
-    const qreal space = qt::textWidth(metrics, QStringLiteral(" ")) / 2.0;
+void drawHalfSpaced(QPainter &painter, qreal x, const QRect &bounds, const QString &text, int weight) {
+    if (weight < 0 && !needsPrivateText(text, painter.font())) {
+        const auto metrics = painter.fontMetrics();
+        const qreal baseline = bounds.y() + (bounds.height() - metrics.height()) / 2.0 + metrics.ascent();
+        const qreal space = qt::textWidth(metrics, QStringLiteral(" ")) / 2.0;
+        for (const auto &word : text.split(' ')) {
+            painter.drawText(QPointF(x, baseline), word);
+            x += qt::textWidth(metrics, word) + space;
+        }
+        return;
+    }
+    const qreal space = interfaceTextWidth(QStringLiteral(" "), painter.font()) / 2.0;
     for (const auto &word : text.split(' ')) {
-        painter.drawText(QPointF(x, baseline), word);
-        x += qt::textWidth(metrics, word) + space;
+        const int width = interfaceTextWidth(word, painter.font());
+        drawInterfaceText(painter, QRect(qRound(x), bounds.y(), width, bounds.height()), word,
+                          Qt::AlignLeft | Qt::AlignVCenter, weight);
+        x += width + space;
     }
 }
 QFont fontSample(const QString &face) {

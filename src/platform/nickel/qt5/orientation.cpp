@@ -1,4 +1,5 @@
 #include "private_functions.h"
+#include "touch_rotation.h"
 #include "platform/nickel/common/orientation.h"
 #include <QGuiApplication>
 #include <QEventLoop>
@@ -7,6 +8,14 @@
 #include <dlfcn.h>
 
 namespace kobalt {
+void ownReaderRotation(bool owned) {
+    nickel4::ownReaderTouchRotation(owned);
+    if (!owned) {
+        // The borrowed sensor's native handler queues its orientation change.
+        // Finish it before the reader repaints and exposes Nickel's window.
+        QWindowSystemInterface::flushWindowSystemEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+}
 QOrientationSensor *nativeOrientationSensor() {
     const auto device = reinterpret_cast<const void *(*)()>(dlsym(RTLD_DEFAULT, "_ZN6Device16getCurrentDeviceEv"));
     const auto capable =

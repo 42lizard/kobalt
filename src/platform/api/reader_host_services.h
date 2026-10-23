@@ -29,6 +29,8 @@ struct BatteryStatus {
 struct ReaderHostServices {
     // Desktop-only presentation preferences; fixtures retain device chrome.
     bool desktopUi = false;
+    // Missing capability means monochrome; independent of theme and animation preferences.
+    std::function<bool()> colorDisplay;
     // Optional desktop query. Device previews retain simulated status chrome.
     std::function<bool()> devicePreview;
     bool systemRotation = false;

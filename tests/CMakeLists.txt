@@ -39,6 +39,7 @@ add_test(NAME variable-font-fixture COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT
 add_test(NAME cpp-formatter-tool COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_format_cpp.py")
 add_test(NAME release-version COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_version.py")
 add_test(NAME release-artifacts COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_release_artifacts.py")
+add_test(NAME boox-adapter COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_boox_adapter.py")
 add_test(NAME android-ci-artifacts COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_ci_android.py")
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" -B -c
@@ -141,6 +142,8 @@ kobalt_check(screen-refresh SOURCES tests/model/screen_refresh.cpp LIBRARIES Qt6
 kobalt_check(font-registration SOURCES tests/model/font_registration.cpp LIBRARIES Qt6::Gui
     ARGUMENTS "${KOBALT_TEST_FIXTURES}/font.ttf")
 kobalt_check(page-refresh-regions SOURCES tests/model/page_refresh_regions.cpp src/model/page_refresh_regions.cpp LIBRARIES Qt6::Gui)
+kobalt_check(highlight-store SOURCES tests/model/highlight_store.cpp src/storage/highlight_store.cpp src/storage/bookmark_store.cpp src/storage/reader_storage.cpp
+    LIBRARIES Qt6::Core)
 kobalt_check(bookmark-store SOURCES tests/model/bookmark_store.cpp src/storage/bookmark_store.cpp src/storage/reader_storage.cpp
     LIBRARIES Qt6::Core)
 kobalt_check(image-damage SOURCES tests/model/image_damage.cpp LIBRARIES Qt6::Gui)
@@ -213,6 +216,8 @@ kobalt_widget_test(acknowledgments-components SOURCES "${KOBALT_TESTS}/model/ack
 qt_add_resources(acknowledgments-components-test component_notices PREFIX "/kobalt"
     BASE "${KOBALT_ROOT}/resources" FILES "${KOBALT_ROOT}/resources/acknowledgments.json" ${notices})
 
+kobalt_widget_test(nickel-touch-input SOURCES "${KOBALT_TESTS}/nickel/touch_input_test.cpp"
+    "${KOBALT_ROOT}/src/platform/nickel/qt5/touch_input.cpp" LIBRARIES reader-widgets)
 kobalt_widget_test(reader-canvas-input SOURCES "${KOBALT_TESTS}/native-ui/reader_canvas_test.cpp" LIBRARIES Qt6::Widgets)
 kobalt_widget_test(test-shards SOURCES "${KOBALT_TESTS}/native-ui/test_shards_test.cpp" LIBRARIES Qt6::Core)
 
@@ -391,6 +396,8 @@ kobalt_check(reader-session SOURCES tests/model/reader_session.cpp LIBRARIES tes
 kobalt_check(local-reader SOURCES tests/model/local_reader.cpp src/support/diagnostics.cpp LIBRARIES test-reading
     ARGUMENTS "${KOBALT_TEST_FIXTURES}/local-cache.epub" "${KOBALT_TEST_FIXTURES}/color.epub")
 set_tests_properties(local-reader PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=${KOBALT_TEST_PLATFORM}")
+kobalt_check(highlight-session SOURCES tests/model/highlight_session.cpp LIBRARIES test-reader-runtime
+    ARGUMENTS "${KOBALT_TEST_FIXTURES}/text.epub")
 kobalt_check(bookmark-session SOURCES tests/model/bookmark_session.cpp LIBRARIES test-reader-runtime
     ARGUMENTS "${KOBALT_TEST_FIXTURES}/text.epub")
 kobalt_check(engine-resource-cache SOURCES tests/model/resource_cache.cpp LIBRARIES test-reader-runtime)
@@ -399,7 +406,8 @@ kobalt_check(engine-image-policy SOURCES tests/model/image_policy.cpp LIBRARIES 
 kobalt_widget_test(android-ui SOURCES "${KOBALT_TESTS}/android/android_ui_test.cpp"
     "${KOBALT_ROOT}/src/platform/android/start_screen.cpp" LIBRARIES test-reader-runtime)
 kobalt_widget_test(android-reader-lifecycle SOURCES "${KOBALT_TESTS}/android/android_reader_test.cpp"
-    "${KOBALT_ROOT}/src/platform/android/reader.cpp" LIBRARIES test-reader-runtime
+    "${KOBALT_ROOT}/src/platform/android/reader.cpp" "${KOBALT_ROOT}/src/platform/android/display.cpp"
+    LIBRARIES test-reader-runtime
     ENVIRONMENT "KOBALT_FIXTURES=${KOBALT_TEST_FIXTURES}")
 kobalt_widget_test(desktop-window SHARDED SOURCES "${KOBALT_TESTS}/desktop/window_test.cpp"
     "${KOBALT_ROOT}/src/platform/desktop/window.cpp" "${KOBALT_ROOT}/src/platform/desktop/services.cpp"

@@ -1,6 +1,7 @@
 #pragma once
 #include "../style/theme.h"
 #include <QCheckBox>
+#include <QFont>
 #include <QVector>
 #include <functional>
 
@@ -21,6 +22,8 @@ public:
         bool pressedFill = false;
         // The indicator sits before the label instead of after it.
         bool leadingIndicator = false;
+        // Align a font-name preview by its visible ink, like the font panel.
+        bool opticalLabel = false;
         bool operator==(const Presentation &other) const;
     };
     void setPresentation(const Presentation &value);
@@ -34,9 +37,12 @@ public:
         int percent = -1;
         bool charging = false;
         bool halfSpaces = false;
+        QFont sampleFont;
+        int sampleWeight = -1;
         bool operator==(const ValueStyle &other) const {
             return battery == other.battery && percent == other.percent && charging == other.charging &&
-                   halfSpaces == other.halfSpaces;
+                   halfSpaces == other.halfSpaces && sampleFont == other.sampleFont &&
+                   sampleWeight == other.sampleWeight;
         }
     };
     void setValue(const QString &value);

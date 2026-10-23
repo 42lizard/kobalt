@@ -4,15 +4,15 @@
 namespace kobalt {
 // When a page turn flashes the whole screen to clear ghosting. Closing the
 // menu with a tap on the page flashes in every mode; this covers turns only.
-enum class ScreenRefresh { Smart, Chapter, Pages6, Pages10, Pages20, Manual };
+enum class ScreenRefresh { Smart, Chapter, Pages6, Pages10, Pages20, Manual, EveryPage };
 
 // Smart flashes at a chapter start after at least this many turns since the
 // last flash, so a run of short chapters does not flash on almost every turn.
 inline constexpr int smartRefreshTurns = 10;
 
 inline constexpr ScreenRefresh screenRefreshModes[] = {
-    ScreenRefresh::Smart,   ScreenRefresh::Chapter, ScreenRefresh::Pages6,
-    ScreenRefresh::Pages10, ScreenRefresh::Pages20, ScreenRefresh::Manual,
+    ScreenRefresh::Smart,   ScreenRefresh::EveryPage, ScreenRefresh::Chapter, ScreenRefresh::Pages6,
+    ScreenRefresh::Pages10, ScreenRefresh::Pages20,   ScreenRefresh::Manual,
 };
 
 // The value saved in reader-settings.json.
@@ -20,6 +20,8 @@ inline QString screenRefreshValue(ScreenRefresh mode) {
     switch (mode) {
     case ScreenRefresh::Smart:
         return QStringLiteral("smart");
+    case ScreenRefresh::EveryPage:
+        return QStringLiteral("1");
     case ScreenRefresh::Chapter:
         return QStringLiteral("chapter");
     case ScreenRefresh::Pages6:
@@ -48,6 +50,8 @@ inline bool refreshOnTurn(ScreenRefresh mode, int turnsSinceFlash, bool chapterS
     switch (mode) {
     case ScreenRefresh::Smart:
         return chapterStart && turnsSinceFlash >= smartRefreshTurns;
+    case ScreenRefresh::EveryPage:
+        return turnsSinceFlash >= 1;
     case ScreenRefresh::Chapter:
         return chapterStart;
     case ScreenRefresh::Pages6:

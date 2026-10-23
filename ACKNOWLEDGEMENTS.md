@@ -49,7 +49,7 @@ Kobalt's independent footnote matcher follows the popup detection rules develope
 | [Noto Serif CJK](https://github.com/notofonts/noto-cjk) | Adobe and the Noto Project Authors. | Chinese, Japanese and Korean fallback glyphs. | [Noto Serif CJK](resources/notices/Noto-Serif-CJK-OFL) |
 | [Instrument Serif](https://github.com/Instrument/instrument-serif) | The Instrument Serif Project Authors. | Loading-screen wordmark and caption. | [Instrument Serif](resources/notices/Instrument-Serif-OFL) |
 | [eBook Fonts](https://github.com/nicoverbruggen/ebook-fonts) | Nico Verbruggen, collection and font adaptations; original font authors listed below. | Reading fonts listed below. | [Font credits](resources/notices/eBook-Fonts), [Atkinson Hyperlegible Next](resources/notices/Atkinson-Hyperlegible-Next-OFL), [Domitian](resources/notices/Domitian) |
-| [Phosphor Icons](https://github.com/phosphor-icons/core) | Helena Zhang, Tobias Fried and the Phosphor contributors. | Reader interface icons, regular weight. | [MIT](resources/notices/Phosphor-MIT) |
+| [Phosphor Icons](https://github.com/phosphor-icons/core) | Helena Zhang, Tobias Fried and the Phosphor contributors. | Reader interface, Navigate compass, Styling settings and annotation action icons, regular weight. | [MIT](resources/notices/Phosphor-MIT) |
 | [TeX hyphenation](https://github.com/hyphenation/tex-hyphen), [wortliste](https://repo.or.cz/wortliste.git), [LibreOffice dictionaries](https://github.com/LibreOffice/dictionaries) and [TeX Users Group exceptions](https://ctan.org/tex-archive/info/digests/tugboat/hyphenex) | The TeX hyphenation, wortliste, LibreOffice dictionary and TeX Users Group authors; conversions by the KOReader contributors. Individual pattern authors are listed below. | Bundled hyphenation patterns. | [Pattern credits and licenses](resources/notices/Hyphenation-patterns) |
 
 Nico Verbruggen maintains the eBook Fonts collection and its NV font adaptations. The original font designs remain credited to their authors below:
@@ -108,3 +108,5 @@ The [font manifests](resources/fonts/) and [icon manifest](resources/icons/phosp
 The build and test scripts also use Python, CMake, Ninja, GNU Make, GCC or Clang, GNU Binutils, pkg-config, Docker or Podman, QEMU user-mode emulation and the Android SDK and NDK. These are development tools, rather than libraries bundled into the Kobalt reader package.
 
 The [in-app acknowledgments](resources/acknowledgments.json), dependency manifests and license notices are the source records for this document.
+
+Android BOOX support uses [AndroidHiddenApiBypass 4.3](https://github.com/LSPosed/AndroidHiddenApiBypass) by the LSPosed contributors, under the Apache License 2.0. Kobalt uses its own BOOX adapter and does not bundle the Onyx SDK.

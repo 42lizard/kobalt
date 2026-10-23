@@ -389,7 +389,9 @@ static PrivateText layoutPrivateText(const QString &input, const QFont &font, in
     if (text.isEmpty() || !fonts().library) {
         return result;
     }
-    const int steps = weight < 0 ? (interfaceFamily(font) ? interfaceWeight() : 0) : qBound(0, weight, 12);
+    const bool interface = interfaceFamily(font) || font.family() == interfaceFont().family() ||
+                           font.family() == chromeFont().family() || font.family() == headerFooterFont().family();
+    const int steps = weight < 0 ? (interface ? interfaceWeight() : 0) : qBound(0, weight, 12);
     QString cacheKey = font.toString() + ':' + QString::number(steps) + ':' + QString::number(rasterize) + ':' +
                        QString::number(font.capitalization()) + ':' + QString::number(font.letterSpacingType()) + ':' +
                        QString::number(font.letterSpacing(), 'g', 16) + ':' +
@@ -774,7 +776,7 @@ void drawPrivateText(QPainter &painter, const QRect &area, const QString &text, 
 }
 void drawInterfaceText(QPainter &painter, const QRect &area, const QString &text, Qt::Alignment alignment, int weight,
                        const QVector<QPair<int, int>> &boldRanges) {
-    if (!needsPrivateText(text, painter.font())) {
+    if (weight < 0 && !needsPrivateText(text, painter.font())) {
         painter.drawText(area, alignment, text);
         return;
     }

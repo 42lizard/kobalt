@@ -417,6 +417,29 @@ assert.equal(elements.image.src, 'seconddark');
         with self.assertRaisesRegex(ValueError, 'Viewport differs'):
             runner.merge_captures(old, fresh, [])
 
+    def test_fixture_date_requires_canonical_utc_and_rejects_bad_calendar_dates(self):
+        self.assertEqual(runner.fixture_date(runner.DEFAULT_FIXTURE_DATE), runner.DEFAULT_FIXTURE_DATE)
+        self.assertEqual(runner.fixture_date('2026-10-18T09:00:00Z'), '2026-10-18T09:00:00Z')
+        for value in ('2026-02-30T09:00:00Z', '2026-10-18', '2026-10-18T09:00:00',
+                      '2026-10-18T09:00:00+02:00', '2026-10-18T09:00:00+00:00', ''):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'canonical UTC'):
+                runner.fixture_date(value)
+
+    def test_invalid_fixture_date_cli_does_not_start_capture(self):
+        for value in ('2026-02-30T09:00:00Z', '2026-10-18T09:00:00+02:00'):
+            with self.subTest(value=value), patch.object(runner.subprocess, 'run') as run, \
+                    patch('sys.stderr', io.StringIO()), self.assertRaises(SystemExit):
+                runner.main(['--fixture-date', value, '--list'])
+            run.assert_not_called()
+
+    def test_partial_gallery_refuses_mixed_creation_dates(self):
+        old = dict(width=1264, height=1680, fixture_date='2026-10-18T09:00:00Z')
+        fresh = dict(width=1264, height=1680, fixture_date='2026-10-19T09:00:00Z')
+        with self.assertRaisesRegex(ValueError, 'Fixture date differs'):
+            runner.merge_captures(old, fresh, [])
+        with self.assertRaisesRegex(ValueError, 'Fixture date differs'):
+            runner.merge_captures(dict(width=1264, height=1680), fresh, [])
+
     def test_density_paths_keep_the_default_and_isolate_other_densities(self):
         self.assertEqual(runner.capture_folder(300, 'light', 'settings'), Path('light/settings'))
         self.assertEqual(runner.capture_folder(212, 'light', 'settings'), Path('ppi-212/light/settings'))
@@ -428,20 +451,33 @@ assert.equal(elements.image.src, 'seconddark');
         (build / 'reader-screenshot-tour').write_bytes(b'binary')
         book = self.cache / 'book.epub'
         book.write_bytes(self.payload)
+        corrupt_date = [False]
         def capture(command, **kwargs):
             folder = Path(command[command.index('--output') + 1])
             ppi = int(command[command.index('--ppi') + 1])
             (folder / 'display.png').write_bytes(b'unchanged PNG')
-            (folder / 'display.json').write_text(json.dumps(dict(ppi=ppi, reading_ppi=ppi, dpr=1)))
-        for options, expected in [([], [300]), (['--ppi', '300', '--ppi', '212'], [300, 212])]:
+            (folder / 'display.json').write_text(json.dumps(dict(ppi=ppi, reading_ppi=ppi, dpr=1, fixture_date='1999-01-01T00:00:00Z' if corrupt_date[0] else command[command.index('--fixture-date') + 1])))
+        for options, expected in [([], [300]), (['--ppi', '300', '--ppi', '212'], [300, 212]),
+                                  (['--fixture-date', '2026-10-18T09:00:00Z'], [300])]:
             with patch.object(runner, 'ROOT', self.cache), patch.object(runner, 'cached_book', return_value=book), \
-                    patch.object(runner, 'report'), patch.object(runner.subprocess, 'run', side_effect=capture) as run:
+                    patch.object(runner, 'report') as report, patch.object(runner.subprocess, 'run', side_effect=capture) as run:
                 runner.main(['--no-build', '--build-dir', str(build), '--group', 'settings', '--theme', 'light', *options])
             self.assertEqual(sorted(int(call.args[0][call.args[0].index('--ppi') + 1]) for call in run.call_args_list), sorted(expected))
+            requested_date = options[options.index('--fixture-date') + 1] if '--fixture-date' in options else runner.DEFAULT_FIXTURE_DATE
+            manifest = report.call_args.args[1]
+            self.assertEqual(manifest['fixture_date'], requested_date)
+            self.assertTrue(all(shot['fixture_date'] == requested_date for shot in manifest['screens']))
+            self.assertTrue(all(call.args[0][call.args[0].index('--fixture-date') + 1] == requested_date for call in run.call_args_list))
             self.assertEqual((self.cache / 'build/screenshots/light/settings/display.png').read_bytes(), b'unchanged PNG')
             if 212 in expected:
                 self.assertTrue((self.cache / 'build/screenshots/ppi-212/light/settings/display.png').exists())
             shutil.rmtree(self.cache / 'build/screenshots')
+        corrupt_date[0] = True
+        with patch.object(runner, 'ROOT', self.cache), patch.object(runner, 'cached_book', return_value=book), \
+                patch.object(runner, 'report'), patch.object(runner.subprocess, 'run', side_effect=capture):
+            with self.assertRaisesRegex(ValueError, 'Capture fixture date differs'):
+                runner.main(['--no-build', '--build-dir', str(build), '--group', 'settings', '--theme', 'light'])
+        self.assertFalse((self.cache / 'build/screenshots/manifest.json').exists())
 
     def test_partial_density_refresh_keeps_other_density(self):
         old = dict(complete=True, width=1264, height=1680, books={}, screens=[
@@ -473,7 +509,7 @@ assert.equal(elements.image.src, 'seconddark');
         (build / 'reader-screenshot-tour').write_bytes(b'binary')
         output = self.cache / 'build/screenshots'
         output.mkdir(parents=True)
-        previous = dict(width=1264, height=1680, screens=[], complete=True)
+        previous = dict(width=1264, height=1680, screens=[], complete=True, fixture_date=runner.DEFAULT_FIXTURE_DATE)
         (output / 'manifest.json').write_text(json.dumps(previous))
         (output / 'index.html').write_text('previous gallery')
         book = self.cache / 'book.epub'

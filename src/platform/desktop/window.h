@@ -7,6 +7,7 @@ class QStackedWidget;
 class QComboBox;
 class QScreen;
 class QActionGroup;
+class QAction;
 namespace kobalt::android {
 class WidgetCanvas;
 class StartScreen;
@@ -50,7 +51,8 @@ private:
     android::WidgetCanvas *canvas;
     QComboBox *screenPicker, *resolutionPicker;
     QActionGroup *screenActions, *resolutionActions;
-    int screenPreset = 0, renderingDpi = 0;
+    QAction *rotateAction;
+    int screenPreset = 1, renderingDpi = 300;
     QTimer resizeTimer;
     QMetaObject::Connection screenChanged, logicalDpiChanged, physicalDpiChanged;
     bool closing = false, repairPending = false, failed = false;

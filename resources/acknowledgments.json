@@ -12,6 +12,17 @@
     ]
   },
   {
+    "group": "kobalt",
+    "name": "AndroidHiddenApiBypass",
+    "version": "4.3",
+    "description": "BOOX vendor interface access within the Android app process. Copyright LSPosed contributors.",
+    "license": "Apache License 2.0",
+    "url": "https://github.com/LSPosed/AndroidHiddenApiBypass",
+    "notices": [
+      "AndroidHiddenApiBypass-Apache-2.0"
+    ]
+  },
+  {
     "group": "engine",
     "name": "CREngine",
     "version": "KOReader fork, b05cf00791d2",

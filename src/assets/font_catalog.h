@@ -46,6 +46,8 @@ QStringList sideloadedFontFiles(const QString &directory);
 inline QString fontDisplayName(const QString &family) {
     return family.startsWith("NV ") ? family.mid(3) : family;
 }
+// Both reading and fallback pickers use source groups, Libron first, then family name.
+QVector<ReadingFont> orderedReadingFonts(QVector<ReadingFont> fonts);
 QString fontFamilyKey(const QString &family);
 double normalizedOpticalSize(const FontOpticalSizeAxis &axis, double points);
 FontOpticalSizeAxis fontOpticalSizeAxis(const QVector<ReadingFont> &fonts, const QString &family);

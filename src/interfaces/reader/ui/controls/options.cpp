@@ -37,7 +37,8 @@ bool DescribedOption::Presentation::operator==(const Presentation &other) const 
     return indicator == other.indicator && dividers == other.dividers && horizontalInset == other.horizontalInset &&
            minimumRowHeight == other.minimumRowHeight && labelPixels == other.labelPixels &&
            descriptionPixels == other.descriptionPixels && indicatorSize == other.indicatorSize &&
-           pressedFill == other.pressedFill && leadingIndicator == other.leadingIndicator;
+           pressedFill == other.pressedFill && leadingIndicator == other.leadingIndicator &&
+           opticalLabel == other.opticalLabel;
 }
 void DescribedOption::setPresentation(const Presentation &value) {
     if (appearance == value)
@@ -73,15 +74,11 @@ int DescribedOption::heightForWidth(int width) const {
     descriptionFont.setPixelSize(appearance.descriptionPixels);
     descriptionFont.setWeight(QFont::Normal);
     descriptionFont.setItalic(false);
-    const auto bounds =
-        QFontMetrics(descriptionFont)
-            .boundingRect(QRect(0, 0,
-                                qMax(1, width - 2 * appearance.horizontalInset - m::settings::labelLeft -
-                                            appearance.indicatorSize.width() - m::settings::toggleGap),
-                                0),
-                          Qt::TextWordWrap, description);
-    return qMax(appearance.minimumRowHeight,
-                m::settings::descriptionTop + bounds.height() + m::settings::descriptionBottom);
+    const int textWidth = qMax(1, width - 2 * appearance.horizontalInset - m::settings::labelLeft -
+                                      appearance.indicatorSize.width() - m::settings::toggleGap);
+    return qMax(appearance.minimumRowHeight, m::settings::descriptionTop +
+                                                 wrappedInterfaceTextHeight(description, descriptionFont, textWidth) +
+                                                 m::settings::descriptionBottom);
 }
 void DescribedOption::resizeEvent(QResizeEvent *event) {
     QCheckBox::resizeEvent(event);
@@ -103,9 +100,7 @@ void DescribedOption::paintEvent(QPaintEvent *) {
     const int textBottom =
         description.isEmpty()
             ? m::settings::checkboxTop + m::settings::checkboxSize
-            : m::settings::descriptionTop + QFontMetrics(descriptionFont)
-                                                .boundingRect(QRect(0, 0, textWidth, 0), Qt::TextWordWrap, description)
-                                                .height();
+            : m::settings::descriptionTop + wrappedInterfaceTextHeight(description, descriptionFont, textWidth);
     const int textOffset = (height() - (textBottom - m::settings::checkboxTop)) / 2 - m::settings::checkboxTop;
     const int boxTop = (height() - appearance.indicatorSize.height()) / 2;
     const int boxLeft = appearance.leadingIndicator
@@ -171,8 +166,10 @@ void DescribedOption::paintEvent(QPaintEvent *) {
         // The value keeps the right of the line; the label keeps at least three fifths.
         const int labelWidth = qMin(interfaceTextWidth(text(), labelFont), labelLine.width() * 3 / 5);
         labelBounds.setWidth(labelWidth);
-        QFont valueFont = chromeFont(m::control::captionValueText);
-        valueFont.setLetterSpacing(QFont::AbsoluteSpacing, m::chrome::captionSpacing);
+        QFont valueFont =
+            valueStyle.sampleWeight >= 0 ? valueStyle.sampleFont : chromeFont(m::control::captionValueText);
+        if (valueStyle.sampleWeight < 0)
+            valueFont.setLetterSpacing(QFont::AbsoluteSpacing, m::chrome::captionSpacing);
         painter.save();
         painter.setFont(valueFont);
         // The battery keeps the right edge and the text ends before it.
@@ -181,15 +178,15 @@ void DescribedOption::paintEvent(QPaintEvent *) {
         const int gap = valueStyle.battery && !value.isEmpty() ? int(m::reading::batteryGap) : 0;
         const int room = qMax(0, labelLine.width() - labelWidth - m::settings::toggleGap - icon - gap);
         const int textRight = labelLine.right() + 1 - icon - gap;
-        const qreal halfSpaced = valueStyle.halfSpaces ? halfSpacedWidth(painter.fontMetrics(), value) : 0;
+        const qreal halfSpaced = valueStyle.halfSpaces ? halfSpacedWidth(painter.font(), value) : 0;
         if (valueStyle.halfSpaces && halfSpaced <= room)
-            drawHalfSpaced(painter, textRight - halfSpaced, labelLine, value);
+            drawHalfSpaced(painter, textRight - halfSpaced, labelLine, value, valueStyle.sampleWeight);
         else {
             const auto shown = qt::textWidth(painter.fontMetrics(), value) > room
                                    ? painter.fontMetrics().elidedText(value, Qt::ElideRight, room)
                                    : value;
-            painter.drawText(QRect(textRight - room, labelLine.y(), room, labelLine.height()),
-                             Qt::AlignRight | Qt::AlignVCenter, shown);
+            drawInterfaceText(painter, QRect(textRight - room, labelLine.y(), room, labelLine.height()), shown,
+                              Qt::AlignRight | Qt::AlignVCenter, valueStyle.sampleWeight);
         }
         if (valueStyle.battery) {
             const qreal width = body * int(m::panel::batteryBodyWidth) / int(m::panel::batteryBodyHeight);
@@ -204,14 +201,18 @@ void DescribedOption::paintEvent(QPaintEvent *) {
     const auto label = interfaceTextWidth(text(), labelFont) > labelBounds.width()
                            ? elideInterfaceText(text(), labelFont, labelBounds.width())
                            : text();
-    drawInterfaceText(painter, labelBounds, label, Qt::AlignLeft | Qt::AlignVCenter);
+    if (appearance.opticalLabel)
+        drawOpticalText(painter, labelBounds, text());
+    else
+        drawInterfaceText(painter, labelBounds, label, Qt::AlignLeft | Qt::AlignVCenter);
     labelFont.setPixelSize(appearance.descriptionPixels);
     labelFont.setItalic(false);
     painter.setFont(labelFont);
     painter.setPen(darkTheme(this) ? QColor(m::text::explanationDark) : QColor(m::text::explanationLight));
-    painter.drawText(
-        QRect(textLeft, m::settings::descriptionTop + textOffset, textWidth, textBottom - m::settings::descriptionTop),
-        Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, description);
+    drawWrappedInterfaceText(painter,
+                             QRect(textLeft, m::settings::descriptionTop + textOffset, textWidth,
+                                   height() - m::settings::descriptionTop - textOffset),
+                             description);
 }
 
 RadioList::RadioList(QWidget *parent) : QWidget(parent) {

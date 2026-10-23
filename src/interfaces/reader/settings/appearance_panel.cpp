@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/icons.h"
 #include "interfaces/reader/ui/controls/rows.h"
@@ -10,7 +11,9 @@
 #include "reading/reading_density.h"
 #include "interfaces/reader/ui/style/styles.h"
 
+#include <QApplication>
 #include <QEvent>
+#include <QPointer>
 #include <QScrollBar>
 
 namespace kobalt::reader {
@@ -79,7 +82,7 @@ AppearanceSheet::AppearanceSheet(QWidget *parent) : ui::Panel(parent, Qt::Bottom
         controls->setContentsMargins(m::panel::rowsMargins);
         pages->addWidget(page);
     }
-    message = new QLabel(this);
+    message = new ui::InterfaceLabel(this);
     message->setObjectName("rrPreviewLabel");
     message->setAlignment(Qt::AlignCenter);
     message->setWordWrap(true);
@@ -122,10 +125,22 @@ int AppearanceSheet::fitHeight(int width, int availableHeight) {
             scroll->setWidget(pages);
             scroll->show();
         } else {
+            QPointer<QWidget> focused = QApplication::focusWidget();
+            const bool focusInScroll = focused && (focused == scroll || scroll->isAncestorOf(focused));
+            // Hiding can traverse focus through the scroll area. Keep its
+            // content attached until that traversal has finished.
+            scroll->hide();
             scroll->takeWidget();
             pages->setParent(this);
             static_cast<QVBoxLayout *>(layout())->insertWidget(0, pages, 1);
-            scroll->hide();
+            pages->show();
+            if (focusInScroll) {
+                if (focused && pages->isAncestorOf(focused)) {
+                    focused->setFocus(Qt::OtherFocusReason);
+                } else {
+                    pages->setFocus(Qt::OtherFocusReason);
+                }
+            }
         }
         pages->show();
     }
@@ -299,7 +314,7 @@ AppearancePanel::AppearancePanel(const AppearanceLayout &layout, const Appearanc
     customRows->addSpacing(m::spacing::section);
     slotMap = new SlotMap(custom, true);
     customRows->addWidget(slotMap);
-    slotHint = new QLabel(strings::get("header_footer.custom_hint"), custom);
+    slotHint = new ui::InterfaceLabel(strings::get("header_footer.custom_hint"), custom);
     slotHint->setObjectName("rrHeaderFooterHint");
     slotHint->setWordWrap(true);
     // The same secondary text as the sliders' current values, so it follows the theme.

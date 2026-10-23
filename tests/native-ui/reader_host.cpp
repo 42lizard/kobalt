@@ -44,7 +44,7 @@ void ReaderHost::open(const QString &path, QSize nativeSize) {
     saved["dark_mode"] = settings.value("dark_mode").toBool(false);
     saved["bold_reading"] = settings.value("bold_reading").toString("off");
     saved["avoid_wasteful_styling"] = settings.value("avoid_wasteful_styling").toBool(true);
-    orientation.configure(settings);
+    (rotation ? rotation : &orientation)->configure(settings);
     const QSize viewport = readerInterface().readingViewport(nativeSize, settings);
     opening = std::make_unique<ReaderSession>(fonts, placeholder);
     session_ = opening.get();
@@ -68,7 +68,8 @@ void ReaderHost::open(const QString &path, QSize nativeSize) {
         auto services = hostReaderServices();
         if (guard->configureServices)
             guard->configureServices(services);
-        auto *window = createReaderWindow(std::move(book), &guard->orientation, std::move(services));
+        auto *window = createReaderWindow(std::move(book), guard->rotation ? guard->rotation : &guard->orientation,
+                                          std::move(services));
         window->setAttribute(Qt::WA_DeleteOnClose, false);
         window->setWindowFlags(Qt::Widget);
         window->setWindowModality(Qt::NonModal);

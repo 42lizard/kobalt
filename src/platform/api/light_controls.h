@@ -24,6 +24,9 @@ public:
     virtual int warmthMinimum() const = 0;
     virtual int warmthMaximum() const = 0;
     virtual int warmthStep() const = 0;
+    virtual bool hasAutomaticWarmth() const {
+        return hasWarmth();
+    }
     virtual bool automaticWarmth() const = 0;
     // Return the actual level, or a negative value on failure. Native levels may round.
     virtual int setWarmth(int value) = 0;

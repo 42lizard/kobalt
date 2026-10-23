@@ -81,7 +81,6 @@ inline constexpr Px overviewBracketMinimum{10}, overviewBracketMaximum{20};
 inline constexpr Px overviewDashSpacing{20}, overviewDashHeight{10}, overviewTickGap{8}, overviewTickHeight{12};
 inline constexpr auto overviewPaperLight = "#f1f1f1", overviewPaperDark = "#242424";
 inline constexpr qreal previewHeightFraction = .9;
-inline constexpr int previewFadeAlpha = 242;
 inline constexpr int minimumZoomSpan = 60;
 }
 namespace loading {
@@ -140,10 +139,10 @@ inline constexpr Px labelText{30}, descriptionText{25}, countText{28}, tabText{2
 // A bottom tab centers its icon and label as one group.
 inline constexpr Px tabIcon{48}, tabGap{10};
 inline constexpr Px captionText{22}, captionSpacing{2}, numberText{22};
-inline constexpr Px listActionHeight{list::twoLines}, optionHeight{186}, checkSize{48};
+inline constexpr Px listActionHeight{list::twoLines}, optionHeight{list::twoLines}, checkSize{48};
 // Settings tabs stack an icon over a label, as the bottom tabs do. The rail
 // is as wide as its widest label with this margin on each side.
-inline constexpr Px railRowHeight{120}, railInset{28};
+inline constexpr Px railRowHeight{124}, railInset{28};
 inline constexpr Px chevronRight{42}, actionRight{112}, statsTopPadding{heavyRule};
 inline constexpr Px queryText{36}, selectorGap{16}, selectorIcon{36};
 // A label and its description, or a caption and the text below it.
@@ -240,6 +239,7 @@ inline const QRectF handoffDetail{28, 463, 346, 24};
 inline const QRectF handoffHint{28, 499, 346, 18};
 }
 namespace notice {
+inline constexpr int dimAlpha = 64;
 inline constexpr Px cardWidth{760}, height{144}, sideClearance{32};
 inline constexpr PxMargins cardMargins{32, 28, 32, 28};
 inline constexpr Px cardGap{20};

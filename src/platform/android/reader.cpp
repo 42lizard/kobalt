@@ -117,7 +117,6 @@ void ReaderController::begin(const QString &path, QSize pixels) {
             window->setWindowModality(Qt::NonModal);
             window->resize(pixels);
             guard->window_ = window;
-            guard->phase = Phase::Reading;
             window->finished = [guard](std::unique_ptr<ReaderSession> retained) {
                 retained.reset();
                 if (guard)
@@ -128,7 +127,20 @@ void ReaderController::begin(const QString &path, QSize pixels) {
                         }
                     });
             };
-            emit guard->opened();
+            QPointer<ReaderWindow> pendingWindow(window);
+            const auto lease = guard->lease;
+            window->preparePresentation([guard, pendingWindow, lease](bool ready) {
+                if (!guard || !pendingWindow || guard->phase != Phase::Opening || guard->window_ != pendingWindow ||
+                    guard->lease != lease) {
+                    return;
+                }
+                if (!ready || !lease || lease->revoked()) {
+                    guard->retire();
+                    return;
+                }
+                guard->phase = Phase::Reading;
+                emit guard->opened();
+            });
         },
         [guard, lastStage = OpeningStage::Content, painted = QElapsedTimer{}](OpeningStage stage, int percent) mutable {
             if (!guard || guard->phase != Phase::Opening)

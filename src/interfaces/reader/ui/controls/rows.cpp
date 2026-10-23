@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "rows.h"
 #include "support/qt_font.h"
 #include "../style/metrics.h"
@@ -84,6 +85,30 @@ void ListRow::setTitlePixels(int pixels) {
     labelStyles[0] = style;
     syncLabelStyles();
 }
+void ListRow::setLabelFont(PrivateTextLabel *label, int index, const QFont &font) {
+    auto family = font.family();
+    family.replace('\\', "\\\\");
+    family.replace('"', "\\\"");
+    const auto style =
+        QString(
+            "font-family:\"%1\";font-size:%2px;font-weight:400;font-style:normal;background:transparent;border:none;")
+            .arg(family)
+            .arg(font.pixelSize());
+    if (labelStyles[index] == style) {
+        return;
+    }
+    label->setFont(font);
+    labelStyles[index] = style;
+    syncLabelStyles();
+}
+void ListRow::setDetailFont(const QFont &font) {
+    setLabelFont(detail, 1, font);
+}
+void ListRow::setMetadataFont(const QFont &font) {
+    setLabelFont(caption, 2, font);
+    setLabelFont(leading, 3, font);
+    setLabelFont(trailing, 4, font);
+}
 QPushButton *ListRow::addAction(const QString &name, const QString &accessibleName) {
     if (!action) {
         auto *cell = new CellButton(ControlIcon::Close, this);
@@ -94,6 +119,11 @@ QPushButton *ListRow::addAction(const QString &name, const QString &accessibleNa
     action->setAccessibleName(accessibleName);
     arrange();
     return action;
+}
+void ListRow::setActionIcon(ControlIcon icon) {
+    if (action) {
+        static_cast<CellButton *>(action)->setGlyph(icon);
+    }
 }
 void ListRow::setActionRule(bool value) {
     if (action)
@@ -248,8 +278,8 @@ void ListRow::paintEvent(QPaintEvent *) {
     painter.fillRect(0, height() - m::control::border, width(), m::control::border, dividerColor(this));
 }
 ListHeader::ListHeader(QWidget *parent) : QWidget(parent) {
-    left = new QLabel(this);
-    right = new QLabel(this);
+    left = new ui::InterfaceLabel(this);
+    right = new ui::InterfaceLabel(this);
     ui::captionLabel(left);
     ui::captionLabel(right);
     right->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -285,8 +315,7 @@ void ListHeader::setShaded(bool value) {
 void ListHeader::paintEvent(QPaintEvent *) {
     QPainter painter(this);
     // Styles can replace Midlight when a list creates headers after theme replay.
-    const auto background =
-        shaded ? (darkTheme(this) ? QColor("#333333") : QColor("#dddddd")) : palette().color(QPalette::Window);
+    const auto background = shaded ? sectionColor(this) : palette().color(QPalette::Window);
     painter.fillRect(rect(), background);
     painter.fillRect(0, height() - m::control::border, width(), m::control::border, dividerColor(this));
 }
@@ -299,7 +328,7 @@ QHBoxLayout *horizontalRow() {
 QHBoxLayout *labeledRow(QWidget *parent, QVBoxLayout *rows, const QString &label) {
     auto *line = horizontalRow();
     rows->addLayout(line);
-    auto *caption = new QLabel(label, parent);
+    auto *caption = new ui::InterfaceLabel(label, parent);
     caption->setFixedWidth(m::control::captionWidth);
     caption->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     readerStyle(caption, styles::font(m::text::secondary));

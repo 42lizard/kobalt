@@ -15,6 +15,7 @@ enum class ControlIcon {
     Layout,
     Close,
     Chapters,
+    Compass,
     Graph,
     Previous,
     Next,
@@ -43,6 +44,7 @@ enum class ControlIcon {
     // The Settings tabs. System belongs to the sleep screen settings.
     Display,
     Advanced,
+    Styling,
     Desktop,
     Dictionaries,
     About,
@@ -50,7 +52,15 @@ enum class ControlIcon {
     RotationBoth,
     Swipe,
     PreviousChapter,
-    NextChapter
+    NextChapter,
+    Annotate,
+    SelectionStart,
+    SelectionEnd,
+    SaveHighlight,
+    ClearSelection,
+    ExtendSelection,
+    EditHighlight,
+    RemoveHighlight
 };
 // Paint vectors at the target resolution without an intermediate icon bitmap.
 void paintOpeningIcon(QPainter &painter, ControlIcon icon, const QRectF &bounds, QColor color);

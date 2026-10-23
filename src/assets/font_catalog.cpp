@@ -8,6 +8,16 @@
 #include FT_MULTIPLE_MASTERS_H
 
 namespace kobalt {
+QVector<ReadingFont> orderedReadingFonts(QVector<ReadingFont> fonts) {
+    std::stable_sort(fonts.begin(), fonts.end(), [](const auto &a, const auto &b) {
+        if (a.origin != b.origin)
+            return a.origin < b.origin;
+        if (a.origin == FontOrigin::Recommended && (a.family == "Libron") != (b.family == "Libron"))
+            return a.family == "Libron";
+        return a.family.compare(b.family, Qt::CaseInsensitive) < 0;
+    });
+    return fonts;
+}
 namespace {
 // Sideloaded families often keep their own folder, and downloaded families
 // often nest their files one level further, as in Family/static/. Hidden

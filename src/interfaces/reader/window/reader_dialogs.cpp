@@ -15,6 +15,7 @@
 #include "reading/sleep_screen.h"
 #include "storage/reader_storage.h"
 #include <QDateTime>
+#include <QGridLayout>
 
 namespace kobalt::reader {
 namespace strings = kobalt::strings;
@@ -197,10 +198,9 @@ void Reader::showFormattingWarning() {
 bool Reader::progressBlocked() const {
     return bool(debugDialog) || bool(finishDialog) || bool(bookmarkErrorDialog) || bool(formattingWarningDialog) ||
            bool(settingsWriteErrorDialog) || book->deviceTransition() || services.suspended() || !isVisible() ||
-           lightPopup->isVisible() || model->busy() || (chapterGraph->isVisible() && !statsPinned()) ||
-           dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() || lookupPending ||
-           appearanceEdit.panelOpen() || appearanceEdit.applying() || general->isVisible() || choices->isVisible() ||
-           acknowledgments->isVisible();
+           lightPopup->isVisible() || model->busy() || chapterGraph->isVisible() || dictionaryPanel->isVisible() ||
+           searchPanel->isVisible() || linksActive() || lookupPending || appearanceEdit.panelOpen() ||
+           appearanceEdit.applying() || general->isVisible() || choices->isVisible() || acknowledgments->isVisible();
 }
 
 void Reader::dismissProgressChoice() {
@@ -493,8 +493,7 @@ void Reader::askRemoveBookmark(const QString &position) {
         if (remove) {
             bookmarks->remove(position);
             page->bookmarked = bookmarks->marked(model->page());
-            bookmarkList->showBookmarks(bookmarkRows(),
-                                        strings::get("stats.page_of").arg(model->page() + 1).arg(model->pages()));
+            bookmarkList->showBookmarks(bookmarkRows());
         }
         refresh();
     };
@@ -515,6 +514,7 @@ void Reader::askRemoveBookmark(const QString &position) {
 }
 
 void Reader::openBookmarks() {
+    annotationPopover->hide();
     if (!bookmarks->available())
         return;
     if (!bookmarks->writable()) {
@@ -537,8 +537,7 @@ void Reader::openBookmarks() {
     bottomControls->hide();
     const int top = navigation ? navigation->statusHeight() : 0;
     bookmarkList->setGeometry(0, top, width(), (navigation ? navigation->contentBottom(size()) : height()) - top);
-    bookmarkList->showBookmarks(bookmarkRows(),
-                                strings::get("stats.page_of").arg(model->page() + 1).arg(model->pages()));
+    bookmarkList->showBookmarks(bookmarkRows());
     refresh();
 }
 
@@ -638,6 +637,8 @@ QString Reader::refreshLabel(kobalt::ScreenRefresh mode) {
     switch (mode) {
     case kobalt::ScreenRefresh::Smart:
         return strings::get("settings.refresh_smart");
+    case kobalt::ScreenRefresh::EveryPage:
+        return strings::get("settings.refresh_every_page");
     case kobalt::ScreenRefresh::Chapter:
         return strings::get("settings.refresh_every_chapter");
     case kobalt::ScreenRefresh::Pages6:
@@ -673,6 +674,7 @@ void Reader::openScreenRefresh() {
     namespace c = m::chrome;
     refreshPopup = new kobalt::ui::ModalOverlay(this);
     refreshPopup->setObjectName("rrScreenRefreshPopup");
+    refreshPopup->setDimmed(true);
     refreshPopup->setGeometry(rect());
     refreshPopup->installEventFilter(this);
     auto *card = refreshPopup->card();
@@ -737,7 +739,8 @@ QString sleepExplanation(sleep::Mode mode) {
 }
 
 void Reader::showSleepScreen() {
-    sleepScreenButton->setCaption(sleepLabel(sleep::mode(preferences)).toUpper());
+    sleepScreenButton->setCaption(sleepScreenButton->isEnabled() ? sleepLabel(sleep::mode(preferences)).toUpper()
+                                                                 : strings::get("settings.unsupported_caption"));
 }
 
 void Reader::closeSleepScreen() {
@@ -756,6 +759,7 @@ void Reader::openSleepScreen() {
     namespace c = m::chrome;
     sleepPopup = new ui::ModalOverlay(this);
     sleepPopup->setObjectName("rrSleepScreenPopup");
+    sleepPopup->setDimmed(true);
     sleepPopup->setGeometry(rect());
     sleepPopup->installEventFilter(this);
     sleepPopup->dismissed = [this] {
@@ -830,6 +834,8 @@ QString tapZoneLabel(tapZones::Layout layout) {
     switch (layout) {
     case tapZones::Layout::LeftRight:
         return strings::get("settings.tap_left_right");
+    case tapZones::Layout::Reversed:
+        return strings::get("settings.tap_reversed");
     case tapZones::Layout::TopBottom:
         return strings::get("settings.tap_top_bottom");
     case tapZones::Layout::OneHanded:
@@ -870,6 +876,7 @@ void Reader::openTapZones() {
     namespace c = m::chrome;
     tapZonesPopup = new ui::ModalOverlay(this);
     tapZonesPopup->setObjectName("rrTapZonesPopup");
+    tapZonesPopup->setDimmed(true);
     tapZonesPopup->setGeometry(rect());
     tapZonesPopup->installEventFilter(this);
     tapZonesPopup->dismissed = [this] {
@@ -879,20 +886,22 @@ void Reader::openTapZones() {
     card->rows()->setContentsMargins(c::inset, m::notice::cardMargins.top(), c::inset, m::notice::cardMargins.bottom());
     card->title(strings::get("settings.tap_zones"), "rrTapZonesTitle");
     card->message(strings::get("settings.tap_zones_hint"), "rrTapZonesHint");
-    auto *row = new QHBoxLayout;
-    row->setContentsMargins(0, 0, 0, 0);
-    row->setSpacing(m::control::itemGap);
-    card->rows()->addLayout(row);
+    auto *grid = new QGridLayout;
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setSpacing(m::control::itemGap);
+    card->rows()->addLayout(grid);
     auto *group = new QButtonGroup(card);
     const bool rtl = model->state().value("page_progression_rtl").toBool();
+    int index = 0;
     for (const auto layout : tapZones::layouts) {
-        auto *button = new ui::TapZoneButton(layout, rtl, card);
+        auto *button = new ui::TapZoneButton(layout, rtl && layout != tapZones::Layout::Reversed, card);
         button->setObjectName("rrTapZones_" + pageNavigation::tapValue(layout));
         button->setText(tapZoneLabel(layout));
         button->setAccessibleName(button->text());
         button->setChecked(layout == pageNavigation::tapLayout(preferences));
         group->addButton(button);
-        row->addWidget(button);
+        grid->addWidget(button, index / 2, index % 2);
+        ++index;
         connect(button, &QPushButton::clicked, this, [this, layout] {
             auto next = preferences;
             next[pageNavigation::tapPreferenceKey] = pageNavigation::tapValue(layout);
@@ -943,6 +952,7 @@ void Reader::openPageNavigation() {
     namespace c = m::chrome;
     pageNavigationPopup = new ui::ModalOverlay(this);
     pageNavigationPopup->setObjectName("rrPageNavigationPopup");
+    pageNavigationPopup->setDimmed(true);
     pageNavigationPopup->setGeometry(rect());
     pageNavigationPopup->installEventFilter(this);
     pageNavigationPopup->dismissed = [this] {
@@ -1025,6 +1035,7 @@ void Reader::openNavigationBarButtons() {
     namespace c = m::chrome;
     navigationBarPopup = new ui::ModalOverlay(this);
     navigationBarPopup->setObjectName("rrNavigationBarPopup");
+    navigationBarPopup->setDimmed(true);
     navigationBarPopup->setGeometry(rect());
     navigationBarPopup->installEventFilter(this);
     navigationBarPopup->dismissed = [this] {
@@ -1047,8 +1058,8 @@ void Reader::openNavigationBarButtons() {
     for (const auto mode : pageNavigation::barButtonsModes) {
         choices->add("rrNavigationBar_" + pageNavigation::value(mode), barButtonsLabel(mode),
                      strings::get(mode == pageNavigation::BarButtons::Chapters
-                                      ? "settings.navigation_bar_chapters_description"
-                                      : "settings.navigation_bar_pages_description"));
+                                      ? strings::key("settings.navigation_bar_chapters_description")
+                                      : strings::key("settings.navigation_bar_pages_description")));
         if (mode == pageNavigation::barButtons(preferences)) {
             choices->setCurrent(choices->options().size() - 1);
         }
@@ -1078,6 +1089,101 @@ void Reader::openNavigationBarButtons() {
     navigationBarPopup->show();
     navigationBarPopup->raise();
     navigationBarPopup->setFocus();
+}
+
+namespace {
+QString menuViewLabel(pageNavigation::MenuView mode) {
+    switch (mode) {
+    case pageNavigation::MenuView::Seek:
+        return strings::get("settings.menu_view_seek");
+    case pageNavigation::MenuView::Stats:
+        return strings::get("settings.menu_view_stats");
+    default:
+        return strings::get("settings.menu_view_none");
+    }
+}
+}
+
+void Reader::showMenuView() {
+    const auto mode = pageNavigation::menuView(preferences);
+    menuViewButton->setCaption(menuViewLabel(mode).toUpper());
+}
+
+void Reader::closeMenuView() {
+    if (!menuViewPopup) {
+        return;
+    }
+    menuViewPopup->hide();
+    menuViewPopup->deleteLater();
+    menuViewPopup.clear();
+}
+
+void Reader::openMenuView() {
+    if (menuViewPopup) {
+        return;
+    }
+    namespace c = m::chrome;
+    menuViewPopup = new ui::ModalOverlay(this);
+    menuViewPopup->setObjectName("rrMenuViewPopup");
+    menuViewPopup->setDimmed(true);
+    menuViewPopup->setGeometry(rect());
+    menuViewPopup->installEventFilter(this);
+    menuViewPopup->dismissed = [this] {
+        closeMenuView();
+    };
+    auto *card = menuViewPopup->card();
+    card->rows()->setContentsMargins(2, 2, 2, 2);
+    card->rows()->setSpacing(0);
+    card->rows()->addSpacing(m::notice::cardMargins.top());
+    auto *title = card->title(strings::get("settings.default_menu_view"), "rrMenuViewTitle");
+    title->setContentsMargins(c::inset, 0, c::inset, 0);
+    card->rows()->addSpacing(m::spacing::row);
+    auto *hint = card->message(strings::get("settings.default_menu_view_description"), "rrMenuViewHint");
+    readerStyle(hint, styles::font(c::descriptionText));
+    hint->setContentsMargins(c::inset, 0, c::inset, 0);
+    card->rows()->addSpacing(m::notice::cardMargins.bottom());
+    const int cardWidth = qMin<int>(m::notice::cardWidth, width() - 2 * m::notice::sideClearance);
+    auto *choices = new ui::RadioList(card);
+    choices->setObjectName("rrMenuViewChoices");
+    choices->setMinimumRowHeight(c::listActionHeight);
+    choices->setTopDivider(true);
+    for (const auto mode : pageNavigation::menuViews) {
+        const auto description =
+            mode == pageNavigation::MenuView::None   ? strings::key("settings.menu_view_none_description")
+            : mode == pageNavigation::MenuView::Seek ? strings::key("settings.menu_view_seek_description")
+                                                     : strings::key("settings.menu_view_stats_description");
+        choices->add("rrMenuView_" + pageNavigation::value(mode), menuViewLabel(mode), strings::get(description));
+        if (mode == pageNavigation::menuView(preferences)) {
+            choices->setCurrent(choices->options().size() - 1);
+        }
+    }
+    choices->chosen = [this](int index) {
+        auto next = preferences;
+        next[pageNavigation::menuViewKey] = pageNavigation::value(pageNavigation::menuViews[index]);
+        next.remove("pin_stats");
+        next.remove(pageNavigation::thumbnailsKey);
+        if (writePreferences(next)) {
+            preferences = next;
+            showMenuView();
+            settingsError->clear();
+            settingsError->hide();
+        } else {
+            settingsError->setText(strings::get("reader.could_not_save_reader_settings"));
+            settingsError->show();
+        }
+        closeMenuView();
+    };
+    card->rows()->addWidget(choices);
+    choices->setFixedHeight(choices->heightForWidth(cardWidth - 4));
+    card->fitToWidth(cardWidth);
+    menuViewPopup->centerCard();
+    for (auto *widget : menuViewPopup->findChildren<QWidget *>()) {
+        textRefresh(widget);
+    }
+    textRefresh(menuViewPopup);
+    menuViewPopup->show();
+    menuViewPopup->raise();
+    menuViewPopup->setFocus();
 }
 
 }

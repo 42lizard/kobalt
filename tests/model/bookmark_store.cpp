@@ -1,4 +1,5 @@
 #include "storage/bookmark_store.h"
+#include "support/qt_compat.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -186,7 +187,7 @@ int main() {
         // folders without disabling edits or accepting an injected path.
         auto unsafeIndex = QJsonDocument::fromJson(read(cache)).object();
         auto unsafePaths = unsafeIndex.value("paths").toObject();
-        unsafePaths[unsafePaths.keys().first()] = QJsonArray{QString("../outside")};
+        unsafePaths[unsafePaths.keys().first()] = kobalt::qt::array({QString("../outside")});
         unsafeIndex["paths"] = unsafePaths;
         for (const auto &bytes :
              {QByteArray("{broken"), QByteArray(4 * 1024 * 1024 + 1, 'x'), QJsonDocument(unsafeIndex).toJson()}) {

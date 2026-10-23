@@ -146,6 +146,68 @@ int main(int argc, char **argv) {
     }
 
     {
+        const auto directory = QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteDir();
+        const auto fallbacks = kobalt::qt::object({{"font_face", ""},
+                                                   {"serif_font_face", kobalt::test::alternateReadingFace()},
+                                                   {"sans_font_face", "IBM Plex Mono"},
+                                                   {"monospace_font_face", "IBM Plex Sans"}});
+        for (const auto *name : {"font-families.epub", "font-families-embedded.epub"}) {
+            const auto path = directory.filePath(name).toLocal8Bit();
+            const auto bytes = read(path.constData());
+            kobalt::ReaderModel model(kobalt::test::readerFonts());
+            require(model.open(bytes, size, fallbacks, &error), qPrintable(error));
+            const auto checkFace = [&](const QString &word, const QString &face) {
+                const auto hits = find(model, word);
+                require(hits.size() == 1 && model.goTo(hits.first().start), qPrintable("Cannot locate " + word));
+                require(model.textFontFace() == face,
+                        qPrintable(word + " used " + model.textFontFace() + " instead of " + face));
+            };
+            const auto checkFamilies = [&] {
+                checkFace("Serifmarker", kobalt::test::alternateReadingFace());
+                checkFace("Sansmarker", "IBM Plex Mono");
+                checkFace("Monomarker", "IBM Plex Sans");
+                checkFace("Namedmarker", "IBM Plex Sans");
+                if (model.embeddedFontCount())
+                    checkFace("Embeddedmarker", "Embedded");
+            };
+            checkFamilies();
+            require(model.applyAppearance(kobalt::qt::object(
+                        {{"serif_font_face", ""}, {"sans_font_face", ""}, {"monospace_font_face", ""}})),
+                    "Cannot restore automatic fallbacks");
+            require(model.applyAppearance(fallbacks), "Cannot change generic fallback fonts on an open book");
+            checkFamilies();
+            kobalt::ReaderModel preview(kobalt::test::readerFonts());
+            require(preview.openPreview(model, size, &error), qPrintable(error));
+            for (const auto *key : kobalt::appearance::fallbackFontKeys)
+                require(preview.state().value(key) == model.state().value(key), "Preview lost a custom fallback");
+            require(preview.textFontFace() == model.textFontFace(),
+                    "Preview changed the current fallback or embedded font");
+            const auto saved = model.state();
+            require(model.open(bytes, size, saved, &error), qPrintable(error));
+            checkFamilies();
+            const auto before = model.state();
+            require(!model.applyAppearance(kobalt::qt::object({{"serif_font_face", "Missing font"}})),
+                    "Missing fallback was accepted");
+            require(model.state() == before, "Rejected fallback changed the model");
+            require(model.applyAppearance(kobalt::qt::object({{"font_face", "Libron"}})), "Explicit override failed");
+            checkFace("Serifmarker", "Libron");
+            checkFace("Sansmarker", "Libron");
+            checkFace("Namedmarker", "Libron");
+            require(
+                model.applyAppearance(kobalt::qt::object(
+                    {{"font_face", ""}, {"serif_font_face", ""}, {"sans_font_face", ""}, {"monospace_font_face", ""}})),
+                "Cannot reset fallback choices");
+            checkFace("Monomarker", "IBM Plex Mono");
+        }
+        kobalt::ReaderModel missing(kobalt::test::readerFonts());
+        auto unavailable = fallbacks;
+        unavailable["serif_font_face"] = QStringLiteral("Removed Personal Font");
+        const auto path = directory.filePath("font-families.epub").toLocal8Bit();
+        require(missing.open(read(path.constData()), size, unavailable, &error), qPrintable(error));
+        require(missing.state().value("serif_font_face").toString().isEmpty(), "Missing fallback did not reset safely");
+    }
+
+    {
         const auto path =
             QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteDir().filePath("equations.epub").toLocal8Bit();
         kobalt::ReaderModel model(kobalt::test::readerFonts());

@@ -2,10 +2,11 @@
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/options.h"
 #include "interfaces/reader/ui/controls/panels.h"
+#include "interfaces/reader/ui/controls/paging.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "dictionaries_page.h"
+#include "assets/font_catalog.h"
 #include <QStackedWidget>
-#include <QScrollArea>
 #include <QVector>
 #include <QPointer>
 
@@ -13,9 +14,9 @@ namespace kobalt::reader {
 enum SettingsPage {
     DisplaySettings,
     ControlsSettings,
-    AdvancedSettings,
+    DefaultsSettings,
+    StylingSettings,
     DictionariesSettings,
-    StatsSettings,
     SystemSettings,
     AboutSettings,
     NativeUiSettings
@@ -36,20 +37,27 @@ public:
     SettingsPanel(QWidget *parent, const SettingsPanelInputs &inputs);
     ~SettingsPanel() override;
     void dismissRestore();
-    void hideDeviceOptions(bool hidden);
+    void showFontChoices(const QString &title, const QVector<ReadingFont> &fonts, const QString &current,
+                         const QString &defaultFamily, std::function<void(const QString &)> chosen,
+                         std::function<void(const QStringList &)> prepareFonts = {});
+    void dismissFontChoices();
+    void showHeaderFooterWeights(int current, const QFont &sampleFont, std::function<void(int)> chosen);
+    QPointer<ui::ModalOverlay> fontDialog;
     void showDictionaries(bool visible);
     void showNativeUi(bool visible);
     int fitContent(QSize availableSize);
-    ui::DescribedOption *hideStatusOption = nullptr, *hideDeviceOptionsOption = nullptr;
+    ui::DescribedOption *hideStatusOption = nullptr, *hideTabLabelsOption = nullptr;
     QStackedWidget *settingsPages = nullptr;
     QVector<QPushButton *> settingsTabButtons;
     ui::DescribedOption *darkOption = nullptr, *inheritTextLayoutOption = nullptr, *animationOption = nullptr;
-    ui::DescribedOption *edgeLightOption = nullptr, *denseGraphOption = nullptr, *pinStatsOption = nullptr,
-                        *inheritHeaderFooterOption = nullptr;
+    ui::DescribedOption *edgeLightOption = nullptr, *denseGraphOption = nullptr, *inheritHeaderFooterOption = nullptr;
     ui::DescribedOption *linkIndicatorOption = nullptr, *hideNonlinearOption = nullptr,
                         *avoidWastefulStylingOption = nullptr;
-    ui::DescribedOption *automaticOpeningOption = nullptr, *navigationBarOption = nullptr;
-    ui::CaptionButton *sleepScreenButton = nullptr;
+    ui::DescribedOption *automaticOpeningOption = nullptr, *minimalAnnotationOption = nullptr;
+    ui::CaptionButton *defaultFontButton = nullptr, *uiFontButton = nullptr, *uiMonoFontButton = nullptr,
+                      *headerFooterFontButton = nullptr, *headerFooterWeightButton = nullptr;
+    ui::CaptionButton *serifFontButton = nullptr, *sansFontButton = nullptr, *monoFontButton = nullptr;
+    ui::CaptionButton *sleepScreenButton = nullptr, *menuViewButton = nullptr;
     ui::CaptionButton *pageNavigationButton = nullptr, *tapZonesButton = nullptr, *navigationBarButton = nullptr;
     ui::DescribedOption *bionicOption = nullptr;
     ui::CaptionButton *refreshButton = nullptr, *resetDefaults = nullptr;
@@ -60,14 +68,17 @@ public:
 
 protected:
     void hideEvent(QHideEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     QWidget *tabRail = nullptr;
-    QBoxLayout *sectionRows = nullptr;
-    QScrollArea *optionsScroll = nullptr;
-    void fitRail();
+    QWidget *optionsViewport = nullptr, *optionsClip = nullptr;
+    ui::PagerBar *optionsPager = nullptr;
+    QVector<QPair<int, int>> optionPages;
+    int optionPage = 0, pageHeight = 0;
+    void showOptionsPage(int page);
+    void fitRail(int availableHeight = 0);
     QLabel *aboutDescription = nullptr;
     QPointer<ui::ChoiceModal> restoreDialog;
-    QVector<QWidget *> deviceOptions;
 };
 }

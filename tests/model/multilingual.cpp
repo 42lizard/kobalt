@@ -86,6 +86,12 @@ void checkBook(const QByteArray &bytes, const QString &language, const QString &
             qPrintable(language + " mixed-order probes unexpectedly wrapped to separate lines"));
     require(firstBounds.center().x() > secondBounds.center().x(),
             qPrintable(language + " RTL logical order did not place its first LTR run on the right"));
+    const auto mixedGeometry = model.annotationGeometry(firstHits.first().start, secondHits.first().end);
+    require(!mixedGeometry.vertical && mixedGeometry.start.visible && mixedGeometry.end.visible &&
+                mixedGeometry.start.first.x() > mixedGeometry.end.first.x(),
+            qPrintable(language + " logical endpoint order was replaced by left-to-right screen sorting"));
+    require(mixedGeometry.start.outward == QPoint(-1, 0) && mixedGeometry.end.outward == QPoint(1, 0),
+            qPrintable(language + " LTR run edges inherited the surrounding RTL direction"));
     const auto arabicDigitHits = search(model, arabicDigits);
     const auto westernDigitHits = search(model, westernDigits);
     require(arabicDigitHits.size() == 1 && westernDigitHits.size() == 1,
@@ -136,6 +142,11 @@ void checkBook(const QByteArray &bytes, const QString &language, const QString &
     require(model.goTo(scriptHits.first().start), qPrintable(language + " script-word anchor did not resolve"));
     const auto scriptRects = model.rangeRects(scriptHits.first().start, scriptHits.first().end);
     require(!scriptRects.isEmpty(), qPrintable(language + " script word has no geometry"));
+    const auto scriptGeometry = model.annotationGeometry(scriptHits.first().start, scriptHits.first().end);
+    require(scriptGeometry.start.visible && scriptGeometry.end.visible &&
+                scriptGeometry.start.first.x() > scriptGeometry.end.first.x() &&
+                scriptGeometry.start.outward == QPoint(1, 0) && scriptGeometry.end.outward == QPoint(-1, 0),
+            qPrintable(language + " RTL glyph endpoints did not follow their logical source direction"));
     require(inkPixels(model.image(model.page()), scriptRects) > 2,
             qPrintable(language + " script word produced no visible ink in its selection geometry"));
     const auto selection = model.wordAt(scriptRects.first().center());

@@ -99,6 +99,9 @@ public:
 }
 ReaderHostServices readerServices() {
     ReaderHostServices result;
+    result.colorDisplay = [] {
+        return true;
+    };
     result.browserAvailable = [] {
         return true;
     };

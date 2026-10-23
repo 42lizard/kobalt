@@ -34,5 +34,11 @@
     "sha256": "57b448edd090cdef0dd33d03cc9fe3e04fc55653572ce81db255b29860e26fb0",
     "file": "ebook-fonts.tar.gz",
     "description": "Reading font inputs, build scripts and licenses"
+  },
+  "android-hidden-api-bypass": {
+    "url": "https://repo.maven.apache.org/maven2/org/lsposed/hiddenapibypass/hiddenapibypass/4.3/hiddenapibypass-4.3-sources.jar",
+    "sha256": "77932eb0a5405264d2586c50faad048c77f9ed8f40682015ccabd3a852c57191",
+    "file": "hiddenapibypass-4.3-sources.jar",
+    "description": "AndroidHiddenApiBypass source matching the Android BOOX compatibility library"
   }
 }

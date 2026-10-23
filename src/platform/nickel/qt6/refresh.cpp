@@ -1,3 +1,4 @@
+#include "../display/annotation_damage.h"
 #include "platform/api/kobo_refresh.h"
 #include "refresh.h"
 #include "platform/nickel/display/page_animation.h"
@@ -93,12 +94,21 @@ void flushReader(QBackingStore *store, const QRegion &region, QWindow *target, c
         // Clear the entire panel, including UI remnants. Entering dark mode
         // always does this.
         previousDark = dark;
+        readerWindow->setProperty("reader_annotation_repairs", QVariant::fromValue(QRegion()));
+        readerWindow->setProperty("reader_palette_repairs", QVariant::fromValue(QRegion()));
         const QRect screen = readerWindow->rect();
         const auto clean = repairPolicy(dark);
         nativeFlush(store, QRegion(screen), target, offset, {{screen, clean}});
         return;
     }
     previousDark = dark;
+    const QRegion annotationRepairs = annotationRepairRegions(readerWindow);
+    if (pageAnimationPanel() == AnimationPanel::Colour && !(region & annotationRepairs).isEmpty()) {
+        keyboardPixels.clear();
+        nativeFlush(store, region, target, offset, {{region.boundingRect(), repairPolicy(dark)}});
+        consumeAnnotationRepairs(readerWindow, region);
+        return;
+    }
     constexpr auto autoText = bit(Qt::WA_KoboEpdWfModeAutoText), gl16 = bit(Qt::WA_KoboEpdWfModeGL16),
                    gck16 = bit(Qt::WA_KoboEpdWfModeGCK16), darkFlag = bit(Qt::WA_KoboEpdFlagDarkMode);
     constexpr auto heuristic = bit(Qt::WA_KoboEpdUpdateModeHeuristic), full = bit(Qt::WA_KoboEpdUpdateModeFull),

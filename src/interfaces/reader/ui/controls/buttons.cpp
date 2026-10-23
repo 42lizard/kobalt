@@ -96,13 +96,21 @@ void Button::paintEvent(QPaintEvent *) {
         QStyleOptionButton option;
         initStyleOption(&option);
         QPainter painter(this);
-        style()->drawControl(QStyle::CE_PushButton, &option, &painter, this);
+        if (needsPrivateText(text(), font())) {
+            option.text.clear();
+            style()->drawControl(QStyle::CE_PushButton, &option, &painter, this);
+            painter.setFont(font());
+            painter.setPen(palette().color(isEnabled() ? QPalette::WindowText : QPalette::Mid));
+            drawInterfaceText(painter, rect(), text(), Qt::AlignCenter);
+        } else {
+            style()->drawControl(QStyle::CE_PushButton, &option, &painter, this);
+        }
         return;
     }
     QPainter painter(this);
     const bool active = isEnabled() && (isChecked() || isDown());
     const auto ink = palette().color(isEnabled() ? QPalette::WindowText : QPalette::Mid);
-    const auto paper = palette().color(fill);
+    const auto paper = fill == QPalette::Midlight ? sectionColor(this) : palette().color(fill);
     const bool toolbar = mode == ButtonPaintMode::ToolbarSquare || mode == ButtonPaintMode::ToolbarCell;
     if (toolbar) {
         painter.fillRect(rect(), paper);
@@ -342,6 +350,18 @@ CaptionButton::CaptionButton(ControlIcon icon, QWidget *parent) : CaptionButton(
 CaptionButton::CaptionButton(Presentation presentation, QWidget *parent)
     : Button(parent), mode(presentation), chevron(presentation == Presentation::ListAction),
       iconVisible(presentation == Presentation::Caption) {}
+void CaptionButton::setTypefacePreview(const QString &face) {
+    if (previewFace == face && previewDensity == density())
+        return;
+    previewFace = face;
+    previewDensity = density();
+    if (!face.isEmpty()) {
+        previewFont = fontSample(face);
+        previewFont.setPixelSize(
+            qRound(previewFont.pixelSize() * qreal(m::chrome::cellIcon) / m::choices::sampleInkHeight));
+    }
+    update();
+}
 QSize CaptionButton::sizeHint() const {
     if (mode != Presentation::CompactAction) {
         return Button::sizeHint();
@@ -391,7 +411,7 @@ void CaptionButton::paintEvent(QPaintEvent *) {
     if (mode == Presentation::ListAction) {
         namespace c = m::chrome;
         QPainter painter(this);
-        painter.fillRect(rect(), palette().color(isDown() ? QPalette::Midlight : QPalette::Window));
+        painter.fillRect(rect(), isEnabled() && isDown() ? sectionColor(this) : palette().color(QPalette::Window));
         paintEdges(painter, rect(), rule, dividerColor(this));
         painter.setPen(palette().color(QPalette::WindowText));
         QFont label = font();
@@ -402,7 +422,8 @@ void CaptionButton::paintEvent(QPaintEvent *) {
         if (actionIcon)
             icon().paint(&painter,
                          QRect(c::inset - px(7), (height() - c::cellIcon) / 2 + px(1), c::cellIcon, c::cellIcon));
-        const int textWidth = width() - left - c::actionRight;
+        const int previewWidth = previewFace.isEmpty() ? 0 : int(px(88));
+        const int textWidth = qMax(0, width() - left - c::actionRight - (previewWidth ? previewWidth + px(20) : 0));
         // The label and its note are one block, centred on its letters. Their
         // line boxes keep the same centre-to-centre distance as before.
         const QFont noteFont = captionFont();
@@ -410,26 +431,30 @@ void CaptionButton::paintEvent(QPaintEvent *) {
         const int pitch = px(40);
         const int blockHeight = note.isEmpty() ? labelHeight : labelHeight / 2 + pitch + noteHeight / 2;
         const int top = (height() - blockHeight) / 2 - opticalCenterShift(label, note.isEmpty() ? label : noteFont);
-        painter.drawText(QRect(left, top, textWidth, labelHeight), Qt::AlignVCenter | Qt::AlignLeft,
-                         painter.fontMetrics().elidedText(text(), Qt::ElideRight, textWidth));
-        painter.setPen(QPen(palette().color(QPalette::WindowText), px(2)));
-        const int x = width() - c::chevronRight, y = height() / 2;
+        drawInterfaceText(painter, QRect(left, top, textWidth, labelHeight),
+                          elideInterfaceText(text(), painter.font(), textWidth), Qt::AlignVCenter | Qt::AlignLeft);
         if (chevron) {
-            painter.drawLine(x - px(8), y - px(10), x + px(2), y);
-            painter.drawLine(x + px(2), y, x - px(8), y + px(10));
+            const int size = px(28);
+            controlIcon(ControlIcon::Next, palette().color(QPalette::WindowText))
+                .paint(&painter, QRect(width() - c::chevronRight - size / 2, (height() - size) / 2, size, size));
+        }
+        if (previewWidth) {
+            painter.setFont(previewFont);
+            drawOpticalText(painter, QRect(width() - c::actionRight - previewWidth, 0, previewWidth, height()),
+                            QStringLiteral("Aa"), true);
         }
         if (!note.isEmpty()) {
             painter.setFont(noteFont);
             painter.setPen(noteColor(this));
-            painter.drawText(QRect(c::inset, top + labelHeight / 2 + pitch - noteHeight / 2, textWidth, noteHeight),
-                             Qt::AlignLeft | Qt::AlignVCenter,
-                             painter.fontMetrics().elidedText(note, Qt::ElideRight, textWidth));
+            drawInterfaceText(painter,
+                              QRect(c::inset, top + labelHeight / 2 + pitch - noteHeight / 2, textWidth, noteHeight),
+                              elideInterfaceText(note, painter.font(), textWidth), Qt::AlignLeft | Qt::AlignVCenter);
         }
         return;
     }
     namespace c = m::chrome;
     QPainter painter(this);
-    painter.fillRect(rect(), palette().color(isDown() ? QPalette::Midlight : QPalette::Window));
+    painter.fillRect(rect(), isEnabled() && isDown() ? sectionColor(this) : palette().color(QPalette::Window));
     paintEdges(painter, rect(), rule, dividerColor(this));
     const auto ink = palette().color(QPalette::WindowText);
     controlIcon(glyph, ink).paint(&painter, QRect(c::inset, (height() - c::cellIcon) / 2, c::cellIcon, c::cellIcon));
@@ -441,20 +466,18 @@ void CaptionButton::paintEvent(QPaintEvent *) {
     const int gap = note.isEmpty() ? 0 : px(2), top = (height() - labelHeight - gap - noteHeight) / 2;
     painter.setPen(ink);
     painter.setFont(labelFont);
-    painter.drawText(QRect(left, top, available, labelHeight), Qt::AlignVCenter,
-                     painter.fontMetrics().elidedText(text(), Qt::ElideRight, available));
+    drawInterfaceText(painter, QRect(left, top, available, labelHeight),
+                      elideInterfaceText(text(), painter.font(), available), Qt::AlignVCenter);
     if (!note.isEmpty()) {
         painter.setFont(noteFont);
         painter.setPen(noteColor(this));
-        painter.drawText(QRect(left, top + labelHeight + gap, available, noteHeight), Qt::AlignVCenter,
-                         painter.fontMetrics().elidedText(note, Qt::ElideRight, available));
+        drawInterfaceText(painter, QRect(left, top + labelHeight + gap, available, noteHeight),
+                          elideInterfaceText(note, painter.font(), available), Qt::AlignVCenter);
     }
     if (chevron) {
-        // The same chevron as list rows.
-        const int x = width() - c::chevronRight, y = height() / 2;
-        painter.setPen(QPen(ink, px(2)));
-        painter.drawLine(x - px(8), y - px(10), x + px(2), y);
-        painter.drawLine(x + px(2), y, x - px(8), y + px(10));
+        const int size = px(28);
+        controlIcon(ControlIcon::Next, ink)
+            .paint(&painter, QRect(width() - c::chevronRight - size / 2, (height() - size) / 2, size, size));
     }
 }
 void DismissButton::paintEvent(QPaintEvent *) {
@@ -487,7 +510,8 @@ QSize CellButton::sizeHint() const {
 void CellButton::paintEvent(QPaintEvent *) {
     QPainter painter(this);
     const bool active = isEnabled() && (isDown() || isChecked());
-    const auto paper = palette().color(QPalette::Window), ink = palette().color(QPalette::WindowText);
+    const auto paper = palette().color(inverted ? QPalette::WindowText : QPalette::Window);
+    const auto ink = palette().color(inverted ? QPalette::Window : QPalette::WindowText);
     painter.fillRect(rect(), active ? ink : paper);
     paintEdges(painter, rect(), rule, palette().color(QPalette::Mid));
     if (!isEnabled())
@@ -504,7 +528,8 @@ void CellButton::paintEvent(QPaintEvent *) {
     painter.setPen(color);
     const int available = qMax(0, width() - 2 * m::chrome::inset - m::chrome::selectorGap - iconPixels);
     const auto shown = painter.fontMetrics().elidedText(text(), Qt::ElideRight, available);
-    painter.drawText(QRect(m::chrome::inset, 0, available, height()), Qt::AlignLeft | Qt::AlignVCenter, shown);
+    drawInterfaceText(painter, QRect(m::chrome::inset, 0, available, height()), shown,
+                      Qt::AlignLeft | Qt::AlignVCenter);
     const int x =
         m::chrome::inset + qMin(available, qt::textWidth(painter.fontMetrics(), shown)) + m::chrome::selectorGap;
     controlIcon(glyph, color).paint(&painter, QRect(x, (height() - iconPixels) / 2, iconPixels, iconPixels));

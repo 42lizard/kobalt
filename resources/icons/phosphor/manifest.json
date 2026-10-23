@@ -27,6 +27,10 @@
       "sha256": "493a836009ab98f8d4ca84f088cc03f2785cdee86daa1643e003865ff3168b41"
     },
     {
+      "file": "books.svg",
+      "sha256": "38560cd9dec996bc3f79c10675ced1d2b3bd2e5ef497f3966733e5d787af5e11"
+    },
+    {
       "file": "bug.svg",
       "sha256": "05041640c72e5cccc75ffe9b5138ff173c8097ee75183f231deeadcdf108dd0a"
     },
@@ -51,6 +55,10 @@
       "sha256": "d161e503af4f5386a370ffd742d19d85e98625fd6d6eadbabbdb36d58dcca22c"
     },
     {
+      "file": "compass.svg",
+      "sha256": "00c7e42415f795fcea90bd9dc0b2c8266b4e9601d2937cb122cd03b7e9e9e198"
+    },
+    {
       "file": "desktop.svg",
       "sha256": "875a31fd2dc493c6ba9aa5187a91e0364de6704876704e1bf81ef4b7e785ad79"
     },
@@ -61,6 +69,10 @@
     {
       "file": "download-simple.svg",
       "sha256": "c48678aa09b44ba4974954690ee6cc846379c448a7214f8c802604c2a1562014"
+    },
+    {
+      "file": "eraser.svg",
+      "sha256": "3e2e2a1f466051a32abed16cd8e6eadf30f9c560aeb6dcf2545f9c8a95ddfdef"
     },
     {
       "file": "eye.svg",
@@ -75,8 +87,16 @@
       "sha256": "6fe1929c860962cadddc917a3d119145444537ccaee6a9d618e7d856c16f8501"
     },
     {
+      "file": "floppy-disk.svg",
+      "sha256": "067b385ee62469be500d2d5bcd10e2aedd7529cd615ed180fa8414aaef0e40ab"
+    },
+    {
       "file": "gear-fine.svg",
       "sha256": "ca000a36662d0049d39ea5cbe44a0133960d791dd95dd1929692211355fac4e0"
+    },
+    {
+      "file": "highlighter.svg",
+      "sha256": "a845539f79ae5c696b46f9a1142fb9180e46bd2098c0912f3b90a4365be9c730"
     },
     {
       "file": "info.svg",
@@ -107,8 +127,20 @@
       "sha256": "5a068d1cfd707fde5ddb0ce0623958123b6a5afba98401318983aeb0fdad6382"
     },
     {
+      "file": "paint-brush-broad.svg",
+      "sha256": "f91cd53b559766993b6b10111077ac90024c9a36fbc8ce4d9c4b2458b4265dba"
+    },
+    {
+      "file": "pencil-simple.svg",
+      "sha256": "999530da442f44d8cf0054364373d16150f3e082c2ac294a4988a9c3a4295c28"
+    },
+    {
       "file": "plus.svg",
       "sha256": "d688feb9dd2e41c1721d6906a05a2a42e18cd774762fe706d72b2bdfd91cddc4"
+    },
+    {
+      "file": "selection.svg",
+      "sha256": "5fff68fdc60d81f1855302416481dc69fe9f0abfbb353d3bc43f2c24150ab8d4"
     },
     {
       "file": "sun.svg",
@@ -129,6 +161,10 @@
     {
       "file": "translate.svg",
       "sha256": "1e49dc31f3a172c9c7c67361511ee5314598b3f5b32788219325f589487f76c5"
+    },
+    {
+      "file": "trash.svg",
+      "sha256": "e6a830c0409f9e101e3695c981eef98427d39fd01f502b9cbd6900930b01f19c"
     },
     {
       "file": "wrench.svg",

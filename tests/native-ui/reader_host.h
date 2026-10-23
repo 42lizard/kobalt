@@ -31,6 +31,8 @@ public:
     // has no saved platform position and no position mapping.
     std::shared_ptr<HostProgress> progress;
     PositionCodec positions;
+    // Optional sensor-backed rotation controller owned by the test.
+    ReaderOrientation *rotation = nullptr;
     std::function<void(ReaderHostServices &)> configureServices;
 signals:
     void opened();

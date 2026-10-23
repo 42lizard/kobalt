@@ -20,8 +20,13 @@ public:
     }
     void setBook(int page, int pages, const QVector<QPair<int, QString>> &chapters, QSize pageSize);
     void setChapterJumps(bool enabled);
+    void setBookmarkedPages(const QVector<int> &pages);
     void setPreview(int page, QImage image);
     void cancel();
+    void showCurrentPage();
+    void setPreviewDismissible(bool dismissible) {
+        previewDismissible = dismissible;
+    }
     void setLinksAction(const QString &label);
     void setReturnAction(const QString &label, const QString &note);
     void setBarVisible(bool visible);
@@ -35,7 +40,7 @@ public:
         return candidate;
     }
     bool previewReady() const {
-        return !preview.isNull();
+        return ready;
     }
     bool previewsReady() const;
     QRect previewBounds() const;
@@ -66,12 +71,19 @@ private:
     QPushButton *stay;
     QTimer renderTimer;
     QVector<QPair<int, QString>> chapters;
+    QVector<int> bookmarkedPages;
     int current = 0, candidate = -1, totalPages = 1;
     int zoomLevel = 0, rangeFirst = 0, rangeLast = 0;
     QImage preview;
     PageThumbnail *preceding, *following;
     int pendingPreview = -1;
-    bool precedingRequested = false, followingRequested = false;
+    // Retain the overlapping pages while a new strip is prepared. Side cards
+    // use the middle card's resolution so promotion does not enlarge a small image.
+    QImage prepared[3];
+    bool requested[3] = {};
+    int displayedPage = -1;
+    bool ready = false;
+    bool previewDismissible = true;
     QSize pageSize{3, 4};
     QRect linksFrame, returnFrame;
     bool pressedPreview = false, chapterJumps = false, barVisible = true, relocating = false, overviewExpanded = false;
@@ -87,7 +99,7 @@ private:
     void syncRange();
     void pan(int first);
     void requestPreview();
-    void requestAdjacentPreview();
+    void publishPreviews();
     void clearPreview();
     void updateMask();
     void updateCaption();

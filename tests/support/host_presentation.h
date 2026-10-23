@@ -19,7 +19,12 @@ public:
     explicit HostPresentation(std::shared_ptr<SleepPresentationState> sleep = {}) : sleep(std::move(sleep)) {}
     void pauseBackground(bool) override {}
     void resumeBackground() override {}
-    void resumeAndRepaintBackground() override {}
+    std::function<void()> repaint;
+    void resumeAndRepaintBackground() override {
+        if (repaint) {
+            repaint();
+        }
+    }
     bool supportsSleepScreen() const override {
         return bool(sleep);
     }

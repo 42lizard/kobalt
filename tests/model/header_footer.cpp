@@ -24,8 +24,8 @@ int main() {
                 a.slotFields[4] == Field::TitleAndPage && a.uppercase[1] && a.uppercase[4] && a.progressBar,
             "Alternative A does not centre a name and a position twice");
     const auto b = presetLayout(Preset::AlternativeB);
-    require(b.slotFields[1] == Field::Time && b.slotFields[3] == Field::ChapterPagesLeft && !b.uppercase[3] &&
-                !b.progressBar,
+    require(b.slotFields[1] == Field::Time && b.slotFields[3] == Field::ChapterPagesLeft &&
+                b.slotFields[5] == Field::BookPercent && !b.uppercase[3] && !b.progressBar,
             "Alternative B is not the quiet preset");
 
     // Values round-trip, and unknown values fall back instead of failing.
@@ -93,6 +93,13 @@ int main() {
     values.page = 6;
     values.pages = 193;
     values.battery = 80;
+    const auto emberProgress = content(b.slotFields[5], values, false).text;
+    require(emberProgress == strings::get("common.percent").arg(3), "Ember does not show whole-book progress");
+    auto nextChapter = values;
+    nextChapter.chapterPage = 1;
+    nextChapter.chapterPages = 4;
+    require(content(b.slotFields[5], nextChapter, false).text == emberProgress,
+            "Ember progress resets at a chapter boundary");
     const auto chapterPage = strings::get("common.page_fraction").arg(6).arg(20);
     require(content(Field::ChapterPage, values, false).text == chapterPage, "Page in chapter is wrong");
     // Beside a name the page reads "6 of 20"; alone it keeps the slash.

@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/icons.h"
 #include "interfaces/reader/ui/controls/sliders.h"
@@ -114,6 +115,26 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
             return layoutKey();
         },
         book->paths().annotations(), book->identity(), book->fingerprint(), model->title());
+    highlights = std::make_unique<kobalt::HighlightSession>(
+        *model,
+        [this] {
+            return layoutKey();
+        },
+        book->paths().annotations(), book->identity(), book->fingerprint(), model->title());
+    highlights->changed = [this] {
+        syncMarkupRequest();
+        annotationFrame.clear();
+        if (bookmarkList && bookmarkList->isVisible() && bookmarkList->annotationsShown()) {
+            bookmarkList->showAnnotations(annotationRows());
+        }
+        if (!annotationSaving) {
+            refresh();
+        }
+    };
+    highlights->failed = [this] {
+        if (annotationHint)
+            annotationHint->setText(strings::get("annotations.save_failed"));
+    };
     auto *nativeSaveTimer = new QTimer(this);
     nativeSaveTimer->setObjectName("rrNativeProgressTimer");
     connect(nativeSaveTimer, &QTimer::timeout, this, [this] {
@@ -123,11 +144,20 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
     });
     nativeSaveTimer->start(30000);
     bookmarks->changed = [this] {
+        if (bookmarkList && bookmarkList->isVisible() && !bookmarkList->annotationsShown()) {
+            bookmarkList->showBookmarks(bookmarkRows());
+        }
         refresh();
     };
     bookmarks->added = [this] {
         page->bookmarked = true;
+        if (bookmarks->resolved()) {
+            pageScrubber->setBookmarkedPages(bookmarks->pages());
+        }
         page->refreshContent();
+        if (bookmarkList && bookmarkList->isVisible() && !bookmarkList->annotationsShown()) {
+            bookmarkList->showBookmarks(bookmarkRows());
+        }
         saveSoon();
     };
     bookmarks->failed = [this] {
@@ -137,6 +167,19 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
     };
     // Choose the text weight before the first font is used.
     kobalt::ui::setInterfaceWeight(kobalt::ui::heavierTextSteps);
+    settingsUiFontFace = preferences.value("ui_font_face").toString();
+    settingsUiMonoFontFace = preferences.value("ui_mono_font_face").toString();
+    settingsHeaderFooterFontFace = preferences.value("header_footer_font_face").toString();
+    for (auto *face : {&settingsUiFontFace, &settingsUiMonoFontFace, &settingsHeaderFooterFontFace}) {
+        if (!model->fontFaces().contains(*face))
+            face->clear();
+        if (!face->isEmpty())
+            registerPickerFonts(*face);
+    }
+    ui::setInterfaceFontFamily(settingsUiFontFace);
+    ui::setInterfaceMonoFontFamily(settingsUiMonoFontFace);
+    ui::setHeaderFooterFontFamily(settingsHeaderFooterFontFace);
+    ui::setHeaderFooterAddedWeight(preferences.value("header_footer_added_weight").toInt(2));
     // Set only our window; native Nickel controls keep their own font.
     setFont(kobalt::ui::interfaceFont());
     kobalt::ui::keepInterfaceUnhinted(this);
@@ -150,6 +193,7 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
     buildAppearance(appearanceLayout);
     buildSettings();
     buildNotices();
+    buildAnnotations();
     connectLightGestures();
     configureNavigation();
     textRefresh(this);
@@ -211,8 +255,8 @@ void Reader::buildReadingPage() {
     layout->setSpacing(0);
     page = new kobalt::ReadingPage(this, services.cancelAnimation);
     layout->addWidget(page, 1);
-    page->setFont(kobalt::ui::chromeFont());
-    readerStyle(page, "font-family:'" + kobalt::ui::chromeFont().family() + "';");
+    page->setFont(kobalt::ui::headerFooterFont());
+    readerStyle(page, "font-family:@header-footer-font@;");
     dictionaryPanel = new kobalt::DictionaryPanel(this);
     dictionaryPanel->setLanguage(model->state().value("language").toString());
     dictionaryPanel->dismissed = [this] {
@@ -282,7 +326,11 @@ void Reader::buildReadingPage() {
         this->model->goTo(hit.start);
     };
     page->held = [this](QPoint point) {
-        lookupWord(point);
+        if (annotationMode) {
+            annotationTap(point);
+        } else {
+            lookupWord(point);
+        }
     };
     header = new ChapterHeader(page);
     const auto chrome = kobalt::headerfooter::select(preferences);
@@ -345,13 +393,13 @@ void Reader::buildToolbar() {
     auto *status = new QGridLayout;
     status->setContentsMargins(m::panel::statusMargins);
     toolbar->addLayout(status);
-    menuClock = new QLabel(topControls);
+    menuClock = new ui::InterfaceLabel(topControls);
     menuClock->setObjectName("rrMenuClock");
     menuClock->setFixedHeight(m::panel::statusHeight);
     menuClock->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     readerStyle(menuClock, styles::font(m::panel::statusText));
     status->addWidget(menuClock, 0, 0);
-    menuSession = new QLabel(topControls);
+    menuSession = new ui::InterfaceLabel(topControls);
     menuSession->setObjectName("rrMenuSession");
     menuSession->setFixedHeight(m::panel::statusHeight);
     menuSession->setAlignment(Qt::AlignCenter);
@@ -421,11 +469,20 @@ void Reader::buildToolbar() {
     iconButton(topControls, top, "rrGraph", strings::get("reader.chapter_lengths"), ControlIcon::Graph, [this] {
         toggleGraph();
     })->setCheckable(true);
+    toolbarComposition.search =
+        iconButton(topControls, top, "rrSearchOpen", strings::get("reader.search_book"), ControlIcon::Search, [this] {
+            activateNavigation(kobalt::NavigationDestination::Search);
+        });
     toolbarComposition.bookmarks =
         iconButton(topControls, top, "rrBookmarks", strings::get("reader.bookmarks"), ControlIcon::Bookmark, [this] {
             openBookmarks();
         });
     toolbarComposition.bookmarks->setEnabled(bookmarks->available());
+    toolbarComposition.annotate =
+        iconButton(topControls, top, "rrAnnotate", strings::get("annotations.title"), ControlIcon::Annotate, [this] {
+            enterAnnotations();
+        });
+    toolbarComposition.annotate->setEnabled(highlights->writable());
     toolbarComposition.formattingWarning =
         iconButton(topControls, top, "rrFormattingWarning", strings::get("reader.formatting_warning"),
                    ControlIcon::FileWarning, [this] {
@@ -452,7 +509,8 @@ void Reader::buildToolbar() {
         if (button == back)
             continue;
         if (button->objectName() != "rrSettings" && button->objectName() != "rrBookmarks" &&
-            button->objectName() != "rrFormattingWarning")
+            button->objectName() != "rrAnnotate" && button->objectName() != "rrFormattingWarning" &&
+            button->objectName() != "rrSearchOpen")
             topActions.append(button);
         if (auto *action = dynamic_cast<kobalt::ui::Button *>(button))
             action->setPaintMode(kobalt::ui::ButtonPaintMode::ToolbarSquare);
@@ -471,6 +529,7 @@ void Reader::buildBottomControls() {
     bottom->setSpacing(m::panel::footerGap);
     bottom->addWidget(linkReturn, 0, Qt::AlignLeft);
     pageScrubber = new kobalt::ui::PageScrubber(this);
+    pageScrubber->setPreviewDismissible(false);
     bookSlider = pageScrubber->slider();
     pageScrubber->linksRequested = [this] {
         showRevealedLinks();
@@ -494,27 +553,28 @@ void Reader::buildBottomControls() {
     };
     pageScrubber->cancelled = [this] {
         model->cancelPagePreview();
+        seekOpen = false;
     };
     pageScrubber->accepted = [this](int target) {
         if (model->busy() || closing || lifecycleHidden || services.suspended())
             return;
+        if (target == model->page()) {
+            dismissControls();
+            return;
+        }
         const LinkVisit origin{model->state().value("position").toString(), model->page(),
                                model->chapterTitle().toUpper()};
         if (!model->go(target))
             return;
         pendingPassage = origin;
         flashAfterPagePreview = true;
-        pageScrubber->cancel();
-        refresh();
+        dismissControls();
     };
     auto *footer = new QHBoxLayout;
     bottom->addLayout(footer);
     auto *chapters = new kobalt::ui::ElidingButton(strings::get("reader.contents"), bottomControls);
     chapters->setObjectName("rrChapters");
     footer->addWidget(chapters, 1);
-    iconButton(bottomControls, footer, "rrSearchOpen", strings::get("reader.search_book"), ControlIcon::Search, [this] {
-        openSearch();
-    });
     connect(chapters, &QPushButton::clicked, this, [this] {
         showChapters();
     });
@@ -547,19 +607,19 @@ void Reader::buildOverlays() {
     linkDiscovery->setEdgeWidth(m::chrome::heavyRule);
     auto *linkRow = new QHBoxLayout(linkDiscovery);
     linkRow->setSpacing(m::links::hintGap);
-    linkDiscoveryIcon = new QLabel(linkDiscovery);
+    linkDiscoveryIcon = new ui::InterfaceLabel(linkDiscovery);
     // The link glyph has more space around it than the undo icon in the return
     // row: a larger drawing in the same column matches its size.
     linkDiscoveryIcon->setFixedSize(m::chrome::cellIcon, m::control::iconSize);
     linkDiscoveryIcon->setAlignment(Qt::AlignCenter);
     linkRow->addWidget(linkDiscoveryIcon);
-    linkDiscoveryHint = new QLabel(strings::get("reader.long_press_link"), linkDiscovery);
+    linkDiscoveryHint = new ui::InterfaceLabel(strings::get("reader.long_press_link"), linkDiscovery);
     linkDiscoveryHint->setObjectName("rrLinkDiscoveryHint");
     linkRow->addWidget(linkDiscoveryHint, 1);
     linkDiscoveryToggle = makeButton(linkDiscovery, linkRow, "rrRevealLinks", {}, [this] {
         showRevealedLinks();
     });
-    linkDiscoveryExit = new QLabel(strings::get("reader.tap_elsewhere_to_exit").toUpper(), linkDiscovery);
+    linkDiscoveryExit = new ui::InterfaceLabel(strings::get("reader.tap_elsewhere_to_exit").toUpper(), linkDiscovery);
     linkDiscoveryExit->setObjectName("rrLinkDiscoveryExit");
     linkRow->addWidget(linkDiscoveryExit);
     linkDiscovery->hide();
@@ -572,21 +632,42 @@ void Reader::buildOverlays() {
         save();
     };
     chapterGraph->setDense(preferences.value("dense_stats_chart").toBool(false));
-    pinStats = preferences.value("pin_stats").toBool(false);
     choices = new ChoiceScreen(this);
     choices->hide();
     bookmarkList = new kobalt::BookmarkList(this);
     bookmarkList->selected = [this](const QString &position) {
-        goToPassage(position);
+        if (bookmarkList->annotationsShown()) {
+            for (const auto &item : highlights->highlights()) {
+                if (item.id == position) {
+                    goToPassage(item.start);
+                    break;
+                }
+            }
+        } else {
+            goToPassage(position);
+        }
+    };
+    bookmarkList->tabRequested = [this](bool annotations) {
+        annotationPopover->hide();
+        if (annotations) {
+            bookmarkList->showAnnotations(annotationRows());
+        } else {
+            bookmarkList->showBookmarks(bookmarkRows());
+        }
     };
     bookmarkList->back = [this] {
+        annotationPopover->hide();
         bookmarkList->hide();
         guardExit();
         showControls();
         refresh();
     };
     bookmarkList->removeRequested = [this](const QString &position) {
-        askRemoveBookmark(position);
+        if (bookmarkList->annotationsShown()) {
+            removeAnnotation(position);
+        } else {
+            askRemoveBookmark(position);
+        }
     };
     choices->changed = [this] {
         if (choosingTypography && choices->isVisible())
@@ -935,10 +1016,8 @@ void Reader::buildSettings() {
         updateDictionaries();
     }
     hideStatusOption = settings->hideStatusOption;
-    hideDeviceOptionsOption = settings->hideDeviceOptionsOption;
     if (services.desktopUi) {
         hideStatusOption->setChecked(preferences.value("native_hide_status_bar").toBool(true));
-        hideDeviceOptionsOption->setChecked(preferences.value("native_hide_device_options").toBool(true));
     }
     settingsPages = settings->settingsPages;
     darkOption = settings->darkOption;
@@ -946,14 +1025,18 @@ void Reader::buildSettings() {
     animationOption = settings->animationOption;
     edgeLightOption = settings->edgeLightOption;
     denseGraphOption = settings->denseGraphOption;
-    pinStatsOption = settings->pinStatsOption;
     inheritHeaderFooterOption = settings->inheritHeaderFooterOption;
     sleepScreenButton = settings->sleepScreenButton;
     pageNavigationButton = settings->pageNavigationButton;
     tapZonesButton = settings->tapZonesButton;
     navigationBarButton = settings->navigationBarButton;
-    navigationBarOption = settings->navigationBarOption;
+    menuViewButton = settings->menuViewButton;
+    connect(menuViewButton, &QPushButton::clicked, this, [this] {
+        openMenuView();
+    });
+    minimalAnnotationOption = settings->minimalAnnotationOption;
     automaticOpeningOption = settings->automaticOpeningOption;
+    hideTabLabelsOption = settings->hideTabLabelsOption;
     linkIndicatorOption = settings->linkIndicatorOption;
     hideNonlinearOption = settings->hideNonlinearOption;
     avoidWastefulStylingOption = settings->avoidWastefulStylingOption;
@@ -961,6 +1044,35 @@ void Reader::buildSettings() {
     refreshButton = settings->refreshButton;
     resetDefaults = settings->resetDefaults;
     settingsError = settings->settingsError;
+    connect(settings->uiFontButton, &QPushButton::clicked, this, [this] {
+        openSettingsFont("ui_font_face");
+    });
+    connect(settings->uiMonoFontButton, &QPushButton::clicked, this, [this] {
+        openSettingsFont("ui_mono_font_face");
+    });
+    connect(settings->headerFooterFontButton, &QPushButton::clicked, this, [this] {
+        openSettingsFont("header_footer_font_face");
+    });
+    connect(settings->headerFooterWeightButton, &QPushButton::clicked, this, [this, settings] {
+        auto sampleFont = ui::headerFooterFont(page->headerTextPixels());
+        if (!settingsHeaderFooterFontFace.isEmpty())
+            sampleFont.setFamily(settingsHeaderFooterFontFace);
+        settings->showHeaderFooterWeights(settingsHeaderFooterWeight, sampleFont, [this](int steps) {
+            settingsHeaderFooterWeight = steps;
+            showSettingsFonts();
+            refresh();
+        });
+    });
+    connect(settings->defaultFontButton, &QPushButton::clicked, this, [this] {
+        openSettingsFont("default_font_face");
+    });
+    int familyIndex = 0;
+    for (auto *button : {settings->serifFontButton, settings->sansFontButton, settings->monoFontButton}) {
+        const int index = familyIndex++;
+        connect(button, &QPushButton::clicked, this, [this, index] {
+            openSettingsFont(appearance::fallbackFontKeys[index]);
+        });
+    }
     connect(darkOption, &QCheckBox::clicked, this, [this](bool enabled) {
         applyDarkMode(enabled);
     });
@@ -992,6 +1104,14 @@ void Reader::buildSettings() {
     });
     connect(settings->confirmDefaults, &QPushButton::clicked, this, [this] {
         restoringDefaults = true;
+        settingsUiFontFace.clear();
+        settingsUiMonoFontFace.clear();
+        settingsHeaderFooterFontFace.clear();
+        settingsHeaderFooterWeight = 2;
+        hideTabLabelsOption->setChecked(false);
+        for (const auto *key : appearance::fallbackFontKeys)
+            settingsFontFaces[key] = QString();
+        showSettingsFonts();
         darkOption->setChecked(false);
         animationOption->setChecked(false);
         bionicOption->setChecked(false);
@@ -999,7 +1119,7 @@ void Reader::buildSettings() {
         showScreenRefresh();
         resetDefaults->setText(strings::get("reader.defaults_selected"));
         resetDefaults->setEnabled(false);
-        settingsPages->setCurrentIndex(AdvancedSettings);
+        settingsPages->setCurrentIndex(DefaultsSettings);
     });
 #ifndef KOBALT_READER_HARDWARE
     connect(settings->debugProgress, &QPushButton::clicked, this, [this] {
@@ -1043,7 +1163,7 @@ void Reader::buildNotices() {
 
 void Reader::connectLightGestures() {
     page->lightStarted = [this](bool warmth) {
-        if (!isVisible() || services.suspended() || book->deviceTransition() || this->model->busy() ||
+        if (annotationMode || !isVisible() || services.suspended() || book->deviceTransition() || this->model->busy() ||
             appearanceEdit.preview() || general->isVisible() || topControls->isVisible() || choices->isVisible() ||
             dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() || lookupPending || syncDialog ||
             finishDialog || applyingText || lightPopup->isVisible() || exitPending)
@@ -1109,8 +1229,29 @@ void Reader::connectLightGestures() {
 }
 
 void Reader::connectPageInput() {
+    page->annotationRequested = [this] {
+        if (annotationMode || !isEnabled() || !isVisible() || lifecycleHidden || closing || exitPending ||
+            exportRunning || services.suspended() || book->deviceTransition() || model->busy() ||
+            appearanceEdit.panelOpen() || appearanceEdit.applying() || general->isVisible() || choices->isVisible() ||
+            topControls->isVisible() || revealingLinks || dictionaryPanel->isVisible() || searchPanel->isVisible() ||
+            linksActive() || lookupPending || acknowledgments->isVisible() || bookmarkList->isVisible() ||
+            lightPopup->isVisible() || chapterGraph->isVisible() || !highlights->writable()) {
+            return;
+        }
+        const auto *modal = QApplication::activeModalWidget();
+        if (modal && modal != this) {
+            return;
+        }
+        for (auto *widget : popups()) {
+            auto *overlay = dynamic_cast<ui::ModalOverlay *>(widget);
+            if (overlay && overlay->isVisible() && overlay->inputBarrier()) {
+                return;
+            }
+        }
+        enterAnnotations();
+    };
     page->swiped = [this](int direction) {
-        if (!pageNavigation::swipes(pageNavigation::mode(preferences, services.pageButtons()))) {
+        if (!annotationMode && !pageNavigation::swipes(pageNavigation::mode(preferences, services.pageButtons()))) {
             return;
         }
         if (revealingLinks || dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() ||
@@ -1120,6 +1261,10 @@ void Reader::connectPageInput() {
         turnPage(model->state().value("page_progression_rtl").toBool() ? -direction : direction);
     };
     page->tapped = [this](QPoint point) {
+        if (annotationMode) {
+            annotationTap(point - QPoint(0, page->topHeight()));
+            return;
+        }
         const qreal x = qreal(point.x()) / qMax(1, page->width());
         if (dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() || lookupPending) {
             dismissLookup();
@@ -1142,8 +1287,7 @@ void Reader::connectPageInput() {
         const qreal y = qreal(point.y()) / qMax(1, page->height());
         const auto layout = pageNavigation::tapLayout(preferences);
         const auto action = tapZones::action(layout, x, y);
-        const bool previewColumn = devicePreview && layout == tapZones::Layout::LeftRight;
-        const bool menuTap = action == tapZones::Action::Menu && (!previewColumn || (y > .33 && y < .67));
+        const bool menuTap = action == tapZones::Action::Menu;
         if (topControls->isVisible() || choices->isVisible()) {
             // An open Text or Layout panel can cover the middle of a device
             // preview, so any tap on the page that stays visible closes it.
@@ -1166,8 +1310,6 @@ void Reader::connectPageInput() {
             showControls();
             return;
         }
-        if (previewColumn && action == tapZones::Action::Menu)
-            return;
         if (!pageNavigation::taps(pageNavigation::mode(preferences, services.pageButtons()))) {
             return;
         }
@@ -1192,7 +1334,7 @@ void Reader::showFontPicker() {
     const auto state = settings->state();
     const auto supplemental = supplementalFontFamily(state.value("language").toString());
     const auto requestedDefault = preferences.value("default_font_face").toString(kobalt::defaultFontFace);
-    for (const auto &font : settings->fontCatalog()) {
+    for (const auto &font : orderedReadingFonts(settings->fontCatalog())) {
         QString section;
         switch (font.origin) {
         case kobalt::FontOrigin::Recommended:
@@ -1215,12 +1357,6 @@ void Reader::showFontPicker() {
         }
         items.append({fontDisplayName(font.family), font.family, QString("rrFontChoice%1").arg(items.size()), section});
     }
-    for (int i = 1; i < items.size(); ++i) {
-        if (items[i].value == QStringLiteral("Libron")) {
-            items.insert(1, items.takeAt(i));
-            break;
-        }
-    }
     QString defaultFace = preferences.value("default_font_face").toString(kobalt::defaultFontFace);
     int defaultIndex = -1;
     for (int i = 1; i < items.size(); ++i)
@@ -1229,11 +1365,13 @@ void Reader::showFontPicker() {
     if (defaultIndex < 0)
         defaultFace = kobalt::defaultFontFace;
     const int embedded = state.value("embedded_font_count").toInt();
-    items[0].detail = embedded > 0
-                          ? (embedded == 1 ? strings::get("reader.one_embedded_font")
-                                           : strings::get("reader.embedded_fonts").arg(embedded))
-                          : strings::get("reader.no_embedded_fonts") + '\n' +
-                                strings::get("reader.uses_default_font").arg(fontDisplayName(kobalt::defaultFontFace));
+    auto serifFallback = state.value("serif_font_face").toString();
+    if (serifFallback.isEmpty())
+        serifFallback = kobalt::defaultFontFace;
+    items[0].detail = embedded > 0 ? (embedded == 1 ? strings::get("reader.one_embedded_font")
+                                                    : strings::get("reader.embedded_fonts").arg(embedded))
+                                   : strings::get("reader.no_embedded_fonts") + '\n' +
+                                         strings::get("reader.uses_default_font").arg(fontDisplayName(serifFallback));
     if (items.size() > 1)
         items[1].detail = (defaultFace == kobalt::defaultFontFace ? strings::get("reader.default_font") : QString());
     if (defaultIndex > 1)

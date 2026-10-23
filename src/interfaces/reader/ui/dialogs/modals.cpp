@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "modals.h"
 #include "../style/metrics.h"
 #include "../style/styles.h"
@@ -26,7 +27,7 @@ PopupCard::PopupCard(QWidget *parent)
     contentRows->setSpacing(m::notice::cardGap);
 }
 QLabel *PopupCard::message(const QString &text, const QString &name) {
-    auto *label = new QLabel(text, this);
+    auto *label = new ui::InterfaceLabel(text, this);
     label->setObjectName(name);
     label->setWordWrap(true);
     label->setAlignment(Qt::AlignCenter);
@@ -47,7 +48,7 @@ QHBoxLayout *PopupCard::actions() {
 void PopupCard::image(const QImage &image) {
     artworkImage = image;
     if (!artwork) {
-        artwork = new QLabel(this);
+        artwork = new ui::InterfaceLabel(this);
         artwork->setAlignment(Qt::AlignCenter);
         contentRows->insertWidget(0, artwork);
     }
@@ -210,10 +211,45 @@ ModalOverlay::ModalOverlay(QWidget *parent) : QWidget(parent) {
     setGeometry(parent->rect());
     hide();
 }
+void ModalOverlay::setInputBarrier(bool enabled) {
+    if (blocksInput == enabled) {
+        return;
+    }
+    blocksInput = enabled;
+    updateInputRegion();
+    update();
+}
+void ModalOverlay::setDimmed(bool enabled) {
+    if (dimmed == enabled) {
+        return;
+    }
+    dimmed = enabled;
+    update();
+}
+void ModalOverlay::paintEvent(QPaintEvent *) {
+    if (dimmed && blocksInput) {
+        QPainter painter(this);
+        QColor shade = darkTheme(this) ? Qt::white : Qt::black;
+        shade.setAlpha(m::notice::dimAlpha);
+        painter.fillRect(rect(), shade);
+    }
+}
+void ModalOverlay::updateInputRegion() {
+    if (blocksInput) {
+        clearMask();
+        return;
+    }
+    QRegion region(content->geometry());
+    if (!pointer->isHidden()) {
+        region += pointer->geometry();
+    }
+    setMask(region);
+}
 void ModalOverlay::centerCard() {
     if (anchor.isEmpty()) {
         pointer->hide();
         content->move(rect().center() - content->rect().center());
+        updateInputRegion();
         return;
     }
     const int gap = ui::px(16), inset = ui::px(24);
@@ -231,6 +267,7 @@ void ModalOverlay::centerCard() {
     pointer->show();
     pointer->raise();
     pointer->update();
+    updateInputRegion();
 }
 bool ModalOverlay::eventFilter(QObject *object, QEvent *event) {
     if (object == parentWidget() && event->type() == QEvent::Resize)

@@ -29,6 +29,9 @@ public class KobaltActivity extends QtActivity {
     private static final long MAX_BOOK_BYTES = 128L * 1024 * 1024;
     private final ExecutorService importer = Executors.newSingleThreadExecutor();
     private final AtomicLong request = new AtomicLong();
+    private BooxDevice boox;
+    private BooxRefresh booxRefresh;
+    private boolean resumed;
     private boolean ready = false;
     private boolean reading = false;
     private volatile boolean readingGeometryReady = false;
@@ -61,6 +64,9 @@ public class KobaltActivity extends QtActivity {
     }
 
     @Override public void onCreate(Bundle state) {
+        // Qt can start its native thread in super.onCreate. Publish capabilities first.
+        boox = new BooxDevice();
+        booxRefresh = new BooxRefresh();
         super.onCreate(state);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
         View decor = getWindow().getDecorView();
@@ -85,6 +91,7 @@ public class KobaltActivity extends QtActivity {
         // Publish readiness only after Android has laid out the final insets.
         // Qt reads this snapshot from its own GUI thread.
         decor.getViewTreeObserver().addOnPreDrawListener(() -> {
+            if (booxRefresh != null) booxRefresh.publish(decor, reading && resumed && hasWindowFocus());
             WindowInsets insets = decor.getRootWindowInsets();
             boolean hidden = false;
             if (insets != null) {
@@ -108,7 +115,7 @@ public class KobaltActivity extends QtActivity {
     }
     @Override public void onWindowFocusChanged(boolean focus) {
         super.onWindowFocusChanged(focus);
-        if (!focus) pageKeys.clear();
+        if (!focus) { pageKeys.clear(); if (booxRefresh != null) booxRefresh.cancel(); }
         if (focus) {
             immersive();
             // Keep a focus target in touch mode. Otherwise Android can consume
@@ -142,7 +149,7 @@ public class KobaltActivity extends QtActivity {
                 | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         }
     }
-    public void showStartup() { runOnUiThread(() -> { readingGeometryReady = false; reading = false; immersive(); }); }
+    public void showStartup() { runOnUiThread(() -> { readingGeometryReady = false; reading = false; if (booxRefresh != null) booxRefresh.cancel(); immersive(); }); }
     public void showReading() { runOnUiThread(() -> { readingGeometryReady = false; reading = true; immersive(); }); }
     public boolean readerGeometryReady() { return readingGeometryReady; }
     // Called only after Qt has loaded the native library and connected its UI.
@@ -155,6 +162,18 @@ public class KobaltActivity extends QtActivity {
         int percent = Math.min(100, level * 100 / scale);
         return percent + (battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0 ? 256 : 0);
     }
+    @Override protected void onResume() { super.onResume(); resumed = true; }
+    @Override protected void onPause() {
+        resumed = false;
+        if (booxRefresh != null) booxRefresh.cancel();
+        super.onPause();
+    }
+    public boolean readerRefreshAvailable() { return booxRefresh != null && booxRefresh.available(); }
+    public boolean readerPrepareRefresh(int[] regions, boolean clean) {
+        return booxRefresh != null && booxRefresh.prepare(regions, clean);
+    }
+    public boolean readerLightAvailable() { return boox != null && boox.available(); }
+    public int readerLight(int operation, int type, int value) { return boox == null ? -1 : boox.light(operation, type, value); }
     public int readerDensity() { return getResources().getDisplayMetrics().densityDpi; }
     public void readerReady() {
         ready = true;
@@ -226,6 +245,7 @@ public class KobaltActivity extends QtActivity {
     public void exitReader() { finishAndRemoveTask(); }
     @Override protected void onDestroy() {
         ready = false;
+        if (booxRefresh != null) booxRefresh.cancel();
         request.incrementAndGet();
         importer.shutdownNow();
         super.onDestroy();

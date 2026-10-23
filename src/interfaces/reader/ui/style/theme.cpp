@@ -1,5 +1,6 @@
 #include "theme.h"
 #include "metrics.h"
+#include "fonts.h"
 #include <QPainter>
 #include <QVariant>
 
@@ -57,6 +58,9 @@ bool darkTheme(const QWidget *widget) {
 QColor dividerColor(const QWidget *widget) {
     return QColor(darkTheme(widget) ? m::chrome::dividerDark : m::chrome::dividerLight);
 }
+QColor sectionColor(const QWidget *widget) {
+    return QColor(darkTheme(widget) ? "#333333" : "#dddddd");
+}
 QColor noteColor(const QWidget *widget) {
     return QColor(darkTheme(widget) ? m::text::explanationDark : m::text::explanationLight);
 }
@@ -71,6 +75,15 @@ void readerStyle(QWidget *widget, const QString &source) {
     const bool dark = darkTheme(widget);
     auto style = QString("QPushButton{border-radius:%1px;} ").arg(m::control::buttonRadius);
     style += source.contains('{') ? source : QString("*{%1}").arg(source);
+    const auto escapedFamily = [](QString name) {
+        name.replace('\\', "\\\\");
+        name.replace('\"', "\\\"");
+        name.replace('\'', "\\'");
+        return name;
+    };
+    style.replace("@ui-font-family@", escapedFamily(interfaceFont().family()));
+    style.replace("@ui-caption-family@", escapedFamily(chromeFont().family()));
+    style.replace("@header-footer-font@", "\"" + escapedFamily(headerFooterFont().family()) + "\"");
     style += " QPushButton:disabled,QPushButton:checked:disabled,QPushButton:pressed:disabled{"
              "color:palette(mid);background:palette(window);border-color:palette(midlight);}";
     style.replace("palette(window-text)", dark ? "white" : "black");

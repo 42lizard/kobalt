@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "interfaces/reader/ui/controls/buttons.h"
 #include "interfaces/reader/ui/controls/icons.h"
 #include "interfaces/reader/ui/controls/rows.h"
@@ -24,11 +25,11 @@ ChapterContents::ChapterContents(QWidget *parent) : Panel(parent) {
         if (back)
             back();
     });
-    title = new QLabel(strings::get("chapter_contents.chapters"), this);
+    title = new ui::InterfaceLabel(strings::get("chapter_contents.chapters"), this);
     title->setObjectName("rrContentsTitle");
     title->setTextFormat(Qt::PlainText);
     ui::readerStyle(title, ui::styles::brand(c::titleText) + "background:transparent;");
-    position = new QLabel(this);
+    position = new ui::InterfaceLabel(this);
     position->setObjectName("rrContentsPosition");
     position->setTextFormat(Qt::PlainText);
     position->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -38,7 +39,7 @@ ChapterContents::ChapterContents(QWidget *parent) : Panel(parent) {
     summary->setObjectName("rrContentsSummary");
     pageHeading = listHeader->rightLabel();
     pageHeading->setObjectName("rrContentsPageHeading");
-    empty = new QLabel(strings::get("chapter_contents.no_chapters_available"), this);
+    empty = new ui::InterfaceLabel(strings::get("chapter_contents.no_chapters_available"), this);
     empty->setObjectName("rrContentsEmpty");
     empty->setTextFormat(Qt::PlainText);
     empty->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);

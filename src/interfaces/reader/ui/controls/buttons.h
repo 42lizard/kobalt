@@ -190,6 +190,11 @@ public:
     QString caption() const {
         return note;
     }
+    // Typeface rows reserve an Aa sample before their chevron.
+    void setTypefacePreview(const QString &face);
+    QString typefacePreview() const {
+        return previewFace;
+    }
     void setRule(Edges edges) {
         if (rule == edges)
             return;
@@ -216,7 +221,9 @@ protected:
 private:
     Presentation mode;
     ControlIcon glyph = ControlIcon::Link;
-    QString note;
+    QString note, previewFace;
+    QFont previewFont;
+    int previewDensity = 0;
     Edges rule;
     bool chevron = false, iconVisible = true;
 };
@@ -235,6 +242,19 @@ protected:
 class CellButton : public Button {
 public:
     CellButton(ControlIcon icon, QWidget *parent, int iconPixels = metrics::chrome::cellIcon);
+    void setInverted(bool value) {
+        if (inverted == value) {
+            return;
+        }
+        inverted = value;
+        update();
+    }
+    void setGlyph(ControlIcon icon) {
+        if (glyph != icon) {
+            glyph = icon;
+            update();
+        }
+    }
     void setRule(Edges edges) {
         rule = edges;
         update();
@@ -248,6 +268,7 @@ private:
     ControlIcon glyph;
     int iconPixels;
     Edges rule;
+    bool inverted = false;
 };
 QPushButton *makeButton(QWidget *parent, QBoxLayout *layout, const char *name, const QString &text,
                         std::function<void()> action);

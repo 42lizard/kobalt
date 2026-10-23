@@ -17,6 +17,19 @@ import tempfile
 import urllib.request
 from datetime import datetime, timezone
 
+DEFAULT_FIXTURE_DATE = '2000-01-01T12:00:00Z'
+
+
+def fixture_date(value):
+    try:
+        parsed = datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ')
+    except ValueError as error:
+        raise ValueError('Fixture date must be a canonical UTC timestamp') from error
+    if parsed.strftime('%Y-%m-%dT%H:%M:%SZ') != value:
+        raise ValueError('Fixture date must be a canonical UTC timestamp')
+    return value
+
+
 ROOT = Path(__file__).resolve().parents[1]
 BOOKS = ROOT / 'tests/fixtures/screenshot_books.json'
 GROUPS = {
@@ -40,6 +53,8 @@ GROUPS = {
     'dictionary': ('alice', 'English selection, definition, dictionary picker and error states'),
     'search': ('alice', 'Search editor, results, pagination and no matches'),
     'bookmarks': ('alice', 'Empty list, ribbon, saved bookmark and removal prompt'),
+    'annotations': ('alice', 'Explicit selection, cross-page highlight, saved passages and deliberate editing'),
+    'menu-thumbnails': ('alice', 'Seek thumbnails with a saved highlight'),
     'light': ('alice', 'Emulated reader frontlight controls'),
     'light-sensor': ('alice', 'Emulated frontlight controls with an ambient light sensor'),
     'stats': ('alice', 'Chapter graph'),
@@ -283,6 +298,8 @@ def merge_captures(previous, current, screens):
         return current
     if any(previous[key] != current[key] for key in ('width', 'height')):
         raise ValueError('Viewport differs from the current gallery. Run a full sweep to replace it.')
+    if previous.get('fixture_date') != current.get('fixture_date'):
+        raise ValueError('Fixture date differs from the current gallery. Run a full sweep to replace it.')
     def replaced(shot):
         selected = {screen for screen in screens if screen.startswith(shot['group'] + '/')}
         return (shot['group'] in current['groups'] and shot['theme'] in current['themes']
@@ -332,10 +349,15 @@ def main(argv=None):
     parser.add_argument('--dependency-cache', type=Path, default=ROOT / '.cache/kobalt')
     parser.add_argument('--jobs', type=int, default=2, help='parallel capture processes, default 2; use 1 for a serial run')
     parser.add_argument('--no-build', action='store_true', help='use the existing screenshot executable')
+    parser.add_argument('--fixture-date', default=DEFAULT_FIXTURE_DATE, help='UTC creation timestamp for saved-entry fixtures')
     parser.add_argument('--ppi', type=int, action='append', help='UI and reading density; repeat for multiple densities, default 300')
     parser.add_argument('--width', type=int, default=1264)
     parser.add_argument('--height', type=int, default=1680)
     args = parser.parse_args(argv)
+    try:
+        args.fixture_date = fixture_date(args.fixture_date)
+    except ValueError as error:
+        parser.error(str(error))
     started = time.monotonic()
     densities = list(dict.fromkeys(args.ppi or [300]))
     if any(ppi <= 0 for ppi in densities): parser.error('--ppi must be positive')
@@ -388,7 +410,7 @@ def main(argv=None):
         dictionary_path = cached_book(reference, args.dependency_cache / 'screenshot-dictionaries', args.offline, 256 * 1024 * 1024)
     themes = ('light', 'dark') if args.theme == 'both' else (args.theme,)
     manifest = dict(complete=False, created=datetime.now(timezone.utc).isoformat(), groups=groups, themes=themes,
-                    width=args.width, height=args.height, densities=densities, clock='09:00', battery_percent=100, screens=[],
+                    width=args.width, height=args.height, densities=densities, clock='09:00', fixture_date=args.fixture_date, battery_percent=100, screens=[],
                     books={name: references[name] for name in sorted(needed)}, exclusions=EXCLUSIONS,
                     binary_sha256=digest(binary), reference_sha256=digest(BOOKS))
     if dictionary: manifest['dictionaries'] = {'en-en': dictionary}
@@ -401,9 +423,10 @@ def main(argv=None):
     staging = None
     try:
         previous = json.loads((output / 'manifest.json').read_text()) if (output / 'manifest.json').exists() else None
-        if previous and any(previous[key] != manifest[key] for key in ('width', 'height')):
+        if previous and (any(previous[key] != manifest[key] for key in ('width', 'height'))
+                         or previous.get('fixture_date') != args.fixture_date):
             if groups != full_groups or themes != ('light', 'dark') or args.screen:
-                raise ValueError('Viewport differs from the current gallery. Run a full sweep to replace it.')
+                raise ValueError('Viewport or fixture date differs from the current gallery. Run a full sweep to replace it.')
             previous = None
         staging = Path(tempfile.mkdtemp(prefix='kobalt-screenshot-capture-'))
         capture_started = time.monotonic()
@@ -412,7 +435,7 @@ def main(argv=None):
             folder = staging / capture_folder(ppi, theme, group)
             folder.mkdir(parents=True)
             command = [str(binary), '--book', str(books[GROUPS[group][0]]), '--output', str(folder), '--group', group,
-                       '--theme', theme, '--ppi', str(ppi), '--width', str(args.width), '--height', str(args.height)]
+                       '--theme', theme, '--ppi', str(ppi), '--width', str(args.width), '--height', str(args.height), '--fixture-date', args.fixture_date]
             selected = [screen.split('/', 1)[1] for screen in args.screen if screen.startswith(group + '/')]
             if selected: command += ['--only', ','.join(selected)]
             environment = dict(os.environ, QT_QPA_PLATFORM='minimal:enable_fonts:freetype' if sys.platform == 'darwin' else 'offscreen',
@@ -428,6 +451,8 @@ def main(argv=None):
                 shot = json.loads(metadata.read_text())
                 if shot.get('ppi') != ppi or shot.get('reading_ppi', ppi) != ppi:
                     raise ValueError('Capture density differs from requested density; rebuild the screenshot executable')
+                if shot.get('fixture_date') != args.fixture_date:
+                    raise ValueError('Capture fixture date differs from requested date')
                 path = metadata.with_suffix('.png')
                 shot.update(name=f'{theme}/{group}/{metadata.stem}', file=path.relative_to(staging).as_posix(), sha256=digest(path),
                             theme=theme, group=group, captured_at=manifest['created'], binary_sha256=manifest['binary_sha256'])

@@ -10,7 +10,7 @@ using namespace kobalt;
 int main() {
     // Appearance settings decide the layout. The list must stay complete, because a
     // missing key would let a retained layout survive a changed setting.
-    require(appearance::keys.size() == 17, "The appearance keys changed without this check");
+    require(appearance::keys.size() == 20, "The appearance keys changed without this check");
 
     const auto from = qt::object({{"font_pixels", 40},
                                   {"line_spacing", QJsonValue(QJsonValue::Null)},
@@ -102,6 +102,18 @@ int main() {
     fresh["font_face"] = QStringLiteral("NV Literata");
     appearance::applyFontDefault(fresh, qt::object({{"default_font_face", "NV Ancizar Serif"}}));
     require(fresh["font_face"].toString() == "NV Literata", "Default changes replaced an explicit book font");
+    for (const auto *key : appearance::fallbackFontKeys) {
+        auto changed = from;
+        changed[key] = QStringLiteral("Personal Font");
+        require(!appearance::same(changed, from), "Fallback changes did not invalidate the retained layout");
+        auto defaults = appearance::bookDefaults(qt::object({{key, "Personal Font"}}));
+        auto existing = qt::object({{"font_face", ""}, {key, "Old Font"}});
+        appearance::applyBookDefaults(existing, defaults);
+        require(existing.value(key).toString() == "Personal Font" && existing.value("font_face").toString().isEmpty(),
+                "Existing book did not take the global fallback without replacing Publisher Fonts");
+        appearance::applyBookDefaults(existing, appearance::bookDefaults({}));
+        require(existing.value(key).toString().isEmpty(), "Removed global fallback survived in saved book state");
+    }
     auto newDefault = from;
     newDefault["default_font_face"] = QStringLiteral("NV Ancizar Serif");
     require(!appearance::same(newDefault, from), "Default changes did not invalidate the layout");

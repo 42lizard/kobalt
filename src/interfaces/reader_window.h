@@ -16,6 +16,11 @@ public:
     using QWidget::QWidget;
     std::function<void(std::unique_ptr<ReaderSession>)> finished;
     virtual bool readyForPresentation() const = 0;
+    // Prepare optional page-bound content before the host replaces its opening view.
+    // Empty preparation completes synchronously. Cancellation destroys the window.
+    virtual void preparePresentation(std::function<void(bool)> finished) {
+        finished(true);
+    }
     virtual void checkpoint() = 0;
     // Limit the native-position wait to two seconds before file release.
     virtual void prepareUsb(std::function<void()> finished) = 0;

@@ -4,6 +4,8 @@
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsProxyWidget>
+#include <QInputMethod>
+#include <QScopedValueRollback>
 #include <QPainter>
 #include <QStyleOptionGraphicsItem>
 #include <QMouseEvent>
@@ -11,6 +13,7 @@
 #include <QTouchEvent>
 #include <QPointingDevice>
 #include <QResizeEvent>
+#include <QPaintEvent>
 #include <QtMath>
 #include <functional>
 
@@ -147,6 +150,8 @@ public:
     QPointer<QWidget> content;
     std::function<void()> cancelGesture;
     std::function<void()> viewportResized;
+    std::function<void(QRegion)> framePreparing;
+    std::function<void(QRegion)> framePainted;
 
 protected:
     void resizeEvent(QResizeEvent *event) override {
@@ -163,10 +168,23 @@ protected:
 #endif
         if (scaleChanged && viewportResized)
             viewportResized();
+        if (scaleChanged || type == QEvent::InputMethodQuery || type == QEvent::FocusIn || type == QEvent::Move ||
+            type == QEvent::Resize) {
+            updateInputGeometry();
+        }
         return handled;
     }
     bool viewportEvent(QEvent *event) override {
         const auto type = event->type();
+        if (type == QEvent::Paint) {
+            const auto region = static_cast<QPaintEvent *>(event)->region();
+            if (framePreparing)
+                framePreparing(region);
+            const bool handled = QGraphicsView::viewportEvent(event);
+            if (framePainted)
+                framePainted(region);
+            return handled;
+        }
         if (type == QEvent::TouchBegin || type == QEvent::TouchUpdate || type == QEvent::TouchEnd ||
             type == QEvent::TouchCancel) {
             const auto *touch = static_cast<QTouchEvent *>(event);
@@ -216,6 +234,32 @@ protected:
 private:
     QPointer<RegionProxy> proxy;
     QPointer<QWidget> target;
+    bool updatingInputGeometry = false;
+    void updateInputGeometry() {
+        auto *focus = QGuiApplication::focusObject();
+        if (updatingInputGeometry || (focus != this && focus != viewport()) || !proxy || !proxy->hasFocus() ||
+            !QGraphicsView::inputMethodQuery(Qt::ImEnabled).toBool()) {
+            return;
+        }
+        auto *editor = proxy && proxy->widget() ? proxy->widget()->focusWidget() : nullptr;
+        if (!editor) {
+            return;
+        }
+        const auto clip = editor->inputMethodQuery(Qt::ImInputItemClipRectangle);
+        if (!clip.isValid() || clip.toRectF().isEmpty()) {
+            return;
+        }
+        const QRectF item = clip.toRectF().translated(proxy->subWidgetRect(editor).topLeft());
+        const QRectF rectangle = viewportTransform().mapRect(proxy->mapRectToScene(item));
+        QScopedValueRollback<bool> updating(updatingInputGeometry, true);
+        // Qt's QWidget focus and resize events cache either the unscaled child
+        // rectangle or the whole view. Map the editor's clip without rounding
+        // through QRect, which can add a physical pixel at fractional scales.
+        auto *input = QGuiApplication::inputMethod();
+        input->setInputItemRectangle(rectangle);
+        const QPoint offset = viewport()->mapTo(window(), QPoint());
+        input->setInputItemTransform(QTransform::fromTranslate(offset.x(), offset.y()));
+    }
     void cancel() {
         // Cancellation handlers can delete the target or start another gesture.
         QPointer<QWidget> cancelled = target;

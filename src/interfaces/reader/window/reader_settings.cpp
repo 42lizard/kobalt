@@ -25,6 +25,14 @@ using kobalt::ui::ControlIcon;
 using kobalt::ui::buttonIcon;
 using kobalt::platform::textRefresh;
 
+namespace {
+QStringList fallbackFontDefaults(const QStringList &families) {
+    return {QString(defaultFontFace),
+            families.contains(publisherSansFontFace) ? QString(publisherSansFontFace) : QString("IBM Plex Sans"),
+            QString(monospaceFontFace)};
+}
+}
+
 kobalt::headerfooter::Values Reader::chromeValues() {
     kobalt::headerfooter::Values values;
     values.title = model->title();
@@ -141,7 +149,8 @@ void Reader::syncChromeControls() {
                          : presetLabel(chromePreset)));
     if (fieldChooser->isVisible())
         fieldChooser->open(fieldChooser->slot(), current.slotFields[fieldChooser->slot()], values,
-                           current.uppercase[fieldChooser->slot()]);
+                           current.uppercase[fieldChooser->slot()],
+                           fieldChooser->slot() < 3 ? page->headerTextPixels() : page->footerTextPixels());
 }
 
 QWidget *Reader::chromeView() const {
@@ -174,7 +183,8 @@ void Reader::openFieldChooser(int slot) {
     if (model->temporaryTypography() || !menu->isVisible())
         return;
     const auto &current = page->chrome;
-    fieldChooser->open(slot, current.slotFields[slot], chromeValues(), current.uppercase[slot]);
+    fieldChooser->open(slot, current.slotFields[slot], chromeValues(), current.uppercase[slot],
+                       slot < 3 ? page->headerTextPixels() : page->footerTextPixels());
     headerFooterView->hide();
     fieldChooser->show();
     fieldChooser->raise();
@@ -212,7 +222,6 @@ void Reader::openSettings() {
     model->cancelPendingTurn();
     if (services.desktopUi) {
         hideStatusOption->setChecked(preferences.value("native_hide_status_bar").toBool(true));
-        hideDeviceOptionsOption->setChecked(preferences.value("native_hide_device_options").toBool(true));
     }
     hideRevealedLinks(false);
     dismissLookup();
@@ -223,6 +232,22 @@ void Reader::openSettings() {
     acknowledgments->hide();
     appearanceEdit.clearContinuation();
     restoringDefaults = false;
+    for (const auto *key : appearance::fallbackFontKeys) {
+        const auto family = preferences.value(key).toString();
+        settingsFontFaces[key] = model->fontFaces().contains(family) ? family : QString();
+    }
+    settingsDefaultFontFace = preferences.value("default_font_face").toString(defaultFontFace);
+    if (!model->fontFaces().contains(settingsDefaultFontFace))
+        settingsDefaultFontFace = defaultFontFace;
+    settingsUiFontFace = preferences.value("ui_font_face").toString();
+    settingsUiMonoFontFace = preferences.value("ui_mono_font_face").toString();
+    settingsHeaderFooterFontFace = preferences.value("header_footer_font_face").toString();
+    settingsHeaderFooterWeight = ui::headerFooterAddedWeight();
+    hideTabLabelsOption->setChecked(preferences.value("hide_tab_labels").toBool(false));
+    for (auto *face : {&settingsUiFontFace, &settingsUiMonoFontFace, &settingsHeaderFooterFontFace})
+        if (!model->fontFaces().contains(*face))
+            face->clear();
+    showSettingsFonts();
     settingsPages->setCurrentIndex(DisplaySettings);
     resetDefaults->setText(strings::get("reader.restore_appearance_defaults"));
     resetDefaults->setEnabled(true);
@@ -245,13 +270,13 @@ void Reader::openSettings() {
     linkIndicatorOption->setChecked(preferences.value("show_link_indicator").toBool(false));
     edgeLightOption->setChecked(preferences.value("edge_light_gestures").toBool(true));
     denseGraphOption->setChecked(preferences.value("dense_stats_chart").toBool(false));
-    pinStatsOption->setChecked(preferences.value("pin_stats").toBool(false));
     inheritHeaderFooterOption->setChecked(preferences.value(appearance::inheritHeaderFooterKey).toBool(true));
     showSleepScreen();
     showPageNavigation();
     showTapZones();
-    navigationBarOption->setChecked(preferences.value(pageNavigation::barVisibleKey).toBool(true));
+    minimalAnnotationOption->setChecked(minimalAnnotationMode());
     showNavigationBarButtons();
+    showMenuView();
     if (services.automaticBookOpening)
         automaticOpeningOption->setChecked(services.automaticBookOpening());
     screenRefreshMode = kobalt::screenRefresh(preferences.value("screen_refresh").toString());
@@ -264,8 +289,7 @@ void Reader::openSettings() {
 
 void Reader::fitSettings() {
     const int top = navigation ? navigation->toolbarHeight() : int(m::panel::toolbarHeight);
-    const int bottom = navigation ? navigation->contentBottom(size()) : height() - int(m::panel::footerHeight);
-    const int panelHeight = static_cast<SettingsPanel *>(general)->fitContent(QSize(width(), bottom - top));
+    const int panelHeight = static_cast<SettingsPanel *>(general)->fitContent(QSize(width(), height() - top));
     general->setGeometry(0, top, width(), panelHeight);
 }
 
@@ -303,6 +327,14 @@ void Reader::applySettings() {
         return;
     }
     auto next = preferences;
+    next["default_font_face"] = settingsDefaultFontFace;
+    next["ui_font_face"] = settingsUiFontFace;
+    next["ui_mono_font_face"] = settingsUiMonoFontFace;
+    next["header_footer_font_face"] = settingsHeaderFooterFontFace;
+    next["header_footer_added_weight"] = settingsHeaderFooterWeight;
+    next["hide_tab_labels"] = hideTabLabelsOption->isChecked();
+    for (const auto *key : appearance::fallbackFontKeys)
+        next[key] = settingsFontFaces.value(key).toString();
     next["bold_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
     next["dark_mode"] = darkOption->isChecked();
     next[appearance::inheritTextLayoutKey] = inheritTextLayoutOption->isChecked();
@@ -312,13 +344,12 @@ void Reader::applySettings() {
     next["show_link_indicator"] = linkIndicatorOption->isChecked();
     next["edge_light_gestures"] = edgeLightOption->isChecked();
     next["dense_stats_chart"] = denseGraphOption->isChecked();
-    next["pin_stats"] = pinStatsOption->isChecked();
-    next[pageNavigation::barVisibleKey] = navigationBarOption->isChecked();
+    next.remove(pageNavigation::barVisibleKey);
+    next["minimal_annotation_mode"] = minimalAnnotationOption->isChecked();
     next[appearance::inheritHeaderFooterKey] = inheritHeaderFooterOption->isChecked();
     next["screen_refresh"] = kobalt::screenRefreshValue(screenRefreshMode);
     if (services.desktopUi) {
         next["native_hide_status_bar"] = hideStatusOption->isChecked();
-        next["native_hide_device_options"] = hideDeviceOptionsOption->isChecked();
     }
     if (restoringDefaults)
         next[kobalt::headerfooter::presetKey] =
@@ -328,6 +359,7 @@ void Reader::applySettings() {
         next[it.key()] = it.value();
     if (!writePreferences(next)) {
         bionicOption->setChecked(model->requestedState().value("bold_reading").toString("off") == "bold");
+        minimalAnnotationOption->setChecked(minimalAnnotationMode());
         settingsError->setText(strings::get("reader.could_not_save_reader_settings"));
         settingsError->show();
         appearanceEdit.cancelNavigation();
@@ -335,6 +367,8 @@ void Reader::applySettings() {
         return;
     }
     preferences = next;
+    ui::setHeaderFooterAddedWeight(settingsHeaderFooterWeight);
+    applyInterfaceFonts();
     navigation->setStatusVisible(!hideNativeStatus());
     const auto chrome = kobalt::headerfooter::select(preferences);
     chromePreset = chrome.preset;
@@ -342,9 +376,11 @@ void Reader::applySettings() {
     syncChromeControls();
     applyEdgeLight();
     chapterGraph->setDense(preferences.value("dense_stats_chart").toBool(false));
-    pinStats = preferences.value("pin_stats").toBool(false);
     auto settings =
         appearanceEdit.edited() && appearanceEdit.ready() ? appearanceEdit.preview()->requestedState() : model->state();
+    settings["default_font_face"] = settingsDefaultFontFace;
+    for (const auto *key : appearance::fallbackFontKeys)
+        settings[key] = preferences.value(key).toString();
     settings["dark_mode"] = darkOption->isChecked();
     settings["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
     settings["avoid_wasteful_styling"] = avoidWastefulStylingOption->isChecked();
@@ -740,4 +776,135 @@ void Reader::applyEdgeLight() {
     }
 }
 
+void Reader::applyInterfaceFonts() {
+    for (const auto &face : {settingsUiFontFace, settingsUiMonoFontFace, settingsHeaderFooterFontFace})
+        if (!face.isEmpty())
+            registerPickerFonts(face);
+    const auto previousUi = ui::interfaceFont().family(), previousStrip = ui::headerFooterFont().family(),
+               previousMono = ui::chromeFont().family();
+    ui::setInterfaceFontFamily(settingsUiFontFace);
+    ui::setInterfaceMonoFontFamily(settingsUiMonoFontFace);
+    ui::setHeaderFooterFontFamily(settingsHeaderFooterFontFace);
+    if (previousUi == ui::interfaceFont().family() && previousStrip == ui::headerFooterFont().family() &&
+        previousMono == ui::chromeFont().family())
+        return;
+    setFont(ui::interfaceFont());
+    const auto widgets = findChildren<QWidget *>();
+    for (auto *widget : widgets) {
+        const auto style = widget->property("reader_style").toString();
+        if (!style.isEmpty())
+            readerStyle(widget, style);
+    }
+    readerStyle(this, ui::styles::reader());
+    page->setFont(ui::headerFooterFont());
+    ui::refreshInterfaceText(this);
+    fitSettings();
+}
+
+void Reader::showSettingsFonts() {
+    auto *panel = static_cast<SettingsPanel *>(general);
+    panel->headerFooterWeightButton->setCaption(
+        (settingsHeaderFooterWeight
+             ? strings::get("settings.header_footer_weight_heavier").arg(settingsHeaderFooterWeight)
+             : strings::get("settings.header_footer_weight_lighter"))
+            .toUpper());
+    panel->uiFontButton->setCaption((settingsUiFontFace.isEmpty()
+                                         ? strings::get("settings.font_default_value").arg("IBM Plex Sans")
+                                         : fontDisplayName(settingsUiFontFace))
+                                        .toUpper());
+    panel->uiMonoFontButton->setCaption((settingsUiMonoFontFace.isEmpty()
+                                             ? strings::get("settings.font_default_value").arg("IBM Plex Mono")
+                                             : fontDisplayName(settingsUiMonoFontFace))
+                                            .toUpper());
+    panel->headerFooterFontButton->setCaption((settingsHeaderFooterFontFace.isEmpty()
+                                                   ? strings::get("settings.font_default_value").arg("IBM Plex Mono")
+                                                   : fontDisplayName(settingsHeaderFooterFontFace))
+                                                  .toUpper());
+    const auto sample = [this](ui::CaptionButton *button, const QString &family) {
+        if (button->typefacePreview() != family)
+            registerPickerFonts(family);
+        button->setTypefacePreview(family);
+    };
+    sample(panel->uiFontButton, settingsUiFontFace.isEmpty() ? QStringLiteral("IBM Plex Sans") : settingsUiFontFace);
+    sample(panel->uiMonoFontButton,
+           settingsUiMonoFontFace.isEmpty() ? QStringLiteral("IBM Plex Mono") : settingsUiMonoFontFace);
+    sample(panel->headerFooterFontButton,
+           settingsHeaderFooterFontFace.isEmpty() ? QStringLiteral("IBM Plex Mono") : settingsHeaderFooterFontFace);
+    sample(panel->defaultFontButton, settingsDefaultFontFace);
+    panel->defaultFontButton->setCaption(fontDisplayName(settingsDefaultFontFace).toUpper());
+    const auto defaults = fallbackFontDefaults(model->fontFaces());
+    int index = 0;
+    for (auto *button : {panel->serifFontButton, panel->sansFontButton, panel->monoFontButton}) {
+        const auto family = settingsFontFaces.value(appearance::fallbackFontKeys[index]).toString();
+        button->setCaption((family.isEmpty()
+                                ? strings::get("settings.font_default_value").arg(fontDisplayName(defaults[index]))
+                                : fontDisplayName(family))
+                               .toUpper());
+        sample(button, family.isEmpty() ? defaults[index] : family);
+        ++index;
+    }
+}
+void Reader::openSettingsFont(const QString &key) {
+    const bool isDefault = key == "default_font_face";
+    const bool isUi = key == "ui_font_face", isMono = key == "ui_mono_font_face",
+               isHeaderFooter = key == "header_footer_font_face";
+    int index = -1;
+    for (int family = 0; family < int(appearance::fallbackFontKeys.size()); ++family)
+        if (key == appearance::fallbackFontKeys[family])
+            index = family;
+    if ((!isDefault && !isUi && !isMono && !isHeaderFooter && index < 0) || !general->isVisible())
+        return;
+    auto *panel = static_cast<SettingsPanel *>(general);
+    const QStringList titles{strings::get("settings.serif_font"), strings::get("settings.sans_font"),
+                             strings::get("settings.mono_font")};
+    auto fonts = orderedReadingFonts(model->fontCatalog());
+    const auto nativeFamilies = services.fontFamilies();
+    for (int row = fonts.size() - 1; row >= 0; --row)
+        if (fonts[row].origin == FontOrigin::BuiltIn &&
+            !nativeFamilies.contains(fonts[row].family, Qt::CaseInsensitive))
+            fonts.removeAt(row);
+    if (!isDefault)
+        fonts.prepend({QString(), {}, FontOrigin::Recommended, false, {}, {}});
+    panel->showFontChoices(
+        isDefault        ? strings::get("reader.default_font")
+        : isUi           ? strings::get("settings.ui_font")
+        : isMono         ? strings::get("settings.ui_mono_font")
+        : isHeaderFooter ? strings::get("settings.header_footer_font")
+                         : titles[index],
+        fonts,
+        isDefault        ? settingsDefaultFontFace
+        : isUi           ? settingsUiFontFace
+        : isMono         ? settingsUiMonoFontFace
+        : isHeaderFooter ? settingsHeaderFooterFontFace
+                         : settingsFontFaces.value(key).toString(),
+        isDefault                    ? QString(defaultFontFace)
+        : isUi                       ? QString("IBM Plex Sans")
+        : (isMono || isHeaderFooter) ? QString("IBM Plex Mono")
+                                     : fallbackFontDefaults(model->fontFaces())[index],
+        [this, key, isDefault, isUi, isMono, isHeaderFooter](const QString &family) {
+            if (isDefault)
+                settingsDefaultFontFace = family;
+            else if (isUi)
+                settingsUiFontFace = family;
+            else if (isMono)
+                settingsUiMonoFontFace = family;
+            else if (isHeaderFooter)
+                settingsHeaderFooterFontFace = family;
+            else
+                settingsFontFaces[key] = family;
+            showSettingsFonts();
+            refresh();
+        },
+        [this](const QStringList &families) {
+            for (const auto &family : families)
+                registerPickerFonts(family);
+        });
+    settingsFontPopup = panel->fontDialog;
+    if (!settingsFontPopup)
+        return;
+    settingsFontPopup->installEventFilter(this);
+    for (auto *widget : settingsFontPopup->findChildren<QWidget *>())
+        textRefresh(widget);
+    textRefresh(settingsFontPopup);
+}
 }

@@ -19,7 +19,7 @@ inline QString brand(int pixels, bool italic = false) {
 inline QString caption(int pixels = metrics::chrome::captionText) {
     return QString(
                "font-family:'%1';font-size:%2px;font-weight:400;background:transparent;border:none;color:palette(placeholder-text);")
-        .arg(chromeFont().family())
+        .arg(QStringLiteral("@ui-caption-family@"))
         .arg(pixels);
 }
 inline QString reader() {
@@ -32,7 +32,7 @@ inline QString reader() {
         .arg(metrics::text::body)
         .arg(metrics::control::minimumHeight)
         .arg(metrics::control::padding)
-        .arg(interfaceFontFamily());
+        .arg(QStringLiteral("@ui-font-family@"));
 }
 inline QString segment() {
     return QString(

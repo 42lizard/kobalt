@@ -21,6 +21,8 @@ def book(path, language="en"):
             '<p id="inline">A rain<strong>bow</strong> and co<em>oper</em>ation.</p>',
             '<p id="soft">An extra\u00adordinary word can wrap across lines.</p>',
             '<p id="multilingual">Astral A𐐀word. Bonjour. 日本語の言葉。中文词语。</p>',
+            '<p id="annotation-punctuation"><span>“</span>quoted<span>…”</span> [bracket], adjacent. Next <em>𐐀token</em>。</p>',
+            '<p id="annotation-sentences">Al<span>pha</span> finishes clearly. Beta completes fully! “Quotation ending.” (Nested closing?) Dr. Smith waits. Value 3.14 remains. 東京。 Ends with ellipsis… “Earlier completed.” Later rests.” We\'re arriving.\' <span>(“</span>Layered pairing<span>.</span><span>”)</span> “Greeting,” she murmured softly. “First one. Second two.”</p>',
         ]
         for name, body in (("one", "".join(paragraphs) + "<p>More fixture text.</p>" * 80), ("two", '<p id="boundary">Chapter boundary. Hello again.</p>')):
             archive.writestr(name + ".xhtml", '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Lookup fixture</title></head><body>' + body + '</body></html>')

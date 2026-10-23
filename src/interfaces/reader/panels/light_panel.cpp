@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "interfaces/reader/ui/controls/sliders.h"
 #include "interfaces/reader/ui/controls/panels.h"
 #include "interfaces/reader/ui/controls/options.h"
@@ -96,7 +97,7 @@ LightPanel::LightPanel(LightControls &light, QWidget *parent) : ui::Panel(parent
     automaticLayout->addWidget(automaticBrightness);
     automaticLayout->addWidget(automaticWarmth);
     rows->addWidget(automaticRows);
-    swipeTip = new QLabel(this);
+    swipeTip = new ui::InterfaceLabel(this);
     swipeTip->setObjectName("rrLightSwipeTip");
     swipeTip->setWordWrap(true);
     ui::readerStyle(swipeTip, ui::styles::font(m::text::secondary) +
@@ -199,9 +200,9 @@ void LightPanel::refreshValues() {
     brightnessValue->setText(QString::number(brightnessSlider->value()) + '%');
     const bool warmth = light.hasWarmth();
     warmthRow->setVisible(warmth);
-    automaticWarmth->setVisible(warmth);
+    automaticWarmth->setVisible(light.hasAutomaticWarmth());
     automaticWarmth->setChecked(light.automaticWarmth());
-    automaticRows->setVisible(sensor || warmth);
+    automaticRows->setVisible(sensor || light.hasAutomaticWarmth());
     swipeTip->setText(strings::get(warmth ? "light_panel.swipe_hint" : "light_panel.brightness_swipe_hint"));
     if (warmth) {
         if (!warmthSlider->interacting()) {

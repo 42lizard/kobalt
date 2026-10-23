@@ -111,9 +111,8 @@ extern "C" __attribute__((visibility("default"))) QPoint kobalt_touch_transform(
 }
 }
 
-namespace kobalt {
-void ownReaderRotation(bool owned) {
-    using namespace nickel4;
+namespace kobalt::nickel4 {
+void ownReaderTouchRotation(bool owned) {
     static bool initialized = false, supported = false, active = false;
     auto *screen = QGuiApplication::primaryScreen();
     if (!initialized && screen) {

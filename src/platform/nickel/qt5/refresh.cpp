@@ -1,3 +1,4 @@
+#include "../display/annotation_damage.h"
 #include "platform/api/kobo_refresh.h"
 #include "refresh.h"
 #include "platform/nickel/display/page_animation.h"
@@ -163,11 +164,20 @@ static void flushReaderUsing(QBackingStore *store, const QRegion &region, QWindo
         // Clear the entire panel, including UI remnants. Entering dark mode
         // always does this.
         previousDark = dark;
+        readerWindow->setProperty("reader_annotation_repairs", QVariant::fromValue(QRegion()));
+        readerWindow->setProperty("reader_palette_repairs", QVariant::fromValue(QRegion()));
         const QRect screen = readerWindow->rect();
         submit(QRegion(screen), {{screen, repairPolicy(dark, wide)}});
         return;
     }
     previousDark = dark;
+    const QRegion annotationRepairs = annotationRepairRegions(readerWindow);
+    if (pageAnimationPanel() == AnimationPanel::Colour && !(region & annotationRepairs).isEmpty()) {
+        keyboardPixels.clear();
+        submit(region, {{region.boundingRect(), repairPolicy(dark, wide)}});
+        consumeAnnotationRepairs(readerWindow, region);
+        return;
+    }
     // Firmware 4 does not take the page widget's attributes into the rectangle
     // policy: a page turn arrives with the controls' automatic policy. Give
     // the page's own rectangles the policy pageRefresh chose.

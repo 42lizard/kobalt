@@ -289,6 +289,114 @@ int run(int argc, char **argv) {
         opened.exec();
         require(!session->image().isNull() && session->pages() > 0, "Session did not open a readable frame");
         {
+            const auto rawImage = session->image();
+            const auto emptyGeneration = session->markupGeneration();
+            require(session->setMarkup({}) == emptyGeneration, "Unchanged empty markup changed generation");
+            bool completed = false, accepted = false;
+            session->captureMarkup([&](bool ready) {
+                completed = true;
+                accepted = ready;
+            });
+            require(completed && accepted && session->markup().resolvedRanges == 0,
+                    "Empty markup must complete without a worker job");
+            require(session->image().cacheKey() == rawImage.cacheKey(), "Markup capture rerendered raw pixels");
+            QVector<SearchHit> hits;
+            completed = false;
+            session->search("reader", [&](SearchBatch batch) {
+                hits += batch.hits;
+                if (batch.done) {
+                    completed = true;
+                    opened.quit();
+                }
+            });
+            if (!completed) {
+                opened.exec();
+            }
+            require(hits.size() > 1, "Markup fixture needs source ranges on several pages");
+            ReaderMarkupRequest request;
+            request.saved.append({hits.first().start, hits.last().end, "blue"});
+            request.draftStart = hits.first().start;
+            request.draftEnd = hits.last().end;
+            const auto generation = session->setMarkup(request);
+            require(generation > emptyGeneration && session->setMarkup(request) == generation,
+                    "Markup snapshot must change generation only when its content changes");
+            auto invalid = request;
+            invalid.draftStart = QString(4097, 'x');
+            require(session->setMarkup(invalid) == generation, "Oversized source anchor changed markup");
+            invalid = request;
+            invalid.saved.resize(2001);
+            require(session->setMarkup(invalid) == generation, "Oversized saved range set changed markup");
+            auto capture = [&] {
+                completed = false;
+                accepted = false;
+                session->captureMarkup([&](bool ready) {
+                    completed = true;
+                    accepted = ready;
+                    opened.quit();
+                });
+                if (!completed) {
+                    opened.exec();
+                }
+                return accepted;
+            };
+            require(capture(), "Could not capture current-page markup");
+            require(session->markup().request == request && session->markup().generation == generation &&
+                        session->markup().imageKey == rawImage.cacheKey() && session->markup().resolvedRanges == 2,
+                    "Markup did not belong to the exact image/request or resolved ranges twice");
+            require(!session->markup().saved.first().first.isEmpty() && !session->markup().draft.rectangles.isEmpty(),
+                    "Current visible saved and draft markup must both be captured");
+            int callbacks = 0;
+            bool staleAccepted = true, latestAccepted = false;
+            session->captureMarkup([&](bool ready) {
+                staleAccepted = ready;
+                if (++callbacks == 2)
+                    opened.quit();
+            });
+            request.saved.first().color = "pink";
+            session->setMarkup(request);
+            session->captureMarkup([&](bool ready) {
+                latestAccepted = ready;
+                if (++callbacks == 2)
+                    opened.quit();
+            });
+            if (callbacks != 2) {
+                opened.exec();
+            }
+            require(!staleAccepted && latestAccepted && session->markup().request == request,
+                    "An obsolete markup capture replaced the latest request or lost its completion");
+            session->updated = [&] {
+                if (!session->busy())
+                    opened.quit();
+            };
+            require(session->turn(1), "Could not turn an atomically marked page");
+            opened.exec();
+            require(session->markup().request == request && session->markup().imageKey == session->image().cacheKey() &&
+                        session->markup().generation == session->markupGeneration() &&
+                        session->markup().resolvedRanges == 2,
+                    "Page-turn frame published without matching complete markup");
+            require(session->go(0), "Could not restore first page after markup turn");
+            opened.exec();
+            ReaderMarkupRequest elsewhere;
+            elsewhere.saved.append({hits.last().start, hits.last().end, "gray"});
+            session->setMarkup(elsewhere);
+            require(capture() && session->markup().resolvedRanges == 0,
+                    "An unmarked destination resolved off-page geometry");
+            require(session->markup().saved.isEmpty(), "Off-page source range fabricated visible geometry");
+            auto appearance = session->state();
+            session->setMarkup(request);
+            auto changed = appearance;
+            changed["font_pixels"] = appearance.value("font_pixels").toInt() + 4;
+            session->apply(changed);
+            opened.exec();
+            require(session->markup().request == request && session->markup().imageKey == session->image().cacheKey(),
+                    "Reflow published geometry from an earlier image");
+            session->setMarkup({});
+            session->apply(appearance);
+            opened.exec();
+            require(session->markup().resolvedRanges == 0, "Cleared markup queued visible geometry after reflow");
+            session->updated = {};
+        }
+        {
             const auto image = session->image();
             const int page = session->page(), pages = session->pages();
             bool searchFinished = false;

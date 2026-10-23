@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "sliders.h"
 #include "icons.h"
 #include "../style/metrics.h"
@@ -338,7 +339,7 @@ SettingSlider *sliderRow(QWidget *parent, QVBoxLayout *rows, const char *name, c
     auto *captionRows = new QVBoxLayout(caption);
     captionRows->setContentsMargins(0, 0, m::control::captionRight, 0);
     captionRows->setSpacing(px(2));
-    auto *title = new QLabel(label.section(':', 0, 0), caption);
+    auto *title = new ui::InterfaceLabel(label.section(':', 0, 0), caption);
     title->setObjectName(QString::fromLatin1(name) + "Caption");
     title->setWordWrap(true);
     readerStyle(title, styles::font(m::text::secondary));
@@ -347,8 +348,8 @@ SettingSlider *sliderRow(QWidget *parent, QVBoxLayout *rows, const char *name, c
     current->setContentsMargins(0, 0, 0, 0);
     current->setSpacing(px(6));
     captionRows->addLayout(current);
-    auto *prefixLabel = new QLabel(strings::get("controls.currently"), caption);
-    auto *value = new QLabel(caption);
+    auto *prefixLabel = new ui::InterfaceLabel(strings::get("controls.currently"), caption);
+    auto *value = new ui::InterfaceLabel(caption);
     value->setObjectName(labelName);
     const auto secondary = styles::font(m::control::captionValueText) + "color:palette(placeholder-text);";
     readerStyle(prefixLabel, secondary);

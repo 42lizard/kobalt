@@ -478,19 +478,25 @@
 
 /* settings */
 "settings.animations_description" = "Animate page turns on supported devices. Images refresh after the sweep.";
-"settings.unsupported_description" = "This feature is not supported on your device.";
+"settings.unsupported_caption" = "Disabled: unsupported on this device.";
+"settings.unsupported_description" = "Disabled because this option is not supported on this device.";
 "settings.dark_description" = "Light text on a dark background.";
 "settings.display" = "Display";
 "settings.controls" = "Controls";
-"settings.advanced" = "Advanced";
+"settings.defaults" = "Defaults";
+"settings.styling" = "Styling";
+"settings.font_families" = "Fallback fonts";
+/* Arguments: %1 */
+"settings.font_default_value" = "Default · %1";
+"settings.serif_font" = "Serif typeface";
+"settings.sans_font" = "Sans-serif typeface";
+"settings.mono_font" = "Monospace typeface";
 "settings.system" = "System";
 "settings.automatic_book_opening" = "Open books automatically in Kobalt";
 "settings.automatic_book_opening_description" = "Use Kobalt when opening supported books from your library. This is the same setting as in Kobo's Reading settings.";
 "settings.sleep_screen" = "Sleep screen";
 "settings.page_navigation" = "Page navigation";
-"settings.section_navigation_bar" = "Navigation Bar";
-"settings.show_navigation_bar" = "Show navigation bar";
-"settings.show_navigation_bar_description" = "Show the book-position slider above the tabs, with preview arrows and an expandable whole-book map.";
+"settings.section_navigation_bar" = "Navigate panel";
 "settings.navigation_bar_buttons" = "Button action";
 "settings.navigation_bar_hint" = "Choose how the arrows beside the scrubber move the page preview.";
 "settings.navigation_bar_pages" = "Page jumps";
@@ -499,6 +505,7 @@
 "settings.navigation_bar_chapters_description" = "Preview the previous or next chapter. Default.";
 "settings.tap_zones" = "Tap zones";
 "settings.tap_left_right" = "Left / right";
+"settings.tap_reversed" = "Reversed";
 "settings.tap_top_bottom" = "Top / bottom";
 "settings.tap_one_handed" = "One-handed";
 "settings.tap_zones_hint" = "Choose where to tap to turn pages. The marked middle zone always opens the menu.";
@@ -508,14 +515,12 @@
 "settings.section_screen" = "Screen refresh";
 "settings.section_navigation" = "Navigation";
 "settings.section_frontlight" = "Frontlight";
-"settings.section_new_books" = "New-book defaults";
+"settings.section_new_books" = "New Book";
 "settings.section_book_content" = "Book content";
-"settings.section_chapter_graph" = "Chapter graph";
 "settings.section_reading_menu" = "Reading menu";
 "settings.section_reader" = "Reader";
 "settings.section_sleep" = "Sleep and wake";
 "settings.section_window" = "Window";
-"settings.section_device_preview" = "Device preview";
 "settings.navigation_taps_and_swipes" = "Swipes and taps";
 "settings.navigation_taps_and_swipes_description" = "Default";
 "settings.navigation_taps_only" = "Taps only";
@@ -538,13 +543,10 @@
 "sleep.percent_read" = "%1% read";
 /* Arguments: %1 */
 "sleep.time_left" = "%1 to go";
-"settings.stats" = "Stats";
 "settings.about" = "About";
 "settings.ui" = "UI";
 "settings.hide_status_bar" = "Hide status bar";
 "settings.hide_status_bar_description" = "Hide the clock, battery and menu status row on this Mac.";
-"settings.hide_device_options" = "Hide device-only options";
-"settings.hide_device_options_description" = "Hide e-ink refresh, page animations and frontlight gestures. Turn this off to inspect the reader controls.";
 "settings.edge_light_description" = "Swipe up or down along the left edge for brightness, and along the right edge for warmth.";
 "settings.edge_brightness_description" = "Swipe up or down along the left edge for brightness.";
 
@@ -564,11 +566,11 @@
 
 
 "navigation.chapters" = "CHAPTERS";
+"navigation.seek" = "NAVIGATE";
 "navigation.text" = "TEXT";
 "navigation.layout" = "LAYOUT";
 "navigation.light" = "LIGHT";
 "navigation.stats" = "STATS";
-"navigation.search" = "SEARCH";
 
 /* Arguments: %1, %2 */
 "navigation.page_count" = "%1 of %2";
@@ -600,6 +602,7 @@
 "settings.refresh_smart" = "Smart";
 /* Arguments: %1 */
 "settings.refresh_smart_description" = "At chapter starts, at most once every %1 turns.";
+"settings.refresh_every_page" = "Every page";
 "settings.refresh_every_chapter" = "Every chapter";
 /* Arguments: %1 */
 "settings.refresh_every_pages" = "Every %1 pages";
@@ -644,8 +647,6 @@
 "stats.counting" = "Counting words…";
 "reader.dense_graph" = "Compact chapter graphs";
 "settings.dense_graph_description" = "When turned on, the Stats panel shows more chapters at once. If you want wider bars, turn this off.";
-"reader.pin_stats" = "Always show statistics";
-"settings.pin_stats_description" = "Stats stays open above the bottom bar whenever the reading controls are open.";
 /* Arguments: %1 */
 "stats.time_left" = "≈ %1 left";
 /* Arguments: %1 */
@@ -732,5 +733,71 @@
 "settings.inherit_header_footer" = "Inherit header and footer from the last book";
 "settings.inherit_header_footer_description" = "New books start with the last book's header and footer. Books with saved settings keep them.";
 
-"settings.avoid_wasteful_styling" = "Selectively avoid wasteful styling";
-"settings.avoid_wasteful_styling_description" = "Kobalt will automatically remove margins at page breaks and ignore page margins to avoid wasting space. If you prefer the original book CSS, you may disable this.";
+"settings.avoid_wasteful_styling" = "Smart Styling";
+"settings.avoid_wasteful_styling_description" = "Kobalt will automatically improve book rendering appearance. If you prefer the original book CSS, disable this.";
+
+"settings.minimal_annotation_mode" = "Minimal annotation mode";
+"settings.minimal_annotation_mode_description" = "Hide the annotation bar. Tap text or blank space, then choose Stop highlighting to exit.";
+
+/* annotations */
+"annotations.title" = "Annotate";
+"annotations.tab" = "Annotations";
+"annotations.close" = "Close annotations";
+"annotations.mode_active" = "HIGHLIGHT MODE NOW ACTIVE";
+"annotations.tap_start" = "tap text to begin highlighting.";
+"annotations.tap_end" = "Tap text to end the selection.";
+"annotations.tap_boundary" = "Tap text to move the end.";
+"annotations.ready" = "Tap selection for actions.";
+"annotations.highlight_word" = "Highlight word";
+"annotations.end_here" = "Highlight to here";
+"annotations.retry_save" = "Retry save";
+"annotations.cancel_selection" = "Cancel selection";
+"annotations.discard_and_stop" = "Discard selection and stop highlighting";
+"annotations.stop" = "Stop highlighting";
+"annotations.empty" = "No annotations yet";
+"annotations.empty_hint" = "Use Annotate in the reading menu to save a passage.";
+/* Arguments: %1 */
+"annotations.summary" = "%1 annotations";
+"annotations.edit" = "Adjust highlight";
+"annotations.remove" = "Delete highlight";
+"annotations.save_failed" = "Could not save the highlight. Your selection is kept.";
+"annotations.remove_prompt" = "Delete this highlight?";
+"annotations.remove_detail" = "The saved passage will be removed from this book.";
+"annotations.dismiss" = "Do nothing";
+"annotations.previous_matches" = "Previous highlights";
+"annotations.next_matches" = "Next highlights";
+"annotations.save_then_edit" = "Save selection and edit highlight";
+"annotations.discard_then_edit" = "Discard selection and edit highlight";
+
+"annotations.color_yellow" = "Yellow";
+"annotations.color_green" = "Green";
+"annotations.color_blue" = "Blue";
+"annotations.color_pink" = "Pink";
+"annotations.color_gray" = "Gray";
+
+"annotations.color_failed" = "Could not save color. Try again.";
+
+"settings.default_menu_view" = "Default menu style";
+"settings.default_menu_view_description" = "Choose the view shown when you open the reading menu.";
+"settings.menu_view_none" = "Default";
+"settings.menu_view_seek" = "Navigate Mode";
+"settings.menu_view_stats" = "Stats Mode";
+"settings.menu_view_none_description" = "Tapping in the middle of the screen simply opens the basic reading menu. Nothing special. Kobalt's default.";
+"settings.menu_view_seek_description" = "Shows page thumbnails and advanced book navigation controls. For those who would normally use the Navigate tab.";
+"settings.menu_view_stats_description" = "Shows chapter and book statistics above the tab bar, as you would normally find using the Stats tab.";
+
+"settings.section_default_global_font" = "Default global font";
+"settings.section_user_interface" = "User Interface";
+"settings.ui_font" = "Sans-serif UI typeface";
+"settings.header_footer_font" = "Header & footer UI typeface";
+"settings.ui_mono_font" = "Monospaced UI typeface";
+
+"settings.header_footer_weight" = "Header & footer UI weight";
+"settings.section_graphs" = "Graphs";
+
+"settings.header_footer_weight_lighter" = "Lighter · 0";
+/* Arguments: %1 */
+"settings.header_footer_weight_heavier" = "Heavier · +%1";
+
+"settings.hide_tab_labels" = "Hide labels in tabs";
+"settings.hide_tab_labels_description" = "Tabs at the bottom of the screen only display an icon when this is selected.";

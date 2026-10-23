@@ -63,6 +63,10 @@ Reader::~Reader() {
     presentation->resumeBackground();
     for (int id : registeredFonts)
         QFontDatabase::removeApplicationFont(id);
+    kobalt::ui::setInterfaceFontFamily({});
+    kobalt::ui::setInterfaceMonoFontFamily({});
+    kobalt::ui::setHeaderFooterFontFamily({});
+    kobalt::ui::setHeaderFooterAddedWeight(2);
 }
 
 void Reader::checkpoint() {
@@ -148,6 +152,9 @@ void Reader::prepareSleepCover() {
 }
 
 void Reader::sleepReader() {
+    if (orientation) {
+        orientation->freeze();
+    }
     if (pageScrubber)
         pageScrubber->cancel();
     if (lifecycleHidden)
@@ -166,7 +173,7 @@ void Reader::sleepReader() {
         sleepPixels <= 4 * 1024 * 1024 && readyForPresentation() && !appearanceEdit.panelOpen() &&
         !model->temporaryTypography()) {
         const bool useCover = mode == sleep::Mode::Cover && !sleepCover.isNull();
-        QImage frame = useCover ? sleepCoverBackground(sleepCover, page->size(), darkTheme) : page->snapshot(true);
+        QImage frame = useCover ? sleepCoverBackground(sleepCover, page->size()) : page->snapshot(true);
         if (!frame.isNull()) {
             // Capture only the page, including its header and footer. Menus,
             // dialogs and a temporary typography preview are not sleep content.
@@ -263,6 +270,9 @@ void Reader::wakeReader() {
     if (finishDialog)
         finishDialog->show();
     setProperty("reader_preparing_wake", true);
+    if (orientation) {
+        orientation->start(kobalt::shownOrientation(QGuiApplication::primaryScreen()));
+    }
     showFullScreen();
     book->invalidateProgress();
     startClock();
@@ -324,11 +334,14 @@ void Reader::progressTick() {
 
 QVector<QWidget *> Reader::popups() const {
     // Header and footer and the field list cover the panels, under every other pop-up.
-    return {headerFooterView,
+    return {annotationHeader,
+            annotationPopover,
+            headerFooterView,
             fieldChooser,
             busyNotice,
             brightnessNotice,
             fontDefaultDialog.data(),
+            settingsFontPopup.data(),
             linkDialog.data(),
             debugDialog.data(),
             syncDialog.data(),
@@ -338,6 +351,7 @@ QVector<QWidget *> Reader::popups() const {
             pageNavigationPopup.data(),
             tapZonesPopup.data(),
             navigationBarPopup.data(),
+            menuViewPopup.data(),
             removeDialog.data(),
             customReplaceDialog.data(),
             bookmarkErrorDialog.data(),
@@ -465,6 +479,10 @@ bool Reader::eventFilter(QObject *watched, QEvent *event) {
     }
     if (navigationBarPopup && watched == navigationBarPopup && type == QEvent::MouseButtonRelease) {
         closeNavigationBarButtons();
+        return true;
+    }
+    if (menuViewPopup && watched == menuViewPopup && type == QEvent::MouseButtonRelease) {
+        closeMenuView();
         return true;
     }
     if (pageNavigationPopup && watched == pageNavigationPopup && type == QEvent::MouseButtonRelease) {
@@ -614,8 +632,9 @@ void Reader::hideEvent(QHideEvent *event) {
     kobalt::diagnostic("reader-hidden");
     if (light)
         lightPopup->hide();
-    if (orientation)
-        orientation->stop();
+    if (orientation) {
+        orientation->stop(property("reader_sleep_handoff").toBool());
+    }
     presentation->resumeBackground();
     resizePending = false;
     setUpdatesEnabled(true);
@@ -623,6 +642,9 @@ void Reader::hideEvent(QHideEvent *event) {
 }
 
 void Reader::resizeEvent(QResizeEvent *) {
+    annotationFrame.clear();
+    if (annotationPopover)
+        annotationPopover->hide();
     if (isVisible() && windowHandle() && windowHandle()->isExposed() && !page->image.isNull() && updatesEnabled()) {
         // Kobo Qt replaces the backing store when the screen turns. Keep
         // painting the current page until reflow finishes, or the new buffer
@@ -685,10 +707,13 @@ void Reader::closeEvent(QCloseEvent *event) {
     }
     setProperty("reader_exit_clean_pending", true);
     setProperty("reader_preparing_handoff", true);
+    // Restore orientation while Home is paused, then repaint its backing store
+    // before making it visible.
+    if (orientation) {
+        orientation->stop();
+    }
     presentation->resumeAndRepaintBackground();
     setProperty("reader_preparing_handoff", false);
-    if (orientation)
-        orientation->stop();
     book->releaseNative();
     save(true);
     model->updated = {};
@@ -724,6 +749,35 @@ void Reader::closeSearch() {
     }
     updateOrientationBlock();
     syncNavigation();
+}
+
+void Reader::openSeek() {
+    if (model->busy() || appearanceEdit.applying()) {
+        return;
+    }
+    if (appearanceEdit.panelOpen() || general->isVisible()) {
+        appearanceEdit.request(AppearanceDestination::Seek);
+        if (general->isVisible()) {
+            applySettings();
+        } else {
+            finishPreview();
+        }
+        return;
+    }
+    if (seekOpen) {
+        if (pageNavigation::menuView(preferences) == pageNavigation::MenuView::Seek)
+            return;
+        seekOpen = false;
+        pageScrubber->cancel();
+        showControls();
+        return;
+    }
+    choices->hide();
+    lightPopup->hide();
+    chapterGraph->hide();
+    seekOpen = true;
+    syncNavigation();
+    pageScrubber->showCurrentPage();
 }
 
 void Reader::openSearch() {
@@ -1000,47 +1054,50 @@ void Reader::configureNavigation() {
         syncNavigation();
     };
     navigation->activated = [this](kobalt::NavigationDestination destination) {
-        model->cancelPendingTurn();
-        bookmarkList->hide();
-        using Nav = kobalt::NavigationDestination;
-        if (destination == Nav::Text)
-            selectPanel(0);
-        else if (destination == Nav::Layout)
-            selectPanel(1);
-        else if (destination == Nav::Light)
-            toggleLight();
-        else if (destination == Nav::Stats)
-            toggleGraph();
-        else {
-            const auto target =
-                destination == Nav::Chapters ? AppearanceDestination::Chapters : AppearanceDestination::Search;
-            if (target == AppearanceDestination::Chapters && choices->isVisible() && !choosingTypography) {
-                choices->hide();
-                showControls();
-            } else if (appearanceEdit.panelOpen() || general->isVisible()) {
-                appearanceEdit.request(target);
-                if (general->isVisible())
-                    applySettings();
-                else
-                    finishPreview();
-            } else if (target == AppearanceDestination::Chapters)
-                showChapters();
-            else
-                openSearch();
-        }
-        syncNavigation();
+        activateNavigation(destination);
     };
+}
+
+void Reader::activateNavigation(kobalt::NavigationDestination destination) {
+    model->cancelPendingTurn();
+    bookmarkList->hide();
+    using Nav = kobalt::NavigationDestination;
+    if (destination != Nav::Seek) {
+        pageScrubber->cancel();
+    }
+    if (destination == Nav::Seek)
+        openSeek();
+    else if (destination == Nav::Text)
+        selectPanel(0);
+    else if (destination == Nav::Layout)
+        selectPanel(1);
+    else if (destination == Nav::Light)
+        toggleLight();
+    else if (destination == Nav::Stats)
+        toggleGraph();
+    else {
+        const auto target =
+            destination == Nav::Chapters ? AppearanceDestination::Chapters : AppearanceDestination::Search;
+        if (target == AppearanceDestination::Chapters && choices->isVisible() && !choosingTypography) {
+            choices->hide();
+            showControls();
+        } else if (appearanceEdit.panelOpen() || general->isVisible()) {
+            appearanceEdit.request(target);
+            if (general->isVisible())
+                applySettings();
+            else
+                finishPreview();
+        } else if (target == AppearanceDestination::Chapters)
+            showChapters();
+        else
+            openSearch();
+    }
+    syncNavigation();
 }
 
 QRect Reader::panelBounds(int panelHeight) const {
     return navigation ? navigation->panelBounds(size(), panelHeight)
                       : QRect(0, m::panel::toolbarHeight, width(), panelHeight);
-}
-
-// Pinned Stats has no tab. It opens above the tabs with the reading
-// controls and steps aside while another panel covers that area.
-bool Reader::statsPinned() const {
-    return pinStats;
 }
 
 void Reader::syncStatusBoundary() {
@@ -1083,7 +1140,7 @@ void Reader::leaveRevealedLinks() {
 void Reader::syncLinkDiscovery() {
     if (!linkDiscovery)
         return;
-    const bool blocked = model->busy() || lifecycleHidden || closing || services.suspended() ||
+    const bool blocked = annotationMode || model->busy() || lifecycleHidden || closing || services.suspended() ||
                          appearanceEdit.panelOpen() || general->isVisible() || menu->isVisible() ||
                          choices->isVisible() || chapterGraph->isVisible() || lightPopup->isVisible() ||
                          bookmarkList->isVisible() || acknowledgments->isVisible() || searchPanel->isVisible() ||
@@ -1131,7 +1188,7 @@ void Reader::syncLinkDiscovery() {
         button->setFixedHeight(strip);
     };
     const auto fits = [](int strip, int text) {
-        return strip >= QFontMetrics(kobalt::ui::chromeFont(text)).height();
+        return strip >= QFontMetrics(kobalt::ui::headerFooterFont(text)).height();
     };
 
     const QString label = strings::get("reader.highlight_links").arg(count);
@@ -1180,7 +1237,7 @@ void Reader::syncLinkDiscovery() {
         const int border = m::control::border;
         row->setContentsMargins(m::reading::headerSide, top ? 0 : border, m::reading::headerSide, top ? border : 0);
         const QString stripText = QString("QLabel{font-family:'%1';%2color:%3;}")
-                                      .arg(kobalt::ui::chromeFont().family())
+                                      .arg(kobalt::ui::headerFooterFont().family())
                                       .arg(styles::font(text))
                                       .arg(ink.name());
         restyle(linkDiscoveryHint, stripText);
@@ -1239,7 +1296,6 @@ void Reader::syncNavigation() {
     // Header and footer is a sheet over the page, placed like Font below.
     QWidget *cover = fieldChooser && fieldChooser->isVisible() ? fieldChooser : nullptr;
     const bool chromeSheet = !cover && headerFooterView && headerFooterView->isVisible();
-    const bool pinned = statsPinned();
     using Nav = kobalt::NavigationDestination;
     const auto update = [&] {
         const int active = cover || chromeSheet                                                    ? int(Nav::Layout)
@@ -1247,8 +1303,9 @@ void Reader::syncNavigation() {
                            : choosingTypography && choices->isVisible() && choices->isFontPicker() ? int(Nav::Text)
                            : menu->isVisible()       ? (panels->currentIndex() == 0 ? int(Nav::Text) : int(Nav::Layout))
                            : lightPopup->isVisible() ? int(Nav::Light)
-                           : chapterGraph->isVisible() && !pinned ? int(Nav::Stats)
-                                                                  : -1;
+                           : chapterGraph->isVisible() ? int(Nav::Stats)
+                           : seekOpen                  ? int(Nav::Seek)
+                                                       : -1;
         pageScrubber->setReturnAction(
             linkReturnAvailable ? strings::get("reader.return_page").arg(linkHistory.last().page + 1) : QString(),
             linkHistory.isEmpty() || linkHistory.last().chapter.isEmpty()
@@ -1264,42 +1321,18 @@ void Reader::syncNavigation() {
              topControls->isVisible() && !searchPanel->isVisible() && !acknowledgments->isVisible(),
              !model->busy() && !appearanceEdit.applying(), services.lightAvailable(), active,
              linkReturnAvailable ? strings::get("reader.return_page").arg(linkHistory.last().page + 1) : QString(),
-             strings::get("navigation.page_count").arg(model->page() + 1).arg(model->pages()), topActions, general,
-             lightPopup, pinned,
+             topActions, general, lightPopup,
              linkHistory.isEmpty() || linkHistory.last().chapter.isEmpty()
                  ? QString()
                  : strings::get("reader.jumped_from_chapter").arg(linkHistory.last().chapter),
-             preferences.value(pageNavigation::barVisibleKey).toBool(true)});
+             seekOpen,
+             pageNavigation::menuView(preferences) == pageNavigation::MenuView::Seek    ? int(Nav::Seek)
+             : pageNavigation::menuView(preferences) == pageNavigation::MenuView::Stats ? int(Nav::Stats)
+                                                                                        : -1,
+             preferences.value("hide_tab_labels").toBool(false)});
     };
     update();
     syncLinkDiscovery();
-    if (pinned) {
-        const QRect bounds = navigation->panelBounds(size(), chapterGraph->height());
-        // Settings always takes precedence; Stats with Settings is too busy.
-        bool covered = !topControls->isVisible() || general->isVisible();
-        for (const QWidget *panel : {static_cast<QWidget *>(menu), static_cast<QWidget *>(lightPopup),
-                                     static_cast<QWidget *>(choices), static_cast<QWidget *>(general),
-                                     static_cast<QWidget *>(searchPanel), static_cast<QWidget *>(dictionaryPanel),
-                                     static_cast<QWidget *>(acknowledgments), static_cast<QWidget *>(bookmarkList)})
-            covered = covered || (panel->isVisible() && panel->geometry().intersects(bounds));
-        if (covered == chapterGraph->isVisible()) {
-            if (covered)
-                chapterGraph->hide();
-            else {
-                updateGraph();
-                chapterGraph->setGeometry(navigation->panelBounds(size(), chapterGraph->height()));
-                chapterGraph->open();
-                navigation->stackPanel(chapterGraph);
-            }
-            update();
-        }
-        pinnedStatsOpen = chapterGraph->isVisible();
-    } else if (pinnedStatsOpen) {
-        // Unpinning closes what the pin opened; the Stats tab opens it again.
-        pinnedStatsOpen = false;
-        chapterGraph->hide();
-        update();
-    }
     if (choosingTypography && choices->isVisible()) {
         if (choices->isFontPicker()) {
             const int bottom = navigation->contentBottom(size());
@@ -1323,6 +1356,9 @@ void Reader::syncNavigation() {
 }
 
 void Reader::showControls() {
+    if (annotationMode) {
+        return;
+    }
     const bool topVisible = topControls->isVisible();
     const bool opening = !topVisible && !bottomControls->isVisible();
     model->cancelPendingTurn();
@@ -1348,6 +1384,24 @@ void Reader::showControls() {
     }
     updateLinkReturn();
     syncNavigation();
+    if (!appearanceEdit.panelDestination()) {
+        switch (pageNavigation::menuView(preferences)) {
+        case pageNavigation::MenuView::Seek:
+            seekOpen = true;
+            chapterGraph->hide();
+            syncNavigation();
+            if (!pageScrubber->selecting())
+                pageScrubber->showCurrentPage();
+            break;
+        case pageNavigation::MenuView::Stats:
+            seekOpen = false;
+            pageScrubber->cancel();
+            openGraph();
+            break;
+        case pageNavigation::MenuView::None:
+            break;
+        }
+    }
     if (opening) {
         // The display submits disjoint bars separately. Paint their completed
         // frame together so they appear in one screen update.
@@ -1499,20 +1553,26 @@ void Reader::pageButton(int direction) {
     const auto *modal = QApplication::activeModalWidget();
     if (modal && modal != this)
         return;
-    for (auto *widget : popups())
-        if (widget && widget->isVisible() && dynamic_cast<ui::ModalOverlay *>(widget))
+    for (auto *widget : popups()) {
+        auto *overlay = dynamic_cast<ui::ModalOverlay *>(widget);
+        if (overlay && overlay->isVisible() && overlay->inputBarrier()) {
             return;
+        }
+    }
     if (pageList(direction))
         return;
     if (!model->canTurn() || appearanceEdit.panelOpen() || general->isVisible() || choices->isVisible() ||
-        (chapterGraph->isVisible() && !statsPinned()) || revealingLinks || dictionaryPanel->isVisible() ||
-        searchPanel->isVisible() || linksActive() || lookupPending || acknowledgments->isVisible() ||
-        bookmarkList->isVisible() || lightPopup->isVisible())
+        chapterGraph->isVisible() || revealingLinks || dictionaryPanel->isVisible() || searchPanel->isVisible() ||
+        linksActive() || lookupPending || acknowledgments->isVisible() || bookmarkList->isVisible() ||
+        lightPopup->isVisible())
         return;
     turnPage(direction);
 }
 
 void Reader::turnPage(int direction) {
+    if (annotationSaving) {
+        return;
+    }
     if (pageScrubber)
         pageScrubber->cancel();
     turnStarted.start();
@@ -1520,11 +1580,18 @@ void Reader::turnPage(int direction) {
         !model->canTurn() || closing || exitPending || lifecycleHidden || services.suspended() ||
         book->deviceTransition() || appearanceEdit.panelOpen() || appearanceEdit.applying())
         return;
-    if (!model->busy() && direction > 0 && model->nextPage() == model->page() && book->offerFinish()) {
+    if (!annotationMode && !model->busy() && direction > 0 && model->nextPage() == model->page() &&
+        book->offerFinish()) {
         showFinishChoice();
         return;
     }
-    model->turn(direction);
+    if (model->turn(direction)) {
+        if (annotationMode) {
+            ++annotationEpoch;
+            annotationPopover->hide();
+        }
+        ++savedHighlightEpoch;
+    }
 }
 
 // The layout that bookmark pages belong to, including the page area size.
@@ -1536,13 +1603,15 @@ QString Reader::layoutKey() const {
 void Reader::syncBookmarks() {
     if (!bookmarks->available() || model->busy() || model->pages() <= 0)
         return;
-    page->bookmarked = bookmarks->sync() && bookmarks->marked(model->page());
+    const bool resolved = bookmarks->sync();
+    page->bookmarked = resolved && bookmarks->marked(model->page());
+    pageScrubber->setBookmarkedPages(resolved ? bookmarks->pages() : QVector<int>());
 }
 
 void Reader::toggleBookmark() {
     if (bookmarks->toggle(model->page()) != kobalt::BookmarkSession::Toggle::Removed)
         return;
-    page->bookmarked = false;
+    syncBookmarks();
     page->refreshContent();
     saveSoon();
 }

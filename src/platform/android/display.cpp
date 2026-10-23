@@ -1,10 +1,23 @@
 #include "platform/api/kobo_refresh.h"
 #include <cerrno>
+#include <QWidget>
+#include <QVariant>
 namespace kobalt::platform {
-// Android's Qt backing store coalesces ordinary widget updates. Kobo waveform
-// commands have no Android equivalent; a device-specific adapter can add one.
+// The canvas attaches these requests to the Surface before painting and flushing.
 void textRefresh(QWidget *) {}
-void pageRefresh(QWidget *, bool, bool) {}
+void pageRefresh(QWidget *widget, bool clean, bool partialText) {
+    if (!widget)
+        return;
+    // Reader maintenance runs again before the proxy's queued canvas paint.
+    // A call without a text request must not cancel that pending frame's request.
+    // prepareRefreshFrame consumes it when the Surface accepts the metadata.
+    if (partialText && widget->palette().color(QPalette::Window).lightness() > 127)
+        widget->window()->setProperty("boox_text_frame", true);
+    if (clean) {
+        widget->window()->setProperty("reader_full_flash", true);
+        widget->update();
+    }
+}
 void setReaderRefreshWindow(QWidget *) {}
 }
 namespace kobalt::nickel4 {

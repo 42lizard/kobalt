@@ -67,7 +67,7 @@ bool AppearanceEditSession::appearanceDestination() const {
 bool AppearanceEditSession::externalDestination() const {
     return destination_ == Destination::Light || destination_ == Destination::Stats ||
            destination_ == Destination::Chapters || destination_ == Destination::Search ||
-           destination_ == Destination::Bookmarks;
+           destination_ == Destination::Bookmarks || destination_ == Destination::Seek;
 }
 AppearanceEditSession::Destination AppearanceEditSession::takeDestination() {
     const auto destination = destination_;

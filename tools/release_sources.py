@@ -90,6 +90,10 @@ def inputs(root, offline=False, allow_dirty=False):
         relative = '.cache/android-dependencies/' + name + '.tar.gz'
         download(spec, root / relative, offline)
         files[relative] = root / relative
+    # Include the exact Android binary with its matching source archive below.
+    compatibility = '.cache/android-dependencies/hiddenapibypass-4.3.aar'
+    download(json.loads((root / 'android/compatibility.json').read_text()), root / compatibility, offline)
+    files[compatibility] = root / compatibility
     extra = json.loads((root / 'dependencies/release-sources.json').read_text())
     qt = json.loads((root / 'toolchains/qt6/source/source.json').read_text())
     extra['qt6-base'] = {**qt, 'file': 'qtbase-' + qt['version'] + '.tar.xz'}

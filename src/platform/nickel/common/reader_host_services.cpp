@@ -126,6 +126,9 @@ private:
 }
 ReaderHostServices readerHostServices() {
     ReaderHostServices result;
+    result.colorDisplay = [] {
+        return pageAnimationPanel() == AnimationPanel::Colour;
+    };
     result.downloadableDictionaries = false;
     result.browserAvailable = nativeReaderBrowserAvailable;
     result.openBrowser = nativeReaderOpenBrowser;

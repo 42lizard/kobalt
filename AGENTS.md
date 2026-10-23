@@ -8,7 +8,7 @@ Only the user edits this repository's root `README.md`. Agents may edit README f
 
 ## Worktrees and branches
 
-`develop` is this repository's integration branch. Start new implementation work in a separate worktree and task branch based on `develop`. Continue existing work in its existing worktree and branch unless the user requests otherwise. Target completed implementation changes at `develop`. Use `main` only for explicitly requested release work.
+`develop` is this repository's integration branch. Start new implementation work in a separate worktree and task branch based on `develop`. Name task branches `feature/*`. Continue existing work in its existing worktree and branch unless the user requests otherwise. Target completed implementation changes at `develop`. Use `main` only for explicitly requested release work.
 
 When the user explicitly asks you to implement a change and merge it into `develop`, you may create the task branch and worktree, stage and commit the task's changes, and integrate them into local `develop` after the required checks pass. This authorization covers only repositories named in the request. Follow the signing requirements and preserve unrelated work. Do not ask again for operations already covered by that authorization.
 

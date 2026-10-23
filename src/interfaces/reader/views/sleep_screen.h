@@ -10,8 +10,8 @@ QString sleepStatusText(SleepStatus status);
 // Rounds up to whole minutes. Estimates above 120 minutes use hours and minutes.
 // A negative estimate is unavailable and has no label.
 QString sleepTimeLeft(qint64 milliseconds);
-// Fits the cover without cropping. Unused space follows the interface theme.
-QImage sleepCoverBackground(const QImage &cover, QSize size, bool dark);
+// Fits the cover without cropping. Unused space is always black.
+QImage sleepCoverBackground(const QImage &cover, QSize size);
 QRect sleepScreenCardRect(QSize size, bool showRemaining);
 // Takes ownership of one background and paints in place. The caller
 // releases the completed frame to the host before the device suspends.

@@ -138,6 +138,9 @@ private:
 }
 ReaderHostServices hostReaderServices(bool ambientLightSensor) {
     ReaderHostServices result;
+    result.colorDisplay = [] {
+        return true;
+    };
     result.browserAvailable = [] {
         return false;
     };

@@ -38,11 +38,13 @@ function(kobalt_reading_library name model publication layout_policy)
         "${KOBALT_COMPONENT_ROOT}/src/reading/reader_session.cpp"
         "${KOBALT_COMPONENT_ROOT}/src/reading/appearance_settings.cpp"
         "${KOBALT_COMPONENT_ROOT}/src/reading/bookmark_session.cpp"
+        "${KOBALT_COMPONENT_ROOT}/src/reading/highlight_session.cpp"
         "${KOBALT_COMPONENT_ROOT}/src/reading/header_footer.cpp"
         "${KOBALT_COMPONENT_ROOT}/src/reading/reading_book.cpp"
         "${KOBALT_COMPONENT_ROOT}/src/reading/reading_progress.cpp"
         "${KOBALT_COMPONENT_ROOT}/src/storage/reader_storage.cpp"
         "${KOBALT_COMPONENT_ROOT}/src/storage/bookmark_store.cpp"
+        "${KOBALT_COMPONENT_ROOT}/src/storage/highlight_store.cpp"
         "${KOBALT_COMPONENT_ROOT}/src/storage/layout_cache.cpp"
         "${KOBALT_COMPONENT_ROOT}/src/publication/layout_compatibility.cpp")
     set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON)

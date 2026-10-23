@@ -11,12 +11,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from build import ENGINE_PATCHES, LUNASVG_PATCHES, build_autotools, source_commit, verify_public_library
 import assets
 from sign import sign_interactively
+from release_sources import download
 from session_lock import acquire
 from dependency_cache import DependencyCache, cache_root, stage_cmake, gradle_cache, fetch_source
 
@@ -107,6 +109,13 @@ def main():
         os.environ['GRADLE_USER_HOME'] = str(gradle_cache(ROOT))
     os.environ.setdefault('ANDROID_USER_HOME', str(output.parent / 'user-home'))
     lock = acquire(output.parent / 'build.lock')
+    compatibility = ROOT / '.cache/android-dependencies/hiddenapibypass-4.3.aar'
+    download(json.loads((ROOT / 'android/compatibility.json').read_text()), compatibility, args.offline)
+    compatibility_jar = output / 'hiddenapibypass.jar'
+    with zipfile.ZipFile(compatibility) as archive:
+        contents = archive.read('classes.jar')
+    if not compatibility_jar.is_file() or compatibility_jar.read_bytes() != contents:
+        compatibility_jar.write_bytes(contents)
     specs = json.loads((ROOT / 'dependencies/manifest.json').read_text())
     specs.update(json.loads((ROOT / 'android/dependencies.json').read_text()))
     names = ['crengine', 'koreader-base', 'lunasvg', 'libpng', 'freetype', 'utf8proc', 'libjpeg-turbo', 'xxhash', 'harfbuzz',
@@ -246,7 +255,7 @@ def main():
         '-DQT_ANDROID_SDK_BUILD_TOOLS_REVISION=36.0.0', '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON',
         f'-DCRENGINE_SOURCE={engine}', f'-DCRENGINE_BUILD={engine_build}', f'-DDEPENDENCY_PREFIX={prefix}',
         f'-DANDROID_OPENSSL_DIR={openssl}', f'-DASSET_MANIFEST={manifest}', f'-DKOBALT_VERSION={app_version}',
-        f'-DKOBALT_ANDROID_VERSION_CODE={args.version_code}',
+        f'-DKOBALT_ANDROID_VERSION_CODE={args.version_code}', f'-DANDROID_COMPATIBILITY_JAR={compatibility_jar}',
         f'-DKOBALT_COMMIT={commit}', '-DKOBALT_COMMIT_MODIFIED=' + ('ON' if modified else 'OFF'))
     run('cmake', '--build', output / 'app', '--target', 'kobalt_android', '--parallel', args.jobs)
     verify_public_library(output / 'app' / ('libkobalt_android_' + args.abi + '.so'))

@@ -2,6 +2,7 @@
 #include <QGuiApplication>
 #include <QInputMethod>
 #include <QJniObject>
+#include <QJniEnvironment>
 #include <QPointer>
 #include <atomic>
 #include <QtCore/qnativeinterface.h>
@@ -34,6 +35,35 @@ bool readingGeometryReady() {
 }
 int screenDensity() {
     return qBound(100, int(QNativeInterface::QAndroidApplication::context().callMethod<jint>("readerDensity")), 600);
+}
+bool refreshAvailable() {
+    return QNativeInterface::QAndroidApplication::context().callMethod<jboolean>("readerRefreshAvailable");
+}
+bool prepareRefreshRegions(const QRegion &uiPixels, const QRegion &textPixels, bool clean) {
+    QVector<jint> entries;
+    entries.reserve((uiPixels.rectCount() + textPixels.rectCount()) * 5);
+    for (int text = 0; text < 2; ++text) {
+        for (const auto &area : text ? textPixels : uiPixels) {
+            entries << area.left() << area.top() << area.right() + 1 << area.bottom() + 1 << text;
+        }
+    }
+    QJniEnvironment environment;
+    const auto array = environment->NewIntArray(entries.size());
+    if (!array) {
+        environment.checkAndClearExceptions();
+        return false;
+    }
+    environment->SetIntArrayRegion(array, 0, entries.size(), entries.constData());
+    const bool accepted = QNativeInterface::QAndroidApplication::context().callMethod<jboolean>("readerPrepareRefresh",
+                                                                                                array, jboolean(clean));
+    environment->DeleteLocalRef(array);
+    return accepted;
+}
+bool lightAvailable() {
+    return QNativeInterface::QAndroidApplication::context().callMethod<jboolean>("readerLightAvailable");
+}
+int lightValue(int operation, int type, int value) {
+    return QNativeInterface::QAndroidApplication::context().callMethod<jint>("readerLight", operation, type, value);
 }
 Battery battery() {
     const int value = QNativeInterface::QAndroidApplication::context().callMethod<jint>("readerBattery");

@@ -20,6 +20,15 @@ bool initializeInterfaceFonts(const AssetBundle &assets, bool *changed = nullptr
 bool initializeOpeningFonts(const AssetBundle &assets);
 // Register bundled faces; never change Nickel's application font.
 QFont interfaceFont(int pixels = -1);
+// Empty families restore the bundled interface and strip defaults.
+void setInterfaceFontFamily(const QString &family);
+void setInterfaceMonoFontFamily(const QString &family);
+void setHeaderFooterFontFamily(const QString &family);
+QFont headerFooterFont(int pixels = -1);
+void setHeaderFooterAddedWeight(int steps);
+int headerFooterAddedWeight();
+// Default keeps the native text path. Extra weight uses synthetic FreeType strokes.
+int headerFooterTextWeight();
 // How far above its line box centre a block of text must sit to look centred:
 // half of the room above the first line's capitals minus the room below the
 // last line's baseline. Line boxes include descender room, so centring them

@@ -27,7 +27,7 @@ using headerfooter::Preset;
 
 namespace {
 QFont valueFont() {
-    QFont font = ui::chromeFont(hf::valueText);
+    QFont font = ui::headerFooterFont(hf::valueText);
     font.setLetterSpacing(QFont::AbsoluteSpacing, m::chrome::captionSpacing);
     return font;
 }
@@ -42,7 +42,7 @@ void paintValue(QPainter &painter, const QRect &bounds, const Content &content, 
     const int room = qMax(0, bounds.width() - icon - gap);
     QString text = content.text;
     int textWidth = text.isEmpty() ? 0
-                    : halfSpaces   ? qCeil(ui::halfSpacedWidth(painter.fontMetrics(), text))
+                    : halfSpaces   ? qCeil(ui::halfSpacedWidth(painter.font(), text))
                                    : qt::textWidth(painter.fontMetrics(), text);
     if (textWidth > room) {
         halfSpaces = false;
@@ -54,9 +54,10 @@ void paintValue(QPainter &painter, const QRect &bounds, const Content &content, 
                   : align & Qt::AlignRight ? bounds.right() + 1 - total
                                            : bounds.x() + (bounds.width() - total) / 2;
     if (!text.isEmpty() && halfSpaces)
-        ui::drawHalfSpaced(painter, x, bounds, text);
+        ui::drawHalfSpaced(painter, x, bounds, text, ui::headerFooterTextWeight());
     else if (!text.isEmpty())
-        painter.drawText(QRect(x, bounds.y(), textWidth, bounds.height()), Qt::AlignLeft | Qt::AlignVCenter, text);
+        ui::drawInterfaceText(painter, QRect(x, bounds.y(), textWidth, bounds.height()), text,
+                              Qt::AlignLeft | Qt::AlignVCenter, ui::headerFooterTextWeight());
     if (content.batteryIcon) {
         const qreal width = body * int(m::panel::batteryBodyWidth) / int(m::panel::batteryBodyHeight);
         ui::paintBattery(painter, QRectF(x + textWidth + gap, bounds.y() + (bounds.height() - body) / 2.0, width, body),
@@ -87,7 +88,7 @@ int progressSpace() {
 }
 // A slot's box: its strip's line of text and the padding around it.
 int slotBoxHeight(const QString &size, bool footer) {
-    const QFont font = ui::chromeFont(m::reading::textPixels(m::reading::textSize(size), footer));
+    const QFont font = ui::headerFooterFont(m::reading::textPixels(m::reading::textSize(size), footer));
     return QFontMetrics(font).height() + 2 * hf::slotPadding;
 }
 // A dashed outline on whole pixels, drawn as filled dashes so every density
@@ -138,7 +139,7 @@ protected:
         if (!shown)
             painter.setOpacity(.45);
         // The strip's own font and size, so Small, Medium and Large show as on the page.
-        painter.setFont(ui::chromeFont(pixels));
+        painter.setFont(ui::headerFooterFont(pixels));
         // Header slots keep the top edge and footer slots the bottom edge,
         // above the progress bar when there is one, as on the page.
         const bool footer = headerfooter::footerSlot(slot);
@@ -371,7 +372,7 @@ void arrangeBar(QWidget *owner, QWidget *cell, QLabel *title, QLabel *count) {
         count->setGeometry(owner->width() / 2, 0, qMax(1, owner->width() / 2 - m::chrome::inset), barHeight);
 }
 QLabel *barTitle(QWidget *parent, const char *name) {
-    auto *title = new QLabel(parent);
+    auto *title = new ui::InterfaceLabel(parent);
     title->setObjectName(name);
     title->setTextFormat(Qt::PlainText);
     ui::readerStyle(title, ui::styles::brand(m::chrome::titleText) + "background:transparent;");
@@ -388,7 +389,7 @@ HeaderFooterView::HeaderFooterView(QWidget *parent) : ui::Panel(parent, Qt::TopE
     setObjectName("rrHeaderFooterView");
     // The same heavy rule, bold title and close cell as the Font sheet.
     setEdgeWidth(m::chrome::heavyRule);
-    title = new QLabel(strings::get("header_footer.customize_title"), this);
+    title = new ui::InterfaceLabel(strings::get("header_footer.customize_title"), this);
     title->setObjectName("rrHeaderFooterTitle");
     ui::readerStyle(title, ui::styles::font(m::text::body, true) + "background:transparent;");
     close = new ui::CellButton(ui::ControlIcon::Close, this);
@@ -495,7 +496,7 @@ FieldChooser::FieldChooser(QWidget *parent) : ui::Panel(parent) {
     hide();
 }
 
-void FieldChooser::open(int slot, Field current, const headerfooter::Values &values, bool uppercase) {
+void FieldChooser::open(int slot, Field current, const headerfooter::Values &values, bool uppercase, int textPixels) {
     currentSlot = slot;
     title->setText(strings::get("header_footer.customize_slot").arg(headerfooter::slotLabel(slot)));
     const auto &rows = list->options();
@@ -510,6 +511,10 @@ void FieldChooser::open(int slot, Field current, const headerfooter::Values &val
         style.percent = shown.battery;
         style.charging = shown.charging;
         style.halfSpaces = headerfooter::pageCount(field);
+        if (textPixels > 0) {
+            style.sampleFont = ui::headerFooterFont(textPixels);
+            style.sampleWeight = ui::interfaceWeight() + ui::headerFooterAddedWeight();
+        }
         rows[index]->setValue(shown.text, style);
         if (field == current)
             list->setCurrent(index);

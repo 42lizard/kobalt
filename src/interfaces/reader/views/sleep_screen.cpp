@@ -31,7 +31,7 @@ QString sleepTimeLeft(qint64 milliseconds) {
                                      : strings::get("stats.duration_hours").arg(minutes / 60).arg(minutes % 60);
     return strings::get("sleep.time_left").arg(time);
 }
-QImage sleepCoverBackground(const QImage &cover, QSize size, bool dark) {
+QImage sleepCoverBackground(const QImage &cover, QSize size) {
     if (cover.isNull() || size.isEmpty() || qint64(size.width()) * size.height() > 4 * 1024 * 1024) {
         return {};
     }
@@ -39,7 +39,7 @@ QImage sleepCoverBackground(const QImage &cover, QSize size, bool dark) {
     if (background.isNull()) {
         return {};
     }
-    background.fill(dark ? Qt::black : Qt::white);
+    background.fill(Qt::black);
     const auto fitted = cover.size().scaled(size, Qt::KeepAspectRatio);
     QPainter painter(&background);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);

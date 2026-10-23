@@ -11,7 +11,7 @@ class AppearanceEditSession final : public QObject {
 public:
     enum class PreviewState { Absent, Opening, Ready, Failed };
     enum class ApplyState { Idle, Deferred, Running };
-    enum class Destination { None, Controls, Reading, Text, Layout, Light, Stats, Chapters, Search, Bookmarks };
+    enum class Destination { None, Controls, Reading, Text, Layout, Light, Stats, Chapters, Search, Bookmarks, Seek };
     enum class Retention { Release, Reuse };
     AppearanceEditSession() = default;
     ~AppearanceEditSession() override;

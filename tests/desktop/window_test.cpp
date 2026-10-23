@@ -48,6 +48,9 @@ struct Fixture {
         : paths{directory.path()},
           window(reportingPaths(), test::variableFontInputs(engineFontInputs(*assets, {}, {}, {})),
                  placeholderFontFamily(*assets, *copies)) {
+        window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(0);
+        auto *resolution = window.findChild<QComboBox *>("desktopResolutionPicker");
+        resolution->setCurrentIndex(resolution->findData(0));
         window.show();
         window.activateWindow();
     }
@@ -101,6 +104,13 @@ struct Fixture {
 class DesktopTest : public QObject {
     Q_OBJECT
 private slots:
+    void defaultsToSixInchAt300Dpi() {
+        QTemporaryDir directory;
+        desktop::Window window(storage::Paths{directory.path()}, engineFontInputs(*assets, {}, {}, {}),
+                               placeholderFontFamily(*assets, *copies));
+        QCOMPARE(window.findChild<QComboBox *>("desktopScreenPicker")->currentIndex(), 1);
+        QCOMPARE(window.findChild<QComboBox *>("desktopResolutionPicker")->currentData().toInt(), 300);
+    }
     void dictionariesStayInFillWindowWithoutHover() {
         Fixture f;
         f.window.resize(1000, 1000);
@@ -214,8 +224,9 @@ private slots:
             QVERIFY(!toolbar->isVisible());
         }
     }
-    void devicePreviewMenuTapsStayNearCenter() {
+    void devicePreviewMenuUsesFullCenterStrip() {
         Fixture f;
+        QVERIFY(storage::writeJson(f.paths.preferences(), {{"show_navigation_thumbnails", false}}));
         auto *picker = f.window.findChild<QComboBox *>("desktopScreenPicker");
         picker->setCurrentIndex(1);
         QSignalSpy opened(&f.window, &desktop::Window::bookOpened);
@@ -233,25 +244,31 @@ private slots:
             QVERIFY(!toolbar->isVisible());
             const QPoint above(page->width() / 2, page->height() / 5);
             const QPoint below(page->width() / 2, page->height() * 4 / 5);
-            for (QPoint point : {QPoint(page->width() / 2, 1), above, below}) {
+            const auto position = f.state().value("position");
+            for (QPoint point :
+                 {QPoint(page->width() / 2, 1), above, below, QPoint(page->width() / 2, page->height() - 2)}) {
                 QVERIFY(f.canvasClick(page, point));
+                QVERIFY2(
+                    toolbar->isVisible(),
+                    qPrintable(QString("Center strip did not open the menu at %1,%2").arg(point.x()).arg(point.y())));
+                QCOMPARE(f.state()["position"], position);
+                QVERIFY(f.canvasClick(page, page->rect().center()));
                 QVERIFY(!toolbar->isVisible());
             }
             QVERIFY(f.canvasClick(page, page->rect().center()));
             QVERIFY(toolbar->isVisible());
             auto *scrubber = reader->findChild<ui::PageScrubber *>("rrPageScrubber");
-            QVERIFY(scrubber && scrubber->isVisible());
-            const int navigationTop =
-                page->mapFrom(reader, scrubber->mapTo(reader, scrubber->panelBounds().topLeft())).y();
-            // The navigation panel owns its hit area above the tabs.
-            const QPoint exposedBelow(page->width() / 2, navigationTop - int(ui::metrics::scrubber::gap));
-            for (QPoint point : {above, exposedBelow, QPoint(1, page->height() / 3)}) {
-                QVERIFY(f.canvasClick(page, point));
+            QVERIFY(scrubber && !scrubber->isVisible());
+            QVERIFY(f.canvasClick(reader->findChild<QPushButton *>("rrNavSeek"), QPoint(20, 20)));
+            QTRY_VERIFY(scrubber->previewsReady());
+            for (QPoint point : {QPoint(scrubber->width() / 2, 5), QPoint(5, 5)}) {
+                QVERIFY(f.canvasClick(scrubber, point));
+                QVERIFY(scrubber->selecting());
                 QVERIFY(toolbar->isVisible());
             }
             auto *hit = reader->childAt(scrubber->mapTo(reader, scrubber->panelBounds().center()));
             QVERIFY(hit == scrubber || scrubber->isAncestorOf(hit));
-            QVERIFY(f.canvasClick(page, page->rect().center()));
+            QVERIFY(f.canvasClick(scrubber, scrubber->previewBounds().center()));
             QVERIFY(!toolbar->isVisible());
         }
     }
@@ -386,7 +403,7 @@ private slots:
             }
         }
         QVERIFY(!reader->findChild<QCheckBox *>("rrHideStatusBar")->isChecked());
-        QVERIFY(!reader->findChild<QCheckBox *>("rrHideDeviceOptions")->isChecked());
+        QVERIFY(!reader->findChild<QCheckBox *>("rrHideDeviceOptions"));
         QCOMPARE(storage::readJson(f.paths.preferences()), savedPreferences);
     }
     void bookmarksFollowStatusAndPreviewChanges() {
@@ -402,7 +419,8 @@ private slots:
             page->tapped(page->rect().center());
             reader->findChild<QPushButton *>("rrBookmarks")->click();
             auto *list = reader->findChild<QWidget *>("rrBookmarkList");
-            auto *title = reader->findChild<QLabel *>("rrBookmarkListTitle");
+            auto *title = reader->findChild<QPushButton *>("rrBookmarksTab");
+            QVERIFY(title);
             auto *rule = reader->findChild<QWidget *>("rrNavigationUpperEdge");
             auto *picker = f.window.findChild<QComboBox *>("desktopScreenPicker");
             for (int preset : {0, 1, 2, 0}) {
@@ -776,7 +794,7 @@ private slots:
             QVERIFY(tab);
             QTRY_VERIFY(tab->isVisible());
             QVERIFY(f.canvasClick(tab, tab->rect().center()));
-            auto *toggle = reader->findChild<QCheckBox *>("rrShowNavigationBar");
+            auto *toggle = reader->findChild<QCheckBox *>("rrShowLinkIndicator");
             QVERIFY(toggle);
             QTRY_VERIFY(toggle->isVisible());
             const bool before = toggle->isChecked();
@@ -855,6 +873,7 @@ private slots:
         auto *reader = f.window.readerWindow();
         auto *page = reader->findChild<ReadingPage *>("rrPage");
         QVERIFY(f.canvasClick(page, page->rect().center()));
+        QVERIFY(f.canvasClick(reader->findChild<QPushButton *>("rrNavSeek"), QPoint(20, 20)));
         auto *scrubber = reader->findChild<ui::PageScrubber *>("rrPageScrubber");
         QTRY_VERIFY(scrubber && scrubber->isVisible());
         auto *canvas = f.window.findChild<android::WidgetCanvas *>();
@@ -1064,6 +1083,7 @@ private slots:
         QCOMPARE(canvas->rasterSize(), QSize(0, 0));
         auto *page = reader->findChild<ReadingPage *>("rrPage");
         QVERIFY(f.canvasClick(page, page->rect().center()));
+        QVERIFY(f.canvasClick(reader->findChild<QPushButton *>("rrNavSeek"), QPoint(20, 20)));
         auto *scrubber = reader->findChild<ui::PageScrubber *>("rrPageScrubber");
         QTRY_VERIFY(scrubber && scrubber->isVisible());
         const auto size = reader->size();
@@ -1096,6 +1116,85 @@ private slots:
         QVERIFY(f.canvasClick(next, next->rect().center()));
         QTRY_VERIFY_WITH_TIMEOUT(scrubber->previewsReady(), 30000);
         QCOMPARE(f.state().value("position").toString(), position);
+    }
+    void devicePreviewsRotate_data() {
+        QTest::addColumn<int>("preset");
+        QTest::addColumn<int>("dpi");
+        for (int preset : {1, 2})
+            for (int dpi : {0, 212, 300})
+                QTest::newRow(qPrintable(QString("%1-inch-%2-dpi").arg(preset == 1 ? 6 : 7).arg(dpi))) << preset << dpi;
+    }
+    void devicePreviewsRotate() {
+        QFETCH(int, preset);
+        QFETCH(int, dpi);
+        Fixture f;
+        f.window.resize(1000, 800);
+        auto *device = f.window.findChild<QComboBox *>("desktopScreenPicker");
+        auto *resolution = f.window.findChild<QComboBox *>("desktopResolutionPicker");
+        auto *rotate = f.window.findChild<QAction *>("desktopRotateDevice");
+        auto *button = f.window.findChild<QPushButton *>("desktopRotateButton");
+        QVERIFY(device && resolution && rotate && button);
+        QVERIFY(!rotate->isEnabled() && !button->isEnabled());
+        device->setCurrentIndex(preset);
+        resolution->setCurrentIndex(resolution->findData(dpi));
+        QVERIFY(rotate->isEnabled() && button->isEnabled());
+        QSignalSpy opened(&f.window, &desktop::Window::bookOpened);
+        f.window.openBook(f.book());
+        QVERIFY(!rotate->isEnabled() && !button->isEnabled());
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
+        auto *reader = f.window.readerWindow();
+        auto *page = reader->findChild<ReadingPage *>("rrPage");
+        page->swiped(1);
+        QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
+        const auto position = f.state()["position"].toString();
+        const QSize portrait = preset == 1 ? QSize(1072, 1448) : QSize(1264, 1680);
+        QCOMPARE(reader->size(), portrait);
+        QTest::mouseClick(button, Qt::LeftButton);
+        QVERIFY(rotate->isChecked() && button->isChecked());
+        QTRY_COMPARE(reader->size(), portrait.transposed());
+        QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
+        QCOMPARE(f.state()["position"].toString(), position);
+        QCOMPARE(resolution->currentData().toInt(), dpi);
+        auto *frame = f.window.findChild<QWidget *>("desktopDeviceFrame");
+        QVERIFY(frame->width() > frame->height());
+        auto *canvas = f.window.findChild<QGraphicsView *>();
+        QVERIFY(canvas->width() > canvas->height());
+        const auto preview = canvas->mapFromScene(QRectF(QPointF(), portrait.transposed())).boundingRect();
+        QVERIFY(preview.width() <= canvas->viewport()->width() + 1);
+        QVERIFY(preview.height() <= canvas->viewport()->height() + 1);
+        if (preset == 2) {
+            auto *next = f.window.findChild<QPushButton *>("desktopDeviceNext");
+            QVERIFY(next->isVisible() && next->width() > next->height());
+            QVERIFY(next->y() >= canvas->mapTo(f.window.centralWidget(), QPoint(0, canvas->height())).y() - frame->y());
+            const int before = f.state()["page"].toInt();
+            QTest::mouseClick(next, Qt::LeftButton);
+            QTRY_VERIFY_WITH_TIMEOUT(f.state()["page"].toInt() > before, 10000);
+            QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
+        }
+        QVERIFY(f.canvasClick(page, page->rect().center()));
+        auto *toolbar = reader->findChild<QWidget *>("rrControlsTop");
+        QTRY_VERIFY(toolbar->isVisible());
+        QVERIFY(f.canvasClick(reader->findChild<QPushButton *>("rrNavSeek"), QPoint(20, 20)));
+        auto *thumbnails = dynamic_cast<ui::PageScrubber *>(reader->findChild<QWidget *>("rrPageScrubber"));
+        QVERIFY(thumbnails && thumbnails->selecting());
+        QTRY_VERIFY_WITH_TIMEOUT(thumbnails->previewReady(), 30000);
+        QVERIFY(f.canvasClick(thumbnails, thumbnails->previewBounds().center()));
+        QTRY_VERIFY(!toolbar->isVisible());
+        QVERIFY(f.window.centralWidget()->grab().save(QString("device-%1-%2-landscape.png").arg(preset).arg(dpi)));
+        const auto rotatedPosition = f.state()["position"].toString();
+        rotate->trigger();
+        QVERIFY(!button->isChecked());
+        QTRY_COMPARE(reader->size(), portrait);
+        QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
+        QCOMPARE(f.state()["position"].toString(), rotatedPosition);
+        QCOMPARE(opened.count(), 1);
+        rotate->trigger();
+        device->setCurrentIndex(0);
+        QVERIFY(!rotate->isEnabled() && !button->isEnabled());
+        device->setCurrentIndex(preset == 1 ? 2 : 1);
+        QCOMPARE(reader->size(), preset == 1 ? QSize(1680, 1264) : QSize(1448, 1072));
+        QVERIFY(rotate->isChecked() && button->isChecked());
     }
     void deviceScreensKeepResolutionAndPosition() {
         Fixture f;
@@ -1281,6 +1380,103 @@ private slots:
         f.window.close();
         QTRY_VERIFY_WITH_TIMEOUT(f.window.idle(), 30000);
     }
+    void settingsRowPressReachesCanvas_data() {
+        QTest::addColumn<int>("dpi");
+        for (int dpi : {0, 212, 300}) {
+            QTest::newRow(qPrintable(QString::number(dpi))) << dpi;
+        }
+    }
+    void settingsRowPressReachesCanvas() {
+        QFETCH(int, dpi);
+        Fixture f;
+        f.window.resize(900, 1000);
+        auto *screens = f.window.findChild<QComboBox *>("desktopScreenPicker");
+        auto *resolutions = f.window.findChild<QComboBox *>("desktopResolutionPicker");
+        screens->setCurrentIndex(1);
+        resolutions->setCurrentIndex(resolutions->findData(dpi));
+        QSignalSpy opened(&f.window, &desktop::Window::bookOpened);
+        f.window.openBook(f.book());
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
+        auto *reader = f.window.readerWindow();
+        reader->findChild<ReadingPage *>("rrPage")->tapped(reader->rect().center());
+        QVERIFY(f.canvasClick(reader->findChild<QPushButton *>("rrSettings"), QPoint(20, 20)));
+        QVERIFY(f.canvasClick(reader->findChild<QPushButton *>("rrSettingsControls"), QPoint(20, 20)));
+        auto *row = reader->findChild<QPushButton *>("rrPageNavigation");
+        auto *canvas = f.window.findChild<QGraphicsView *>();
+        QTest::qWait(100);
+        const auto point = canvas->mapFromScene(row->mapTo(reader, row->rect().center()));
+        const auto sample = canvas->mapFromScene(row->mapTo(reader, QPoint(10, 10)));
+        const auto color = [&] {
+            const auto image = canvas->viewport()->grab().toImage();
+            return image.pixelColor(sample * image.devicePixelRatio());
+        };
+        const QColor normal = color();
+        const auto global = canvas->viewport()->mapToGlobal(point);
+        QMouseEvent press(QEvent::MouseButtonPress, QPointF(point), QPointF(global), Qt::LeftButton, Qt::LeftButton,
+                          Qt::NoModifier);
+        QApplication::sendEvent(canvas->viewport(), &press);
+        QVERIFY(row->isDown());
+        QTest::qWait(100);
+        QVERIFY(color() != normal);
+        QMouseEvent release(QEvent::MouseButtonRelease, QPointF(point), QPointF(global), Qt::LeftButton, Qt::NoButton,
+                            Qt::NoModifier);
+        QApplication::sendEvent(canvas->viewport(), &release);
+        QTRY_VERIFY(reader->findChild<QWidget *>("rrPageNavigationPopup"));
+    }
+    void settingsPaginationReachesCanvas_data() {
+        settingsRowPressReachesCanvas_data();
+    }
+    void settingsPaginationReachesCanvas() {
+        QFETCH(int, dpi);
+        Fixture f;
+        f.window.resize(900, 1000);
+        f.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(1);
+        auto *resolutions = f.window.findChild<QComboBox *>("desktopResolutionPicker");
+        resolutions->setCurrentIndex(resolutions->findData(dpi));
+        QSignalSpy opened(&f.window, &desktop::Window::bookOpened);
+        f.window.openBook(f.book());
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QTRY_VERIFY_WITH_TIMEOUT(!f.state()["busy"].toBool(), 30000);
+        auto *reader = f.window.readerWindow();
+        // Force overflow even when the full-height panel fits ordinary options.
+        auto *option = dynamic_cast<ui::DescribedOption *>(reader->findChild<QCheckBox *>("rrInheritTextLayout"));
+        QVERIFY(option);
+        auto presentation = option->presentation();
+        presentation.minimumRowHeight = reader->height();
+        option->setPresentation(presentation);
+        reader->findChild<ReadingPage *>("rrPage")->tapped(reader->rect().center());
+        QVERIFY(f.canvasClick(reader->findChild<QPushButton *>("rrSettings"), QPoint(20, 20)));
+        QVERIFY(f.canvasClick(reader->findChild<QPushButton *>("rrSettingsDefaults"), QPoint(20, 20)));
+        auto *next = reader->findChild<QPushButton *>("rrSettingsOptionsNext");
+        auto *previous = reader->findChild<QPushButton *>("rrSettingsOptionsPrevious");
+        auto *counter = reader->findChild<QLabel *>("rrSettingsOptionsPage");
+        auto *pages = reader->findChild<QWidget *>("rrSettingsPages");
+        auto *settings = reader->findChild<QWidget *>("rrGeneralSettings");
+        auto *navigation = reader->findChild<QWidget *>("rrBottomNavigation");
+        QVERIFY(next && previous && counter && pages && settings && navigation);
+        QCOMPARE(settings->geometry().bottom() + 1, reader->height());
+        QVERIFY(!navigation->isVisible());
+        auto *pager = next->parentWidget();
+        auto *viewport = reader->findChild<QWidget *>("rrSettingsViewport");
+        auto *rail = reader->findChild<QWidget *>("rrSettingsRail");
+        QVERIFY(viewport && rail);
+        QCOMPARE(pager->mapTo(settings, QPoint()).x(), viewport->mapTo(settings, QPoint()).x());
+        QCOMPARE(pager->width(), viewport->width());
+        QCOMPARE(rail->height(), pager->parentWidget()->height());
+        QVERIFY(next->isVisible() && next->isEnabled());
+        QVERIFY(!previous->isEnabled());
+        const auto before = counter->text();
+        QVERIFY(f.canvasClick(next, next->rect().center()));
+        QVERIFY(counter->text() != before);
+        QVERIFY(pages->y() < 0);
+        QVERIFY(f.canvasClick(previous, previous->rect().center()));
+        QCOMPARE(counter->text(), before);
+        QCOMPARE(pages->y(), 0);
+        QVERIFY(f.canvasClick(reader->findChild<QPushButton *>("rrSettings"), QPoint(20, 20)));
+        QVERIFY(!settings->isVisible());
+        QVERIFY(navigation->isVisible());
+    }
     void fontHoverKeepsHeaderBorder() {
         Fixture f;
         QSignalSpy opened(&f.window, &desktop::Window::bookOpened);
@@ -1426,17 +1622,15 @@ private slots:
         QVERIFY(nativeTab);
         nativeTab->click();
         auto *hideStatus = reader->findChild<QCheckBox *>("rrHideStatusBar");
-        auto *hideDevice = reader->findChild<QCheckBox *>("rrHideDeviceOptions");
-        QVERIFY(hideStatus && hideDevice);
+        QVERIFY(!reader->findChild<QCheckBox *>("rrHideDeviceOptions"));
+        QVERIFY(hideStatus);
         QVERIFY(hideStatus->isChecked());
-        QVERIFY(hideDevice->isChecked());
         QVERIFY(hideStatus->isVisible());
         auto *animation = reader->findChild<QCheckBox *>("rrPageAnimations");
         auto *refresh = reader->findChild<QPushButton *>("rrScreenRefresh");
         QVERIFY(animation && refresh);
-        QVERIFY(animation->isHidden());
-        QVERIFY(refresh->isHidden());
-        hideDevice->click();
+        QVERIFY(!animation->isHidden());
+        QVERIFY(!refresh->isHidden());
         hideStatus->click();
         reader->findChild<QPushButton *>("rrSettingsDisplay")->click();
         QVERIFY(animation->isVisible());
@@ -1457,7 +1651,6 @@ private slots:
         const auto prefs = storage::readJson(f.paths.preferences());
         QVERIFY(prefs.contains("native_hide_status_bar"));
         QVERIFY(!prefs.value("native_hide_status_bar").toBool());
-        QVERIFY(!prefs.value("native_hide_device_options").toBool());
         reader->findChild<QPushButton *>("rrReturn")->click();
         QTRY_VERIFY_WITH_TIMEOUT(f.window.idle(), 30000);
         f.window.openBook(f.book());
@@ -1466,7 +1659,7 @@ private slots:
         QVERIFY(reopened);
         QVERIFY(!reopened->slotContents[0].empty());
     }
-    void hiddenDeviceOptionsKeepCompactRows() {
+    void settingsCategoriesKeepCompactRows() {
         Fixture f;
         QSignalSpy opened(&f.window, &desktop::Window::bookOpened);
         f.window.openBook(f.book());
@@ -1475,14 +1668,12 @@ private slots:
         auto *reader = f.window.readerWindow();
         reader->findChild<ReadingPage *>("rrPage")->tapped(reader->rect().center());
         reader->findChild<QPushButton *>("rrSettings")->click();
-        for (bool hidden : {true, false, true}) {
+        {
             reader->findChild<QPushButton *>("rrSettingsUI")->click();
-            auto *toggle = reader->findChild<QCheckBox *>("rrHideDeviceOptions");
-            if (toggle->isChecked() != hidden)
-                toggle->click();
-            for (const auto &tab : {"Advanced", "Display"}) {
+            QVERIFY(!reader->findChild<QCheckBox *>("rrHideDeviceOptions"));
+            for (const auto &tab : {"Defaults", "Display"}) {
                 reader->findChild<QPushButton *>(QString("rrSettings") + tab)->click();
-                const QStringList names = QString(tab) == "Advanced"
+                const QStringList names = QString(tab) == "Defaults"
                                               ? QStringList{"rrInheritTextLayout", "rrInheritHeaderFooter"}
                                               : QStringList{"rrDarkMode", "rrBionicReading"};
                 for (const auto &name : names) {
@@ -1490,13 +1681,18 @@ private slots:
                     QVERIFY(option);
                     QTRY_COMPARE(option->height(), option->heightForWidth(option->width()));
                 }
-                if (QString(tab) == "Advanced") {
+                if (QString(tab) == "Defaults") {
                     auto *lastDefault = reader->findChild<QCheckBox *>("rrInheritHeaderFooter");
-                    auto *content = reader->findChild<QWidget *>("rrAdvancedContentSection");
-                    QVERIFY(lastDefault && content);
+                    QVERIFY(lastDefault);
                     auto *reset = reader->findChild<QPushButton *>("rrRestoreDefaults");
-                    QTRY_COMPARE(reset->y(), lastDefault->geometry().bottom() + 1);
-                    QTRY_COMPARE(content->y(), reset->geometry().bottom() + 1);
+                    auto *defaultFont = reader->findChild<QPushButton *>("rrDefaultFont");
+                    auto *fontSection = reader->findChild<QWidget *>("rrDefaultsGlobalFontSection");
+                    auto *restoreSection = reader->findChild<QWidget *>("rrDefaultsRestoreSection");
+                    QVERIFY(defaultFont && fontSection && restoreSection);
+                    QTRY_COMPARE(fontSection->y(), lastDefault->geometry().bottom() + 1);
+                    QCOMPARE(defaultFont->y(), fontSection->geometry().bottom() + 1);
+                    QCOMPARE(restoreSection->y(), defaultFont->geometry().bottom() + 1);
+                    QCOMPARE(reset->y(), restoreSection->geometry().bottom() + 1);
                 }
             }
         }
@@ -1510,8 +1706,10 @@ private slots:
         auto *reader = f.window.readerWindow();
         reader->findChild<ReadingPage *>("rrPage")->tapped(reader->rect().center());
         reader->findChild<QPushButton *>("rrSettings")->click();
-        for (const auto &tab : {"Display", "Advanced", "UI", "Stats"}) {
-            reader->findChild<QPushButton *>(QString("rrSettings") + tab)->click();
+        for (const auto &tab : {"Display", "Defaults", "Styling", "UI"}) {
+            auto *button = reader->findChild<QPushButton *>(QString("rrSettings") + tab);
+            QVERIFY(button);
+            button->click();
             auto *pages = reader->findChild<QStackedWidget *>("rrSettingsPages");
             for (auto *row : pages->currentWidget()->findChildren<QWidget *>()) {
                 auto *action = dynamic_cast<ui::CaptionButton *>(row);

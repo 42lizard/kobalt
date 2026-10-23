@@ -17,15 +17,26 @@ Qt::ScreenOrientation shownOrientation(const QScreen *screen);
 
 class ReaderOrientation : public QObject, private QOrientationFilter {
 public:
-    // Ownership begins before the first turn and ends after restoring the native
-    // orientation. Repeated start/stop calls do not repeat ownership callbacks.
+    // Ownership begins before the first turn and ends after stop() prepares
+    // Nickel's orientation. Repeated start/stop calls do not repeat callbacks.
     ReaderOrientation(QOrientationSensor *sensor, std::function<void(Qt::ScreenOrientation)> turn,
                       std::function<void(bool)> rotationOwnership = {});
     ~ReaderOrientation() override;
     void configure(const QJsonObject &settings);
-    // stop() restores nativeOrientation, unless it is PrimaryOrientation.
+    // Start in a permitted sensor or shown orientation. After a sleep handoff,
+    // resume without replacing the original nativeOrientation with Nickel's
+    // temporary wake orientation. Discard samples received during sleep and
+    // resume rotation only from readings received after start().
     void start(Qt::ScreenOrientation nativeOrientation);
-    void stop();
+    // Restore nativeOrientation, unless it is PrimaryOrientation. Sleep keeps
+    // a same-axis orientation until wake or a final stop(), including when the
+    // reader closes or is destroyed while hidden. Quarter turns restore native.
+    // An awake close also publishes the latest valid reading to a borrowed
+    // sensor, so its native owner can select the current permitted orientation.
+    void stop(bool keepForSleep = false);
+    // Cancel pending turns and discard readings from the sleep request onward.
+    // Keep the filter installed so Nickel cannot rotate the sleep screen.
+    void freeze();
     void rotate();
     bool setAutomatic(bool enabled);
     void setBlocked(bool blocked);
@@ -52,8 +63,16 @@ private:
     Qt::ScreenOrientation nativeOrientation = Qt::PortraitOrientation;
     Qt::ScreenOrientation currentOrientation = Qt::PortraitOrientation;
     Qt::ScreenOrientation pending = Qt::PrimaryOrientation;
-    bool active = false, blocked = false, automaticRotation = false, startedSensor = false;
+    // The filter rejects samples, so sensor->reading() is stale while active.
+    Qt::ScreenOrientation heldOrientation = Qt::PrimaryOrientation;
+    QOrientationReading::Orientation latestReading = QOrientationReading::Undefined;
+    quint64 latestTimestamp = 0;
+    bool frozen = false;
+    bool active = false, sleeping = false, blocked = false, automaticRotation = false, startedSensor = false;
     bool filter(QOrientationReading *reading) override;
+    bool startSensor();
+    bool permits(Qt::ScreenOrientation orientation) const;
+    void follow();
     void deliver();
     void apply(Qt::ScreenOrientation value) {
         currentOrientation = value;

@@ -3,6 +3,9 @@
 #include "services.h"
 #include "runtime.h"
 #include "canvas.h"
+#include "refresh.h"
+#include "boox_frame_queue.h"
+#include "boox_refresh.h"
 #include "assets.h"
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
@@ -19,9 +22,11 @@
 #include <QFontDatabase>
 #include <QPushButton>
 #include <QSettings>
+#include <QScopedValueRollback>
 #include <QStackedLayout>
 #include <QStandardPaths>
 #include <QTimer>
+#include <utility>
 
 using namespace kobalt;
 namespace {
@@ -71,7 +76,44 @@ public:
         canvas = new android::WidgetCanvas(this);
         layout->addWidget(canvas);
         canvas->viewportResized = [this] {
+            resetRefresh();
             sizeCanvas();
+        };
+        canvas->framePreparing = [this](const QRegion &region) {
+            regionAccepted = false;
+            auto *reader = controller.window();
+            if (!reader || layout->currentWidget() != canvas || !android::refreshAvailable() || region.isEmpty()) {
+                return;
+            }
+            if (presentingRegion) {
+                regionAccepted = refreshQueue.present(submitRefresh);
+                return;
+            }
+            auto *page = static_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
+            regionAccepted = booxRefresh.prepare(reader, canvas->viewport(), page, region,
+                                                 [this](const android::RefreshFrame &frame) {
+                                                     return refreshQueue.prepare(frame, submitRefresh);
+                                                 });
+        };
+        regionFrame.setSingleShot(true);
+        // Keep the next region out of this compositor frame. Two 60 Hz frames
+        // also leave room for Qt's queued backing-store flush.
+        regionFrame.setInterval(34);
+        connect(&regionFrame, &QTimer::timeout, this, [this] {
+            if (!refreshQueue.pending() || !canvas->isVisible()) {
+                return;
+            }
+            const auto ratio = canvas->viewport()->devicePixelRatioF();
+            const auto origin = QPointF(canvas->viewport()->mapToGlobal(QPoint())) * ratio;
+            const QRectF pixels = QRectF(refreshQueue.nextArea()).translated(-origin);
+            const QRect logical = QRectF(pixels.topLeft() / ratio, pixels.size() / ratio).toAlignedRect();
+            QScopedValueRollback<bool> presenting(presentingRegion, true);
+            canvas->viewport()->repaint(logical);
+        });
+        canvas->framePainted = [this](const QRegion &) {
+            if (regionAccepted && refreshQueue.pending() && !regionFrame.isActive()) {
+                regionFrame.start();
+            }
         };
         openingHandoff.setInterval(16);
         connect(&openingHandoff, &QTimer::timeout, this, [this] {
@@ -125,8 +167,8 @@ public:
             canvas->setContent(reader);
             setPalette(reader->palette());
             sizeCanvas();
-            for (const auto *name : {"rrLight", "rrEdgeLight", "rrScreenRefresh"})
-                if (auto *control = reader->findChild<QWidget *>(name))
+            if (!android::refreshAvailable())
+                if (auto *control = reader->findChild<QWidget *>("rrScreenRefresh"))
                     control->hide();
             if (auto *exit = reader->findChild<QPushButton *>("rrReturn")) {
                 exit->setText(strings::get("android.return"));
@@ -152,6 +194,7 @@ public:
             qWarning() << "Kobalt reader error:" << error;
         });
         connect(&controller, &android::ReaderController::closed, this, [this] {
+            resetRefresh();
             android::setPageButtonsAvailable(false);
             if (closing) {
                 android::activity("exitReader");
@@ -180,6 +223,19 @@ private:
     QStackedLayout *layout;
     android::StartScreen *start;
     android::WidgetCanvas *canvas;
+    android::BooxRefreshPolicy booxRefresh;
+    android::BooxFrameQueue refreshQueue;
+    QTimer regionFrame;
+    bool presentingRegion = false, regionAccepted = false;
+    static bool submitRefresh(const android::RefreshFrame &frame) {
+        return android::prepareRefreshRegions(frame.screenPixels - frame.textPixels, frame.textPixels, frame.clean);
+    }
+    void resetRefresh() {
+        regionFrame.stop();
+        refreshQueue.reset();
+        booxRefresh.reset();
+        regionAccepted = false;
+    }
     QTimer openingHandoff;
     bool closing = false, layoutRepairPending = false, failedOpening = false;
     QSize pixels() const {

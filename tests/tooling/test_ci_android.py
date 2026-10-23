@@ -81,6 +81,7 @@ class AndroidSourceTests(unittest.TestCase):
                 (root / directory).mkdir(parents=True)
             manifests = {
                 'dependencies/manifest.json': {'libpng': {'url': 'kobo-libpng'}},
+                'android/compatibility.json': {'url': 'hiddenapibypass'},
                 'android/dependencies.json': {'libpng': {'url': 'android-libpng'}, 'openssl': {'url': 'openssl'}},
                 'dependencies/release-sources.json': json.loads((ROOT / 'dependencies/release-sources.json').read_text()),
                 'toolchains/qt6/source/source.json': {'version': '6.5.2', 'url': 'qt-kobo'},
@@ -98,6 +99,7 @@ class AndroidSourceTests(unittest.TestCase):
                     patch.object(release_sources, 'download', side_effect=download), \
                     patch.object(ci_android.fetch_fonts, 'fetch'):
                 files = release_sources.inputs(root, offline=True)
+            self.assertIn('.cache/android-dependencies/hiddenapibypass-4.3.aar', files)
             self.assertEqual(files['.cache/kobalt/libpng.tar.gz'].read_text(), 'kobo-libpng')
             self.assertEqual(files['.cache/android-dependencies/libpng.tar.gz'].read_text(), 'android-libpng')
             self.assertIn('.cache/android-dependencies/openssl.tar.gz', files)

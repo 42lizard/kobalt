@@ -88,7 +88,7 @@ protected:
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(QPen(QColor("#111111"), 1));
         painter.setBrush(isDown() ? QColor("#444444") : QColor("#303030"));
-        const qreal radius = qMax(3.0, width() * 0.25);
+        const qreal radius = qMax(3.0, qMin(width(), height()) * 0.25);
         painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
     }
 };
@@ -109,10 +109,21 @@ public:
         for (auto *button : {previous, next})
             button->setFocusPolicy(Qt::NoFocus);
     }
-    QRect layoutScreen(int preset, QRect bounds) {
+    QRect layoutScreen(int preset, bool landscape, QRect bounds) {
         libra = preset == 2;
-        const QSize body = libra ? QSize(1708, 1902) : QSize(1323, 1890);
-        const QRect screen = libra ? QRect(90, 111, 1264, 1680) : QRect(126, 150, 1072, 1448);
+        QSize body = libra ? QSize(1708, 1902) : QSize(1323, 1890);
+        QRect screen = libra ? QRect(90, 111, 1264, 1680) : QRect(126, 150, 1072, 1448);
+        QRect previousBounds(1450, 715, 110, 180), nextBounds(1450, 1005, 110, 180);
+        if (landscape) {
+            // Turn the physical body clockwise; reader content stays upright.
+            const auto rotated = [body](QRect rect) {
+                return QRect(body.height() - rect.y() - rect.height(), rect.x(), rect.height(), rect.width());
+            };
+            screen = rotated(screen);
+            previousBounds = rotated(previousBounds);
+            nextBounds = rotated(nextBounds);
+            body.transpose();
+        }
         const auto fitted = body.scaled(bounds.size(), Qt::KeepAspectRatio);
         setGeometry(QRect(bounds.center() - QPoint(fitted.width() / 2, fitted.height() / 2), fitted));
         const qreal scale = qMin(qreal(width()) / body.width(), qreal(height()) / body.height());
@@ -121,8 +132,8 @@ public:
                          qRound(rect.height() * scale));
         };
         screenBounds = scaled(screen);
-        previous->setGeometry(scaled(QRect(1450, 715, 110, 180)));
-        next->setGeometry(scaled(QRect(1450, 1005, 110, 180)));
+        previous->setGeometry(scaled(previousBounds));
+        next->setGeometry(scaled(nextBounds));
         for (auto *button : {previous, next})
             button->setVisible(libra);
         show();
@@ -137,7 +148,7 @@ protected:
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(QPen(Qt::black, 1.5));
         painter.setBrush(QColor("#242424"));
-        const qreal radius = qMax(5.0, width() * 0.025);
+        const qreal radius = qMax(5.0, qMin(width(), height()) * 0.025);
         painter.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), radius, radius);
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(Qt::black, 2));
@@ -201,6 +212,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     screenPicker->setObjectName("desktopScreenPicker");
     screenPicker->setAccessibleName(tr("Reader screen"));
     screenPicker->addItems({tr("Fill window"), tr("6-inch e-reader"), tr("7-inch e-reader with buttons")});
+    screenPicker->setCurrentIndex(screenPreset);
     screenPicker->setMinimumWidth(100);
     screenPicker->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     resolutionPicker = new QComboBox(toolbar);
@@ -233,6 +245,18 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     choices->setSpacing(8);
     choices->addWidget(screenPicker, 1);
     choices->addWidget(resolutionPicker);
+    rotateAction = new QAction(tr("Rotate Device"), this);
+    rotateAction->setObjectName("desktopRotateDevice");
+    rotateAction->setCheckable(true);
+    rotateAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+R")));
+    rotateAction->setToolTip(tr("Switch the e-reader preview between portrait and landscape."));
+    auto *rotate = new QPushButton(tr("Rotate"), pickers);
+    rotate->setObjectName("desktopRotateButton");
+    rotate->setCheckable(true);
+    rotate->setFocusPolicy(Qt::NoFocus);
+    rotate->setToolTip(rotateAction->toolTip());
+    choices->addWidget(rotate);
+    connect(rotate, &QPushButton::clicked, rotateAction, &QAction::trigger);
     auto *screenshot = new QPushButton(tr("Screenshot"), pickers);
     screenshot->setObjectName("desktopScreenshot");
     screenshot->setToolTip(tr("Save the current preview to the Desktop as a PNG."));
@@ -304,6 +328,14 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     };
     screenActions = choicesMenu(screenPicker, tr("Device"), "desktopDeviceMenu");
     resolutionActions = choicesMenu(resolutionPicker, tr("Rendering Resolution"), "desktopResolutionMenu");
+    view->addAction(rotateAction);
+    connect(rotateAction, &QAction::toggled, this, [this, rotate](bool landscape) {
+        rotate->setChecked(landscape);
+        sizeCanvas();
+    });
+    connect(rotateAction, &QAction::changed, rotate, [this, rotate] {
+        rotate->setEnabled(rotateAction->isEnabled());
+    });
     view->addSeparator();
     auto *showToolbar = toolbar->toggleViewAction();
     showToolbar->setObjectName("desktopShowToolbar");
@@ -417,17 +449,19 @@ QString Window::saveScreenshot(const QString &directory, QString *error) {
     return file.fileName();
 }
 QSize Window::pixels() const {
-    if (screenPreset == 1)
-        return {1072, 1448};
-    if (screenPreset == 2)
-        return {1264, 1680};
+    if (screenPreset) {
+        QSize size = screenPreset == 1 ? QSize(1072, 1448) : QSize(1264, 1680);
+        if (rotateAction->isChecked())
+            size.transpose();
+        return size;
+    }
     return {qRound(stack->width() * readerPixelsPerPoint), qRound(stack->height() * readerPixelsPerPoint)};
 }
 void Window::sizeCanvas() {
     auto bounds = centralWidget()->rect();
     if (screenPreset) {
         bounds.adjust(20, 20, -20, -20);
-        const auto screen = deviceFrame->layoutScreen(screenPreset, bounds);
+        const auto screen = deviceFrame->layoutScreen(screenPreset, rotateAction->isChecked(), bounds);
         deviceFrame->lower();
         stack->setGeometry(screen.translated(deviceFrame->pos()));
     } else {
@@ -451,6 +485,7 @@ void Window::selectScreen(int index) {
     if (closing || screenPreset == index)
         return;
     screenPreset = index;
+    rotateAction->setEnabled(screenPicker->isEnabled() && screenPreset != 0);
     if (auto *reader = controller.window())
         reader->refreshHostPresentation();
     sizeCanvas();
@@ -458,6 +493,7 @@ void Window::selectScreen(int index) {
 void Window::setPreviewControlsEnabled(bool enabled) {
     screenPicker->setEnabled(enabled);
     resolutionPicker->setEnabled(enabled);
+    rotateAction->setEnabled(enabled && screenPreset != 0);
     screenActions->setEnabled(enabled);
     resolutionActions->setEnabled(enabled);
 }

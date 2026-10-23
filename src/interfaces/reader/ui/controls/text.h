@@ -8,6 +8,19 @@
 class QPainter;
 
 namespace kobalt::ui {
+// Plain interface labels retain Qt's native path unless the face needs private rendering.
+class InterfaceLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+    int heightForWidth(int width) const override;
+    QSize sizeHint() const override;
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+};
+int wrappedInterfaceTextHeight(const QString &text, const QFont &font, int width);
+void drawWrappedInterfaceText(QPainter &painter, const QRect &bounds, const QString &text,
+                              Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop);
 // Uses the same font backend and wrapping as WholeLineLabel.
 qreal excerptTextHeight(const QString &html, const QFont &font, int width);
 // Search excerpts end between complete lines, even when their context wraps.
@@ -58,7 +71,7 @@ QFont fontSample(const QString &face);
 // Page counts such as 5 / 33 keep half-width spaces around the slash. A
 // Unicode thin space still takes a full cell in mono fonts, so the painter
 // draws each word and advances half a space between them.
-qreal halfSpacedWidth(const QFontMetrics &metrics, const QString &text);
-void drawHalfSpaced(QPainter &painter, qreal x, const QRect &bounds, const QString &text);
+qreal halfSpacedWidth(const QFont &font, const QString &text);
+void drawHalfSpaced(QPainter &painter, qreal x, const QRect &bounds, const QString &text, int weight = -1);
 void captionLabel(QLabel *label, int pixels = metrics::chrome::captionText);
 }

@@ -1,14 +1,27 @@
 #include "interfaces/reader/ui/controls/sliders.h"
 #include "platform/android/start_screen.h"
 #include "platform/android/canvas.h"
+#include "platform/android/light.h"
+#include "platform/android/refresh.h"
+#include "platform/android/boox_refresh.h"
+#include "platform/android/boox_frame_queue.h"
+#include "interfaces/reader/panels/light_panel.h"
+#include "interfaces/reader/ui/style/scale.h"
+#include "interfaces/reader/ui/style/theme.h"
+#include <QDir>
 #include "interfaces/reader/views/opening.h"
+#include "interfaces/reader/panels/search_panel.h"
+#include "host_services.h"
 #include <QScrollArea>
 #include <QBuffer>
 #include <QProgressBar>
 #include "assets/assets.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include <QApplication>
+#include <QGuiApplication>
+#include <QInputMethod>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QPaintEvent>
 #include <QGraphicsProxyWidget>
@@ -77,6 +90,305 @@ protected:
 class AndroidUiTest : public QObject {
     Q_OBJECT
 private slots:
+    void booxRegionsUseSeparateBuffers() {
+        android::BooxFrameQueue queue;
+        android::RefreshFrame frame;
+        const QRegion header(QRect(500, 10, 50, 20)), footer(QRect(250, 760, 60, 20));
+        const QRegion body(QRect(20, 60, 560, 680));
+        frame.screenPixels = header | body | footer;
+        frame.textPixels = body;
+        QList<android::RefreshFrame> buffers;
+        const auto submit = [&](const android::RefreshFrame &value) {
+            buffers.append(value);
+            return true;
+        };
+        QVERIFY(queue.prepare(frame, submit));
+        QCOMPARE(buffers.size(), 1);
+        QCOMPARE(buffers.first().textPixels, body);
+        QCOMPARE(buffers.first().screenPixels, body);
+        QVERIFY(queue.pending());
+        while (queue.pending()) {
+            QVERIFY(queue.present(submit));
+            QVERIFY(buffers.size() <= 3);
+        }
+        QCOMPARE(buffers.size(), 3);
+        QRegion chrome;
+        for (int i = 1; i < buffers.size(); ++i) {
+            QVERIFY(buffers[i].textPixels.isEmpty());
+            QCOMPARE(buffers[i].screenPixels.rectCount(), 1);
+            chrome += buffers[i].screenPixels;
+        }
+        QCOMPARE(chrome, header | footer);
+        // A cleanup supersedes queued partial updates and is submitted once.
+        QVERIFY(queue.prepare(frame, submit));
+        android::RefreshFrame cleanup;
+        cleanup.clean = true;
+        cleanup.screenPixels = body;
+        QVERIFY(queue.prepare(cleanup, submit));
+        QVERIFY(buffers.last().clean);
+        QVERIFY(!queue.pending());
+    }
+    void booxPendingRegionsKeepLatestPolicy() {
+        android::BooxFrameQueue queue;
+        android::RefreshFrame frame;
+        frame.screenPixels = QRegion(QRect(10, 20, 100, 200));
+        frame.textPixels = frame.screenPixels;
+        QVERIFY(!queue.prepare(frame, [](const android::RefreshFrame &) {
+            return false;
+        }));
+        QVERIFY(queue.pending());
+        frame.textPixels = {};
+        android::RefreshFrame accepted;
+        QVERIFY(queue.prepare(frame, [&](const android::RefreshFrame &value) {
+            accepted = value;
+            return true;
+        }));
+        QCOMPARE(accepted.screenPixels, frame.screenPixels);
+        QVERIFY(accepted.textPixels.isEmpty());
+        QVERIFY(!queue.pending());
+        QVERIFY(!queue.prepare(frame, [](const android::RefreshFrame &) {
+            return false;
+        }));
+        queue.reset();
+        QVERIFY(!queue.pending());
+    }
+    void booxKeepsDisjointPaintDamage() {
+        QWidget reader, viewport;
+        const QRegion damage = QRegion(QRect(10, 20, 20, 30)) | QRegion(QRect(200, 300, 20, 30));
+        const auto frame = android::takeRefreshFrame(&reader, &viewport, damage);
+        QCOMPARE(frame.screenPixels.rectCount(), 2);
+        QVERIFY(!frame.screenPixels.contains(frame.screenPixels.boundingRect().center()));
+    }
+    void booxPageTurnRegions_data() {
+        QTest::addColumn<bool>("dark");
+        QTest::addColumn<bool>("accept");
+        QTest::newRow("light") << false << true;
+        QTest::newRow("dark") << true << true;
+        QTest::newRow("retry") << false << false;
+    }
+    void booxPageTurnRegions() {
+        QFETCH(bool, dark);
+        QFETCH(bool, accept);
+        QWidget reader, viewport;
+        reader.resize(600, 800);
+        ReadingPage page(&reader, [] {});
+        page.setFont(ui::headerFooterFont());
+        page.resize(reader.size());
+        page.chrome.progressBar = false;
+        page.chrome.slotFields = {headerfooter::Field::Time,     headerfooter::Field::BookTitle,
+                                  headerfooter::Field::BookPage, headerfooter::Field::Author,
+                                  headerfooter::Field::Chapter,  headerfooter::Field::BatteryPercent};
+        page.slotContents[0].text = "09:00";
+        page.slotContents[1].text = "Unchanged title";
+        page.slotContents[2].text = "35 / 4000";
+        page.slotContents[3].text = "Unchanged author";
+        page.slotContents[4].text = "Unchanged chapter";
+        page.slotContents[5].text = "100%";
+        auto palette = page.palette();
+        palette.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        page.setPalette(palette);
+        page.image = QImage(600, 600, QImage::Format_RGB32);
+        page.image.fill(Qt::white);
+        page.refreshContent();
+        reader.show();
+        QCoreApplication::processEvents();
+        android::BooxRefreshPolicy policy;
+        const QRegion paint(page.rect());
+        QVERIFY(policy.prepare(&reader, &viewport, &page, paint, [](const android::RefreshFrame &) {
+            return true;
+        }));
+        const int top = page.topHeight(), bottom = page.bottomHeight();
+        QVERIFY(top > 0 && bottom > 0);
+        page.slotContents[0].text = "09:01";
+        page.slotContents[2].text = "36 / 4000";
+        page.image.fill(Qt::gray);
+        page.refreshContent(true);
+        reader.setProperty("boox_text_frame", !dark);
+        android::RefreshFrame frame;
+        const auto submit = [&](const android::RefreshFrame &value) {
+            frame = value;
+            return accept;
+        };
+        QCOMPARE(policy.prepare(&reader, &viewport, &page, paint, submit), accept);
+        if (!accept) {
+            QVERIFY(reader.property("boox_text_frame").toBool());
+            const auto rejected = frame.screenPixels;
+            QVERIFY(policy.prepare(&reader, &viewport, &page, paint, [&](const android::RefreshFrame &value) {
+                frame = value;
+                return true;
+            }));
+            QCOMPARE(frame.screenPixels, rejected);
+        }
+        const QPoint origin = viewport.mapToGlobal(QPoint()) * viewport.devicePixelRatioF();
+        const auto pixels = frame.screenPixels.translated(-origin);
+        QVERIFY(pixels.intersects(QRect(0, 0, 200, top)));
+        QVERIFY(pixels.intersects(QRect(400, 0, 200, top)));
+        // Stable monospace positions leave the slash and total untouched.
+        QVERIFY((pixels & QRegion(QRect(400, 0, 200, top))).boundingRect().width() < 60);
+        QVERIFY(!pixels.intersects(QRect(200, 0, 200, top)));
+        QVERIFY(!pixels.intersects(QRect(0, 800 - bottom, 600, bottom)));
+        const QRegion body(QRect(0, top, 600, 800 - top - bottom));
+        QCOMPARE(frame.textPixels.translated(-origin), dark ? QRegion() : body);
+        // Visible reading controls keep their conservative paint damage.
+        QWidget controls(&reader);
+        controls.setObjectName("rrControlsTop");
+        controls.show();
+        page.image.fill(Qt::yellow);
+        page.refreshContent(true);
+        QVERIFY(policy.prepare(&reader, &viewport, &page, paint, [&](const android::RefreshFrame &value) {
+            frame = value;
+            return true;
+        }));
+        QCOMPARE(frame.screenPixels.translated(-origin), paint);
+        controls.hide();
+        // Resizing invalidates the strip comparison even without an explicit reset.
+        page.resize(590, 800);
+        page.image.fill(Qt::green);
+        page.refreshContent(true);
+        QVERIFY(policy.prepare(&reader, &viewport, &page, paint, [&](const android::RefreshFrame &value) {
+            frame = value;
+            return true;
+        }));
+        QCOMPARE(frame.screenPixels.translated(-origin), paint);
+        // Reader close and viewport changes can explicitly release the cache.
+        policy.reset();
+        QVERIFY(policy.prepare(&reader, &viewport, &page, paint, [&](const android::RefreshFrame &value) {
+            frame = value;
+            return true;
+        }));
+        QCOMPARE(frame.screenPixels.translated(-origin), paint);
+    }
+    void booxMissingSurfaceRetainsPendingFrame() {
+        QWidget reader, viewport;
+        reader.setProperty("reader_full_flash", true);
+        reader.setProperty("boox_text_frame", true);
+        const QRegion damage(QRect(10, 20, 100, 200));
+        QVERIFY(!android::prepareRefreshFrame(&reader, &viewport, damage, [](const android::RefreshFrame &) {
+            return false;
+        }));
+        QVERIFY(reader.property("reader_full_flash").toBool());
+        QVERIFY(reader.property("boox_text_frame").toBool());
+        bool clean = false, text = false;
+        QVERIFY(android::prepareRefreshFrame(&reader, &viewport, damage, [&](const android::RefreshFrame &frame) {
+            clean = frame.clean;
+            text = frame.text;
+            return true;
+        }));
+        QVERIFY(clean);
+        QVERIFY(text);
+        QVERIFY(!reader.property("reader_full_flash").toBool());
+        QVERIFY(!reader.property("boox_text_frame").toBool());
+    }
+    void booxCleanupUsesSharedReaderPolicy() {
+        QWidget reader, viewport;
+        reader.setProperty("reader_full_flash", true);
+        reader.setProperty("boox_text_frame", true);
+        const auto frame = android::takeRefreshFrame(&reader, &viewport, QRegion(QRect(10, 20, 100, 200)));
+        QVERIFY(frame.clean);
+        QVERIFY(frame.text);
+        QVERIFY(!reader.property("reader_full_flash").toBool());
+        QVERIFY(!reader.property("boox_text_frame").toBool());
+        const auto next = android::takeRefreshFrame(&reader, &viewport, QRegion(QRect(10, 20, 100, 200)));
+        QVERIFY(!next.clean);
+        QVERIFY(!next.text);
+    }
+    void booxLightPanel_data() {
+        QTest::addColumn<int>("ppi");
+        QTest::addColumn<bool>("dark");
+        QTest::newRow("light-212") << 212 << false;
+        QTest::newRow("dark-212") << 212 << true;
+        QTest::newRow("light-300") << 300 << false;
+        QTest::newRow("dark-300") << 300 << true;
+    }
+    void booxLightPanel() {
+        QFETCH(int, ppi);
+        QFETCH(bool, dark);
+        struct DensityRestore {
+            int original = ui::density();
+            ~DensityRestore() {
+                ui::setDensity(original);
+            }
+        } restore;
+        ui::setDensity(ppi);
+        android::Light light([](int operation, int type, int) {
+            return operation == 1 ? 32 : type == 7 ? 28 : 12;
+        });
+        QWidget parent;
+        parent.resize(ui::px(1264), ui::px(1680));
+        QPalette palette = parent.palette();
+        palette.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        palette.setColor(QPalette::Text, dark ? Qt::white : Qt::black);
+        palette.setColor(QPalette::Base, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::Button, dark ? Qt::black : Qt::white);
+        palette.setColor(QPalette::ButtonText, dark ? Qt::white : Qt::black);
+        parent.setPalette(palette);
+        parent.setProperty("reader_dark", dark);
+        LightPanel panel(light, &parent);
+        for (auto *widget : parent.findChildren<QWidget *>()) {
+            widget->setPalette(palette);
+            if (widget->property("reader_style").isValid())
+                ui::readerStyle(widget, widget->property("reader_style").toString());
+        }
+        parent.show();
+        QVERIFY(panel.open());
+        QCoreApplication::processEvents();
+        QVERIFY(panel.findChild<QWidget *>("rrAutomaticWarmth")->isHidden());
+        QVERIFY(parent.rect().contains(panel.geometry()));
+        QCOMPARE(panel.findChild<QWidget *>("rrBrightnessValue")->palette().color(QPalette::WindowText),
+                 QColor(dark ? Qt::white : Qt::black));
+        const auto directory = qEnvironmentVariable("KOBALT_BOOX_CAPTURES");
+        if (!directory.isEmpty()) {
+            QVERIFY(QDir().mkpath(directory));
+            QVERIFY(panel.grab().save(directory + '/' + QTest::currentDataTag() + ".png"));
+        }
+    }
+    void booxLightLevelsAndCancellation() {
+        int brightness = 28, warmth = 0;
+        bool failed = false;
+        android::Light light([&](int operation, int type, int value) {
+            if (failed)
+                return -1;
+            int &level = type == 7 ? brightness : warmth;
+            if (operation == 1)
+                return 32;
+            if (operation == 2)
+                level = value;
+            return level;
+        });
+        QVERIFY(light.initialize());
+        QVERIFY(light.hasWarmth());
+        QVERIFY(!light.hasAutomaticWarmth());
+        QWidget parent;
+        parent.resize(600, 800);
+        LightPanel panel(light, &parent);
+        QVERIFY(panel.open());
+        QVERIFY(panel.findChild<QWidget *>("rrAutomaticWarmth")->isHidden());
+        QVERIFY(!panel.findChild<QWidget *>("rrWarmth")->isHidden());
+        panel.hide();
+        QCOMPARE(light.brightness(), 88);
+        QVERIFY(light.beginGesture());
+        QCOMPARE(light.setGestureLevel(50), 50);
+        QCOMPARE(brightness, 16);
+        QVERIFY(light.beginGesture());
+        light.finishGesture(false);
+        QCOMPARE(brightness, 28);
+        QVERIFY(light.beginGesture());
+        QCOMPARE(light.setGestureLevel(100), 100);
+        light.finishGesture(true);
+        QCOMPARE(brightness, 32);
+        QCOMPARE(light.setWarmth(12), 12);
+        QCOMPARE(warmth, 12);
+        QCOMPARE(brightness, 32);
+        QVERIFY(light.saveWarmth());
+        failed = true;
+        QVERIFY(!light.initialize());
+        QVERIFY(!light.beginGesture());
+        QCOMPARE(light.brightness(), -1);
+        QCOMPARE(light.setGestureLevel(50), -1);
+    }
+
     void cancelledCanvasTouchRestoresSlider_data() {
         QTest::addColumn<bool>("secondFinger");
         QTest::newRow("touch-cancel") << false;
@@ -263,6 +575,130 @@ private slots:
         QApplication::setStyle("Fusion");
         AssetBundle assets(QStringLiteral(KOBALT_TEST_ASSET_ROOT), QStringLiteral(KOBALT_VERSION));
         QVERIFY(ui::initializeInterfaceFonts(assets));
+    }
+    void searchEditorKeepsCaseAndReleasesFocusOnReturn() {
+        android::WidgetCanvas canvas(nullptr);
+        canvas.resize(1264, 1680);
+        auto *owner = new QWidget;
+        owner->resize(1264, 1680);
+        auto *panel = new SearchPanel(owner, test::hostReaderServices().keyboard);
+        panel->setGeometry(owner->rect());
+        canvas.setContent(owner);
+        canvas.fitContent();
+        canvas.show();
+        panel->open(false, 0);
+        auto *query = panel->findChild<QLineEdit *>("rrSearchQuery");
+        QVERIFY(query);
+        QTRY_VERIFY(query->hasFocus());
+        const QVariant hints = QGuiApplication::inputMethod()->queryFocusObject(Qt::ImHints, {});
+        QVERIFY2(hints.isValid(), "The focused editor must expose input hints to the Android keyboard");
+
+        class FocusEvents final : public QObject {
+        public:
+            int focusOut = 0;
+            bool eventFilter(QObject *, QEvent *event) override {
+                if (event->type() == QEvent::FocusOut) {
+                    ++focusOut;
+                }
+                return false;
+            }
+        } focusEvents;
+        query->installEventFilter(&focusEvents);
+        QStringList requests;
+        panel->requested = [&](const QString &text) {
+            requests.append(text);
+        };
+        QTest::keyClicks(query, "chapter");
+        QTest::keyClick(query, Qt::Key_Return);
+        QCOMPARE(requests, QStringList({"chapter"}));
+        QVERIFY(!query->hasFocus());
+        QCOMPARE(focusEvents.focusOut, 1);
+
+        const QPoint editor = canvas.mapFromScene(query->mapTo(owner, query->rect().center()));
+        QTest::mouseClick(canvas.viewport(), Qt::LeftButton, Qt::NoModifier, editor);
+        QTRY_VERIFY(query->hasFocus());
+        QTest::keyClick(query, Qt::Key_Return);
+        QCOMPARE(requests, QStringList({"chapter", "chapter"}));
+        QVERIFY(!query->hasFocus());
+        QCOMPARE(focusEvents.focusOut, 2);
+        QVERIFY2(hints.toInt() & Qt::ImhNoAutoUppercase, "The Android keyboard must preserve lowercase search text");
+
+        auto *otherEditor = new QLineEdit(owner);
+        otherEditor->setGeometry(118, 240, 1028, 109);
+        otherEditor->show();
+        otherEditor->setFocus();
+        QTRY_VERIFY(otherEditor->hasFocus());
+        panel->stop();
+        QVERIFY(otherEditor->hasFocus());
+    }
+    void searchInputGeometryTracksCanvasTransform() {
+        QWidget window;
+        window.resize(674, 900);
+        android::WidgetCanvas canvas(&window);
+        canvas.setGeometry(0, 73, 674, 791);
+        auto *owner = new QWidget;
+        auto *panel = new SearchPanel(owner, test::hostReaderServices().keyboard);
+        canvas.setContent(owner);
+        canvas.viewportResized = [&] {
+            canvas.fitContent();
+            panel->setGeometry(owner->rect());
+        };
+        canvas.viewportResized();
+        window.show();
+        qInfo() << "Canvas device pixel ratio:" << canvas.devicePixelRatioF();
+        panel->open(false, 0);
+        auto *query = panel->findChild<QLineEdit *>("rrSearchQuery");
+        QVERIFY(query);
+        QTRY_VERIFY(query->hasFocus());
+        const auto editorRectangle = [&] {
+            const QRectF sceneRect(query->mapTo(owner, QPoint()), query->size());
+            return canvas.viewportTransform().mapRect(sceneRect).translated(
+                canvas.viewport()->mapTo(&window, QPoint()));
+        };
+        const auto cachedRectangle = [] {
+            auto *input = QGuiApplication::inputMethod();
+            return input->inputItemTransform().mapRect(input->inputItemRectangle());
+        };
+        QInputMethodQueryEvent queryEvent(Qt::ImInputItemClipRectangle);
+        QApplication::sendEvent(&canvas, &queryEvent);
+        QCOMPARE(cachedRectangle(), editorRectangle());
+
+        canvas.resize(620, 700);
+        QCoreApplication::processEvents();
+        QVERIFY(query->hasFocus());
+        QCOMPARE(cachedRectangle(), editorRectangle());
+
+        QLineEdit otherEditor(&window);
+        otherEditor.setGeometry(20, 10, 300, 40);
+        otherEditor.show();
+        otherEditor.setFocus();
+        QTRY_VERIFY(otherEditor.hasFocus());
+        const QRectF otherRectangle = cachedRectangle();
+        QInputMethodQueryEvent inactiveQuery(Qt::ImInputItemClipRectangle);
+        QApplication::sendEvent(&canvas, &inactiveQuery);
+        QCOMPARE(cachedRectangle(), otherRectangle);
+
+        auto *foreignEditor = new QLineEdit;
+        foreignEditor->resize(300, 40);
+        auto *foreignProxy = canvas.scene()->addWidget(foreignEditor);
+        foreignProxy->setPos(40, 300);
+        canvas.setFocus();
+        foreignEditor->setFocus();
+        QTRY_VERIFY(foreignProxy->hasFocus());
+        QVERIFY(!owner->graphicsProxyWidget()->hasFocus());
+        QVERIFY(QGuiApplication::focusObject() == &canvas || QGuiApplication::focusObject() == canvas.viewport());
+        QVERIFY(QInputMethod::queryFocusObject(Qt::ImEnabled, {}).toBool());
+        const QRectF foreignSceneRect = foreignProxy->mapRectToScene(QRectF(foreignEditor->rect()));
+        const QRectF foreignRectangle = canvas.viewportTransform().mapRect(foreignSceneRect);
+        const QPoint offset = canvas.viewport()->mapTo(&window, QPoint());
+        auto *input = QGuiApplication::inputMethod();
+        input->setInputItemRectangle(foreignRectangle);
+        const QTransform foreignTransform = QTransform::fromTranslate(offset.x(), offset.y());
+        input->setInputItemTransform(foreignTransform);
+        QInputMethodQueryEvent foreignQuery(Qt::ImInputItemClipRectangle);
+        QApplication::sendEvent(&canvas, &foreignQuery);
+        QCOMPARE(input->inputItemRectangle(), foreignRectangle);
+        QCOMPARE(input->inputItemTransform(), foreignTransform);
     }
     void lastBookRequiresAnExplicitTap() {
         android::StartScreen screen(presentation());

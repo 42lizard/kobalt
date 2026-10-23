@@ -16,6 +16,7 @@ void paintButtonShape(QPainter &painter, const QRect &rect, const QColor &paper,
 bool darkTheme(const QWidget *widget);
 // Light dividers between rows and grey secondary text follow the reader theme.
 QColor dividerColor(const QWidget *widget);
+QColor sectionColor(const QWidget *widget);
 QColor noteColor(const QWidget *widget);
 // The status rule and the heavy lower rule of a view that uses the header geometry.
 void paintHeaderRules(QPainter &painter, const QWidget *view);

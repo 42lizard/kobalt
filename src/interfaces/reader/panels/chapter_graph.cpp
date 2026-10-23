@@ -114,21 +114,21 @@ class StatsCell : public QWidget {
 public:
     StatsCell(QWidget *parent, const QString &prefix, const QString &title) : QWidget(parent) {
         setObjectName(prefix + "Cell");
-        caption = new QLabel(title, this);
+        caption = new ui::InterfaceLabel(title, this);
         caption->setObjectName(prefix + "Caption");
         ui::captionLabel(caption);
-        percent = new QLabel(this);
+        percent = new ui::InterfaceLabel(this);
         percent->setObjectName(prefix + "Percent");
         ui::captionLabel(percent);
         percent->setAlignment(Qt::AlignRight | Qt::AlignTop);
         caption->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-        figure = new QLabel(this);
+        figure = new ui::InterfaceLabel(this);
         figure->setObjectName(prefix + "Figure");
         figure->setTextFormat(Qt::PlainText);
         ui::readerStyle(figure, ui::styles::brand(m::figureText) + "background:transparent;");
-        unit = new QLabel(this);
+        unit = new ui::InterfaceLabel(this);
         unit->setObjectName(prefix + "Unit");
-        detail = new QLabel(this);
+        detail = new ui::InterfaceLabel(this);
         detail->setObjectName(prefix + "Detail");
         for (auto *label : {figure, unit, detail})
             label->setAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -204,15 +204,15 @@ private:
 
 ChapterGraph::ChapterGraph(QWidget *parent) : Panel(parent, Qt::BottomEdge) {
     setObjectName("rrChapterGraph");
-    message = new QLabel(this);
+    message = new ui::InterfaceLabel(this);
     message->setObjectName("rrGraphMessage");
     message->setTextFormat(Qt::PlainText);
     message->setAlignment(Qt::AlignCenter);
     ui::readerStyle(message, ui::styles::font(c::labelText) + "background:transparent;");
-    chapterCaption = new QLabel(this);
+    chapterCaption = new ui::InterfaceLabel(this);
     chapterCaption->setObjectName("rrGraphChapterNumber");
     ui::captionLabel(chapterCaption);
-    chapterPage = new QLabel(this);
+    chapterPage = new ui::InterfaceLabel(this);
     chapterPage->setObjectName("rrGraphChapterPosition");
     ui::captionLabel(chapterPage);
     chapterPage->setAlignment(Qt::AlignRight | Qt::AlignTop);

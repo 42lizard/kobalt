@@ -3035,6 +3035,37 @@ int main(int argc, char **argv) {
         const qreal offset = (inkRows.first() + baseline) / 2.0 - (image.height() - 1) / 2.0;
         require(qAbs(offset) <= 1.5, "List action text is not centred on its letters");
     }
+    {
+        using namespace kobalt::ui;
+        QWidget owner;
+        auto *row = makeCaptionButton(&owner, nullptr, "typefacePreview", "Typeface", [] {});
+        row->setCaption("SELECTED FACE");
+        row->setFixedSize(900, metrics::about::actionHeight);
+        owner.show();
+        row->show();
+        for (bool dark : {false, true}) {
+            QPalette colors = originalPalette;
+            colors.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+            colors.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+            row->setPalette(colors);
+            row->setTypefacePreview({});
+            app.processEvents();
+            const auto plain = row->grab().toImage();
+            const QRect preview(row->width() - metrics::chrome::actionRight - px(88), 0, px(88), row->height());
+            const auto empty = plain.copy(preview);
+            row->setTypefacePreview(interfaceFont().family());
+            const auto sans = row->grab().toImage();
+            require(sans.copy(preview) != empty, "Typeface row did not draw its Aa preview");
+            row->setTypefacePreview(chromeFont().family());
+            const auto mono = row->grab().toImage();
+            require(mono.copy(preview) != sans.copy(preview), "Typeface row reused the previous face");
+            require(mono.copy(0, 0, row->width() - metrics::chrome::actionRight - px(108), row->height()) ==
+                        plain.copy(0, 0, row->width() - metrics::chrome::actionRight - px(108), row->height()),
+                    "Typeface preview moved the row label or caption");
+            row->setTypefacePreview({});
+            require(row->grab().toImage() == plain, "Clearing a typeface preview left sample pixels behind");
+        }
+    }
     kobalt::ui::SettingSlider slider(&panel, 0, 100);
     slider.resize(300, 72);
     slider.show();

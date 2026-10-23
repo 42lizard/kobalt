@@ -9,21 +9,53 @@
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/metrics.h"
 #include "interfaces/reader/ui/style/styles.h"
+#include <QGraphicsProxyWidget>
 #include <QGuiApplication>
 #include <QInputMethod>
+#include <QKeyEvent>
 #include <QPainter>
 #include <QtMath>
 
 namespace kobalt {
 namespace m = ui::metrics;
 namespace c = ui::metrics::chrome;
+namespace {
+class SearchEdit final : public QLineEdit {
+public:
+    using QLineEdit::QLineEdit;
+
+protected:
+    void keyReleaseEvent(QKeyEvent *event) override {
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            // Android can deliver submission after key release. QLineEdit queues
+            // a keyboard show on release, which can run after submission hides it.
+            QWidget::keyReleaseEvent(event);
+            return;
+        }
+        QLineEdit::keyReleaseEvent(event);
+    }
+};
+void clearQueryFocus(QLineEdit *query) {
+    if (query->hasFocus()) {
+        // Clear the proxy before QWidget::clearFocus removes its embedded focus
+        // widget, so Qt delivers FocusOut and stops the editor's cursor timer.
+        for (auto *widget = static_cast<QWidget *>(query); widget; widget = widget->parentWidget()) {
+            if (auto *proxy = widget->graphicsProxyWidget()) {
+                proxy->clearFocus();
+                break;
+            }
+        }
+    }
+    query->clearFocus();
+}
+}
 SearchPanel::SearchPanel(QWidget *parent, KeyboardFactory makeKeyboard) : ui::Panel(parent) {
     setObjectName("rrSearch");
     back = new ui::CellButton(ui::ControlIcon::Back, this, c::backIcon);
     back->setObjectName("rrSearchBack");
     back->setRule(Qt::RightEdge);
     back->setAccessibleName(strings::get("common.back"));
-    query = new QLineEdit(this);
+    query = new SearchEdit(this);
     query->setObjectName("rrSearchQuery");
     query->setMaxLength(128);
     ui::readerStyle(query, "QLineEdit{border:none;padding:0;background:palette(window);" +
@@ -47,7 +79,7 @@ SearchPanel::SearchPanel(QWidget *parent, KeyboardFactory makeKeyboard) : ui::Pa
         clear->setVisible(!text.isEmpty());
     });
     query->setAccessibleName(strings::get("reader.search_book"));
-    query->setInputMethodHints(Qt::ImhNoPredictiveText);
+    query->setInputMethodHints(Qt::ImhNoPredictiveText | Qt::ImhNoAutoUppercase);
     keyboard = makeKeyboard(this, query);
     Q_ASSERT(keyboard);
     keyboard->submitted = [this] {
@@ -65,7 +97,7 @@ SearchPanel::SearchPanel(QWidget *parent, KeyboardFactory makeKeyboard) : ui::Pa
                                          if (returnToStart)
                                              returnToStart();
                                      });
-    status = new QLabel(strings::get("search_panel.search_this_book"), this);
+    status = new ui::InterfaceLabel(strings::get("search_panel.search_this_book"), this);
     status->setObjectName("rrSearchStatus");
     ui::captionLabel(status);
     connect(query, &QLineEdit::returnPressed, this, [this] {
@@ -84,12 +116,12 @@ SearchPanel::SearchPanel(QWidget *parent, KeyboardFactory makeKeyboard) : ui::Pa
         resultPage = pager->turnTarget(1);
         redraw();
     });
-    empty = new QLabel(this);
+    empty = new ui::InterfaceLabel(this);
     empty->setObjectName("rrSearchEmpty");
     empty->setTextFormat(Qt::PlainText);
     empty->setWordWrap(true);
     ui::readerStyle(empty, ui::styles::font(c::labelText) + "background:transparent;");
-    hint = new QLabel(this);
+    hint = new ui::InterfaceLabel(this);
     hint->setObjectName("rrSearchHint");
     hint->setTextFormat(Qt::PlainText);
     hint->setWordWrap(true);
@@ -124,7 +156,7 @@ void SearchPanel::open(bool returnAvailable, int originalPage) {
         query->setFocus();
         keyboard->show();
     } else {
-        query->clearFocus();
+        clearQueryFocus(query);
         keyboard->hide();
     }
 }
@@ -172,7 +204,7 @@ void SearchPanel::run() {
     const auto text = query->text().trimmed();
     if (text.isEmpty())
         return;
-    query->clearFocus();
+    clearQueryFocus(query);
     keyboard->hide();
     QGuiApplication::inputMethod()->hide();
     updates.stop();
@@ -189,6 +221,13 @@ void SearchPanel::run() {
         requested(text);
 }
 void SearchPanel::append(const SearchBatch &batch, int totalPages) {
+    if (batch.reset) {
+        updates.stop();
+        pendingStatus.clear();
+        invalidateRows();
+        hits.clear();
+        resultPage = 0;
+    }
     const bool firstResults = hits.isEmpty() && !batch.hits.isEmpty();
     scanning = !batch.done;
     hits += batch.hits;
@@ -198,10 +237,11 @@ void SearchPanel::append(const SearchBatch &batch, int totalPages) {
                                   : strings::get("search_panel.matches_searching")
                                        .arg(hits.size())
                                        .arg(100 * batch.nextPage / qMax(1, totalPages));
-    if (firstResults || batch.done)
+    if (batch.reset || firstResults || batch.done) {
         flush();
-    else if (!updates.isActive())
+    } else if (!updates.isActive()) {
         updates.start();
+    }
 }
 void SearchPanel::flush() {
     updates.stop();
@@ -210,7 +250,7 @@ void SearchPanel::flush() {
 }
 void SearchPanel::stop() {
     updates.stop();
-    query->clearFocus();
+    clearQueryFocus(query);
     keyboard->hide();
     QGuiApplication::inputMethod()->hide();
     if (scanning)

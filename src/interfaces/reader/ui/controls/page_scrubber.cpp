@@ -1,4 +1,5 @@
 #include "page_scrubber.h"
+#include "ui/bookmark_paint.h"
 #include "buttons.h"
 #include "panels.h"
 #include "text.h"
@@ -17,6 +18,25 @@
 namespace kobalt::ui {
 namespace m = metrics::scrubber;
 namespace {
+// Both card sizes hang the ribbon from the page border.
+void paintThumbnail(QPainter &painter, const QRect &card, const QImage &image, bool bookmarked, const QColor &ink) {
+    if (image.isNull()) {
+        return;
+    }
+    const QRect room = card.adjusted(m::padding, m::padding, -m::padding, -m::padding);
+    const QSize fitted = image.size().scaled(room.size(), Qt::KeepAspectRatio);
+    const QRect target(room.center() - QPoint(fitted.width() / 2, fitted.height() / 2), fitted);
+    // Ordinary cards already have fitted pixels. Oversized desktop previews
+    // keep the bounded master and use smooth sampling without a larger cache.
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, target.size() != image.size());
+    painter.drawImage(target, image);
+    if (bookmarked) {
+        const qreal width = fitted.width() * .036;
+        paintBookmarkRibbon(
+            painter, QRectF(target.right() - fitted.width() * .03 - width, card.top(), width, fitted.height() * .045),
+            ink);
+    }
+}
 constexpr int initialZoomMaximumSpan = 1000;
 constexpr int zoomScales[] = {1, 2, 4, 8, 16, 24, 36};
 constexpr int lastZoomLevel = sizeof(zoomScales) / sizeof(zoomScales[0]) - 1;
@@ -68,7 +88,19 @@ private:
 class PageThumbnail : public Button {
 public:
     using Button::Button;
+    // Keep only the fitted side image here. PageScrubber owns the promotion masters.
+    void setImage(const QImage &source) {
+        image = {};
+        if (!source.isNull()) {
+            const QSize room = rect().adjusted(m::padding, m::padding, -m::padding, -m::padding).size();
+            const QSize fitted = source.size().scaled(room, Qt::KeepAspectRatio);
+            image = fitted.width() <= 1024 && fitted.height() <= 1024
+                        ? source.scaled(fitted, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                        : source;
+        }
+    }
     QImage image;
+    bool bookmarked = false;
 
 protected:
     void paintEvent(QPaintEvent *) override {
@@ -76,18 +108,13 @@ protected:
         painter.fillRect(rect(), palette().color(QPalette::Base));
         paintEdges(painter, rect(), Edges(Qt::TopEdge) | Qt::BottomEdge | Qt::LeftEdge | Qt::RightEdge,
                    palette().color(QPalette::Text));
-        if (!image.isNull()) {
-            const QRect room = rect().adjusted(m::padding, m::padding, -m::padding, -m::padding);
-            const QSize fitted = image.size().scaled(room.size(), Qt::KeepAspectRatio);
-            painter.drawImage(QRect(room.center() - QPoint(fitted.width() / 2, fitted.height() / 2), fitted), image);
-        }
+        paintThumbnail(painter, rect(), image, bookmarked, palette().color(QPalette::Text));
     }
 };
 PageScrubber::PageScrubber(QWidget *parent) : QWidget(parent), position(new SettingSlider(this, 0, 0)) {
     setObjectName("rrPageScrubber");
     setAttribute(Qt::WA_NoSystemBackground);
     setAttribute(Qt::WA_AcceptTouchEvents);
-    setStyleSheet("#rrPageScrubber{background:transparent;}");
     preceding = new NavigationButton<PageThumbnail>(this);
     following = new NavigationButton<PageThumbnail>(this);
     preceding->setObjectName("rrPreviewPreviousPage");
@@ -363,14 +390,33 @@ void PageScrubber::choose(int page) {
     if (candidate == page) {
         return;
     }
-    candidate = qBound(0, page, totalPages - 1);
+    const int target = qBound(0, page, totalPages - 1);
+    QImage retained[3];
+    if (selecting() && qAbs(target - candidate) == 1) {
+        for (int index = 0; index < 3; ++index) {
+            const int oldIndex = target - candidate + index;
+            if (oldIndex >= 0 && oldIndex < 3) {
+                retained[index] = prepared[oldIndex];
+            }
+        }
+    }
+    if (!selecting() || displayedPage < 0 || qAbs(target - displayedPage) > 1) {
+        clearPreview();
+    }
+    pendingPreview = -1;
+    for (int index = 0; index < 3; ++index) {
+        prepared[index] = std::move(retained[index]);
+        requested[index] = !prepared[index].isNull();
+    }
+    candidate = target;
+    ready = false;
+    setAttribute(Qt::WA_OpaquePaintEvent, true);
     if (candidate < rangeFirst || candidate > rangeLast) {
         centerRange(candidate);
     }
     syncRange();
     barRule->setSoftEdges(true);
-    position->setValue(page);
-    clearPreview();
+    position->setValue(candidate);
     setProperty("preview_page", page);
     setProperty("preview_ready", false);
     updateButtons();
@@ -378,6 +424,27 @@ void PageScrubber::choose(int page) {
     arrange();
     renderTimer.start();
     update();
+}
+void PageScrubber::setBookmarkedPages(const QVector<int> &pages) {
+    if (bookmarkedPages == pages) {
+        return;
+    }
+    const bool centerChanged =
+        displayedPage >= 0 && bookmarkedPages.contains(displayedPage) != pages.contains(displayedPage);
+    bookmarkedPages = pages;
+    if (centerChanged) {
+        update(previewBounds());
+    }
+    const bool previousMarked = displayedPage > 0 && bookmarkedPages.contains(displayedPage - 1);
+    const bool nextMarked = displayedPage >= 0 && bookmarkedPages.contains(displayedPage + 1);
+    if (preceding->bookmarked != previousMarked) {
+        preceding->bookmarked = previousMarked;
+        preceding->update();
+    }
+    if (following->bookmarked != nextMarked) {
+        following->bookmarked = nextMarked;
+        following->update();
+    }
 }
 void PageScrubber::setChapterJumps(bool enabled) {
     if (chapterJumps == enabled) {
@@ -428,62 +495,64 @@ void PageScrubber::step(int direction) {
 }
 void PageScrubber::requestPreview() {
     renderTimer.stop();
-    if (selecting() && previewRequested) {
+    if (!selecting() || !previewRequested || pendingPreview >= 0) {
+        return;
+    }
+    // The session accepts one outstanding preview. Keep that contract, but
+    // publish the completed strip in one frame instead of each reply separately.
+    for (int index : {1, 0, 2}) {
+        const int page = candidate + index - 1;
+        if (page < 0 || page >= totalPages || requested[index]) {
+            continue;
+        }
         auto bounds = imageBounds().size();
-        // Match the larger card while keeping the engine thumbnail within 1 Mi pixels.
         if (bounds.width() > 1024 || bounds.height() > 1024) {
             bounds.scale(1024, 1024, Qt::KeepAspectRatio);
         }
-        pendingPreview = candidate;
-        previewRequested(candidate, bounds);
+        requested[index] = true;
+        pendingPreview = page;
+        previewRequested(page, bounds);
+        return;
     }
+    publishPreviews();
 }
 void PageScrubber::setPreview(int page, QImage image) {
     if (!selecting() || page != pendingPreview || !isVisible()) {
         return;
     }
     pendingPreview = -1;
-    if (page == candidate) {
-        preview = std::move(image);
-        setProperty("preview_ready", !preview.isNull());
-        update(previewBounds());
-    } else if (page == candidate - 1) {
-        preceding->image = std::move(image);
-        preceding->update();
-    } else if (page == candidate + 1) {
-        following->image = std::move(image);
-        following->update();
+    const int index = page - candidate + 1;
+    if (index >= 0 && index < 3) {
+        prepared[index] = std::move(image);
     }
-    requestAdjacentPreview();
+    requestPreview();
 }
-void PageScrubber::requestAdjacentPreview() {
-    if (preview.isNull() || !previewRequested || pendingPreview >= 0) {
+void PageScrubber::publishPreviews() {
+    if (prepared[1].isNull() || ready) {
         return;
     }
-    PageThumbnail *thumbnail = nullptr;
-    if (candidate > 0 && !precedingRequested) {
-        precedingRequested = true;
-        pendingPreview = candidate - 1;
-        thumbnail = preceding;
-    } else if (candidate < totalPages - 1 && !followingRequested) {
-        followingRequested = true;
-        pendingPreview = candidate + 1;
-        thumbnail = following;
-    }
-    if (thumbnail) {
-        auto bounds = thumbnail->rect().adjusted(m::padding, m::padding, -m::padding, -m::padding).size();
-        if (bounds.width() > 1024 || bounds.height() > 1024) {
-            bounds.scale(1024, 1024, Qt::KeepAspectRatio);
-        }
-        previewRequested(pendingPreview, bounds);
-    }
+    preview = prepared[1];
+    preceding->setImage(prepared[0]);
+    following->setImage(prepared[2]);
+    displayedPage = candidate;
+    preceding->bookmarked = bookmarkedPages.contains(candidate - 1);
+    following->bookmarked = bookmarkedPages.contains(candidate + 1);
+    ready = true;
+    setProperty("preview_ready", true);
+    update(QRegion(previewBounds()) | preceding->geometry() | following->geometry());
 }
 void PageScrubber::clearPreview() {
     preview = {};
     preceding->image = {};
     following->image = {};
-    precedingRequested = followingRequested = false;
+    for (int index = 0; index < 3; ++index) {
+        prepared[index] = {};
+        requested[index] = false;
+    }
+    displayedPage = -1;
+    ready = false;
     pendingPreview = -1;
+    setProperty("preview_ready", false);
     preceding->update();
     following->update();
 }
@@ -491,10 +560,17 @@ bool PageScrubber::previewsReady() const {
     return previewReady() && (candidate == 0 || !preceding->image.isNull()) &&
            (candidate == totalPages - 1 || !following->image.isNull());
 }
+void PageScrubber::showCurrentPage() {
+    if (!isVisible() || !isEnabled() || selecting())
+        return;
+    choose(current);
+    requestPreview();
+}
 void PageScrubber::cancel() {
     const bool wasSelecting = selecting();
     renderTimer.stop();
     candidate = -1;
+    setAttribute(Qt::WA_OpaquePaintEvent, false);
     barRule->setSoftEdges(true);
     clearPreview();
     pressedPreview = false;
@@ -604,9 +680,6 @@ void PageScrubber::setBarVisible(bool visible) {
         return;
     }
     barVisible = visible;
-    if (!visible) {
-        cancel();
-    }
     arrange();
 }
 void PageScrubber::arrange() {
@@ -703,9 +776,7 @@ void PageScrubber::paintEvent(QPaintEvent *) {
     QPainter painter(this);
     const QColor paper = palette().color(QPalette::Base), ink = palette().color(QPalette::Text);
     if (selecting()) {
-        QColor fade = paper;
-        fade.setAlpha(m::previewFadeAlpha);
-        painter.fillRect(rect(), fade);
+        painter.fillRect(rect(), paper);
     }
     const QRect bar = barBounds();
     painter.fillRect(panelBounds(), paper);
@@ -725,11 +796,8 @@ void PageScrubber::paintEvent(QPaintEvent *) {
     const QRect card = previewBounds();
     painter.fillRect(card, paper);
     paintEdges(painter, card, Edges(Qt::TopEdge) | Qt::BottomEdge | Qt::LeftEdge | Qt::RightEdge, ink);
-    if (!preview.isNull()) {
-        const QSize fitted = preview.size().scaled(imageBounds().size(), Qt::KeepAspectRatio);
-        painter.drawImage(QRect(imageBounds().center() - QPoint(fitted.width() / 2, fitted.height() / 2), fitted),
-                          preview);
-    }
+    paintThumbnail(painter, previewBounds(), preview, displayedPage >= 0 && bookmarkedPages.contains(displayedPage),
+                   ink);
 }
 void PageScrubber::updateCaption() {
     if (!barVisible) {
@@ -776,10 +844,10 @@ void PageScrubber::release(QPoint point) {
         return;
     }
     if (pressedPreview && previewBounds().contains(point)) {
-        if (!preview.isNull() && accepted) {
+        if (previewReady() && accepted) {
             accepted(candidate);
         }
-    } else if (!panelBounds().contains(point)) {
+    } else if (previewDismissible && !panelBounds().contains(point)) {
         cancel();
     }
     pressedPreview = false;

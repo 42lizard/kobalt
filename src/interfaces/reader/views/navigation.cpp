@@ -33,10 +33,8 @@ protected:
         const int status = property("status_height").toInt();
         if (status)
             painter.fillRect(0, status - border, width(), border, ink);
-        painter.fillRect(width() - c::cellWidth - border, status, border, height() - status, ink);
-        painter.fillRect(width() - 2 * c::cellWidth - border, status, border, height() - status, ink);
-        if (property("formatting_warning").toBool()) {
-            painter.fillRect(width() - 3 * c::cellWidth - border, status, border, height() - status, ink);
+        for (int cell = 1; cell <= property("right_actions").toInt(); ++cell) {
+            painter.fillRect(width() - cell * c::cellWidth - border, status, border, height() - status, ink);
         }
         ui::paintEdges(painter, rect(), Qt::BottomEdge, palette().color(QPalette::WindowText), toolbarBorder);
     }
@@ -61,7 +59,14 @@ public:
         setCheckable(true);
         setFont(ui::interfaceFont(c::tabText));
         setAccessibleName(label);
+        setToolTip(label);
         setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+    }
+    void setLabelsHidden(bool hidden) {
+        if (labelsHidden == hidden)
+            return;
+        labelsHidden = hidden;
+        update();
     }
     void setSampleFace(const QString &face) {
         auto next = ui::fontSample(face);
@@ -90,7 +95,7 @@ protected:
         // the icon box and that ink as one group lines every tab up.
         const auto label = ui::interfaceFont(c::tabText);
         const int capital = qCeil(QFontMetricsF(label).tightBoundingRect(QStringLiteral("H")).height());
-        const int top = (height() - c::tabIcon - c::tabGap - capital) / 2;
+        const int top = labelsHidden ? (height() - c::tabIcon) / 2 : (height() - c::tabIcon - c::tabGap - capital) / 2;
         const QRect icon((width() - c::tabIcon) / 2, top, c::tabIcon, c::tabIcon);
         painter.setPen(color);
         if (glyph == ui::ControlIcon::Typography) {
@@ -98,6 +103,8 @@ protected:
             ui::drawOpticalText(painter, QRect(0, icon.top(), width(), icon.height()), QStringLiteral("Aa"), true);
         } else
             ui::controlIcon(glyph, color).paint(&painter, icon);
+        if (labelsHidden)
+            return;
         painter.setFont(label);
         ui::drawOpticalText(painter, QRect(ui::px(2), icon.bottom() + 1 + c::tabGap, width() - ui::px(4), capital),
                             text(), true);
@@ -106,6 +113,7 @@ protected:
 private:
     ui::ControlIcon glyph;
     QFont sample;
+    bool labelsHidden = false;
 };
 }
 BottomNavigation::BottomNavigation(QWidget *parent) : ui::Panel(parent, Qt::TopEdge) {
@@ -146,12 +154,12 @@ BottomNavigation::BottomNavigation(QWidget *parent) : ui::Panel(parent, Qt::TopE
     auto *row = new QHBoxLayout(tabRow);
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(0);
-    const ui::ControlIcon icons[] = {ui::ControlIcon::Chapters, ui::ControlIcon::Typography, ui::ControlIcon::Layout,
-                                     ui::ControlIcon::Light,    ui::ControlIcon::Graph,      ui::ControlIcon::Search};
-    const char *names[] = {"Chapters", "Text", "Layout", "Light", "Stats", "Search"};
-    const QString labels[] = {strings::get("navigation.chapters"), strings::get("navigation.text"),
-                              strings::get("navigation.layout"),   strings::get("navigation.light"),
-                              strings::get("navigation.stats"),    strings::get("navigation.search")};
+    const ui::ControlIcon icons[] = {ui::ControlIcon::Chapters, ui::ControlIcon::Compass, ui::ControlIcon::Typography,
+                                     ui::ControlIcon::Layout,   ui::ControlIcon::Light,   ui::ControlIcon::Graph};
+    const char *names[] = {"Chapters", "Seek", "Text", "Layout", "Light", "Stats"};
+    const QString labels[] = {strings::get("navigation.chapters"), strings::get("navigation.seek"),
+                              strings::get("navigation.text"),     strings::get("navigation.layout"),
+                              strings::get("navigation.light"),    strings::get("navigation.stats")};
     for (int i = 0; i < 6; ++i) {
         auto *tab = new Tab(labels[i], icons[i], tabRow);
         tab->setObjectName(QString("rrNav%1").arg(names[i]));
@@ -205,9 +213,17 @@ void BottomNavigation::setTextFace(const QString &face) {
 void BottomNavigation::setLightTab(bool shown) {
     tabs[int(NavigationDestination::Light)]->setVisible(shown);
 }
-void BottomNavigation::setStatsTab(bool shown) {
-    tabs[int(NavigationDestination::Stats)]->setVisible(shown);
+
+void BottomNavigation::setDefaultView(int destination) {
+    for (auto tab : {NavigationDestination::Seek, NavigationDestination::Stats})
+        tabs[int(tab)]->setVisible(int(tab) != destination);
 }
+
+void BottomNavigation::setLabelsHidden(bool hidden) {
+    for (auto *tab : tabs)
+        static_cast<Tab *>(tab)->setLabelsHidden(hidden);
+}
+
 void BottomNavigation::setReturnLabel(const QString &label, const QString &note) {
     returnRow->setVisible(!label.isEmpty());
     returnButton->setText(label);
@@ -219,10 +235,10 @@ int BottomNavigation::navigationHeight() const {
 }
 
 Navigation::Navigation(QWidget *parent, const ToolbarComposition &controls)
-    : bar(new BottomNavigation(parent)), pageCount(new QLabel(controls.panel)), toolbar(controls.panel),
-      toolbarRows(controls.rows), exitAction(controls.exitAction), settings(controls.settings),
-      bookmarks(controls.bookmarks), clock(controls.clock), session(controls.session), battery(controls.battery),
-      bluetooth(controls.bluetooth), formattingWarning(controls.formattingWarning) {
+    : bar(new BottomNavigation(parent)), toolbar(controls.panel), toolbarRows(controls.rows),
+      exitAction(controls.exitAction), settings(controls.settings), bookmarks(controls.bookmarks),
+      annotate(controls.annotate), clock(controls.clock), session(controls.session), battery(controls.battery),
+      bluetooth(controls.bluetooth), formattingWarning(controls.formattingWarning), search(controls.search) {
     upperEdge = new ReadingRule(parent);
     upperEdge->setObjectName("rrNavigationUpperEdge");
     lowerEdge = new ReadingRule(parent);
@@ -247,6 +263,24 @@ Navigation::Navigation(QWidget *parent, const ToolbarComposition &controls)
         bookmarksPaint = button->paintMode();
         button->setPaintMode(ui::ButtonPaintMode::ToolbarCell);
     }
+    if (search) {
+        searchStyle = search->styleSheet();
+        ui::readerStyle(search, "QPushButton{border:none;padding:0;}");
+        search->setFixedSize(c::cellWidth, c::actionHeight);
+        if (auto *button = dynamic_cast<ui::Button *>(search)) {
+            searchPaint = button->paintMode();
+            button->setPaintMode(ui::ButtonPaintMode::ToolbarCell);
+        }
+    }
+    if (annotate) {
+        annotateStyle = annotate->styleSheet();
+        ui::readerStyle(annotate, "QPushButton{border:none;padding:0;}");
+        annotate->setFixedSize(c::cellWidth, c::actionHeight);
+        if (auto *button = dynamic_cast<ui::Button *>(annotate)) {
+            annotatePaint = button->paintMode();
+            button->setPaintMode(ui::ButtonPaintMode::ToolbarCell);
+        }
+    }
     if (formattingWarning) {
         formattingWarningStyle = formattingWarning->styleSheet();
         formattingWarning->setFixedSize(c::cellWidth, c::actionHeight);
@@ -256,11 +290,6 @@ Navigation::Navigation(QWidget *parent, const ToolbarComposition &controls)
             button->setPaintMode(ui::ButtonPaintMode::ToolbarCell);
         }
     }
-    pageCount->setObjectName("rrMenuPageCount");
-    pageCount->setAlignment(Qt::AlignCenter);
-    pageCount->setAttribute(Qt::WA_TransparentForMouseEvents);
-    ui::readerStyle(pageCount, ui::styles::font(c::countText));
-    pageCount->setFont(ui::interfaceFont(c::countText));
     bar->activated = [this](NavigationDestination destination) {
         if (activated)
             activated(destination);
@@ -276,7 +305,6 @@ Navigation::Navigation(QWidget *parent, const ToolbarComposition &controls)
 }
 Navigation::~Navigation() {
     delete bar;
-    delete pageCount;
     delete rules;
     delete upperEdge;
     delete lowerEdge;
@@ -291,6 +319,20 @@ Navigation::~Navigation() {
         formattingWarning->setStyleSheet(formattingWarningStyle);
         formattingWarning->setFixedSize(ui::metrics::control::toolbarButtonSize,
                                         ui::metrics::control::toolbarButtonSize);
+    }
+    if (annotate) {
+        annotate->setStyleSheet(annotateStyle);
+        annotate->setFixedSize(ui::metrics::control::toolbarButtonSize, ui::metrics::control::toolbarButtonSize);
+        if (auto *button = dynamic_cast<ui::Button *>(annotate)) {
+            button->setPaintMode(annotatePaint);
+        }
+    }
+    if (search) {
+        search->setStyleSheet(searchStyle);
+        search->setFixedSize(ui::metrics::control::toolbarButtonSize, ui::metrics::control::toolbarButtonSize);
+        if (auto *button = dynamic_cast<ui::Button *>(search)) {
+            button->setPaintMode(searchPaint);
+        }
     }
     session->setStyleSheet(sessionStyle);
     settings->setStyleSheet(settingsStyle);
@@ -334,29 +376,35 @@ void Navigation::update(QSize size, const NavigationState &state) {
     exitAction->setGeometry(ui::px(24), statusHeight(), exitAction->sizeHint().width(), c::actionHeight);
     settings->setGeometry(size.width() - c::cellWidth, statusHeight(), c::cellWidth, c::actionHeight);
     bookmarks->setGeometry(size.width() - 2 * c::cellWidth, statusHeight(), c::cellWidth, c::actionHeight);
-    if (formattingWarning) {
-        formattingWarning->setGeometry(size.width() - 3 * c::cellWidth, statusHeight(), c::cellWidth, c::actionHeight);
+    if (annotate) {
+        annotate->setGeometry(size.width() - 3 * c::cellWidth, statusHeight(), c::cellWidth, c::actionHeight);
     }
-    pageCount->setText(state.pageCount);
-    const int rightActions = formattingWarning && !formattingWarning->isHidden() ? 3 : 2;
-    if (rules->property("formatting_warning").toBool() != (rightActions == 3)) {
-        rules->setProperty("formatting_warning", rightActions == 3);
+    if (search) {
+        search->setGeometry(size.width() - (annotate ? 4 : 3) * c::cellWidth, statusHeight(), c::cellWidth,
+                            c::actionHeight);
+    }
+    if (formattingWarning) {
+        formattingWarning->setGeometry(size.width() - ((annotate ? 4 : 3) + (search ? 1 : 0)) * c::cellWidth,
+                                       statusHeight(), c::cellWidth, c::actionHeight);
+    }
+    const int rightActions =
+        (formattingWarning && !formattingWarning->isHidden() ? 3 : 2) + (annotate ? 1 : 0) + (search ? 1 : 0);
+    if (rules->property("right_actions").toInt() != rightActions) {
+        rules->setProperty("right_actions", rightActions);
         rules->update();
     }
-    const int labelLeft = qMax(exitAction->geometry().right() + 1, size.width() / 3);
-    const int labelRight = qMin(size.width() - rightActions * int(c::cellWidth), 2 * size.width() / 3);
-    const int labelWidth = qMax(0, labelRight - labelLeft);
-    pageCount->setGeometry(labelLeft, exitAction->y(), labelWidth, exitAction->height());
-    pageCount->show();
     for (auto *action : state.topActions)
         action->hide();
-    const bool scrubberShown = scrubber && (state.scrubberVisible || scrubber->hasActions()) && state.visible &&
-                               state.active < 0 && !state.chaptersOpen && !state.settings->isVisible() &&
-                               !state.appearance->isVisible() && !state.stats->isVisible() && !state.light->isVisible();
+    const bool scrubberShown =
+        scrubber &&
+        (state.scrubberVisible || state.active == int(NavigationDestination::Seek) || scrubber->hasActions()) &&
+        state.visible && (state.active < 0 || state.active == int(NavigationDestination::Seek)) &&
+        !state.chaptersOpen && !state.settings->isVisible() && !state.appearance->isVisible() &&
+        !state.stats->isVisible() && !state.light->isVisible();
     bar->setReturnLabel(scrubber ? QString() : state.returnLabel, state.returnNote);
     const int height = bar->navigationHeight();
     bar->setGeometry(0, size.height() - height, size.width(), height);
-    bar->setVisible(state.visible);
+    bar->setVisible(state.visible && !state.settings->isVisible());
     if (scrubber) {
         scrubber->setBarVisible(state.scrubberVisible);
         scrubber->setGeometry(0, toolbarHeight(), size.width(), qMax(1, bar->y() - toolbarHeight()));
@@ -369,8 +417,9 @@ void Navigation::update(QSize size, const NavigationState &state) {
         lowerEdge->hide();
         return;
     }
-    bar->setStatsTab(!state.statsPinned);
     bar->setLightTab(state.lightAvailable);
+    bar->setDefaultView(state.defaultView);
+    bar->setLabelsHidden(state.hideTabLabels);
     for (auto *panel : {state.appearance, state.stats})
         if (panel->isVisible())
             panel->setGeometry(panelBounds(size, panel->height()));
@@ -411,14 +460,9 @@ void Navigation::update(QSize size, const NavigationState &state) {
     if (state.chaptersOpen) {
         state.chapters->stackUnder(upperEdge);
     }
-    // Settings opens raised above the reading bars. Its heavy bottom rule is
-    // upperEdge, so keep the panel beneath it. Move it only when it is above
-    // the rule; restacking an unchanged order would repaint the panel.
-    auto *settings = state.settings;
-    if (settings->isVisible() && settings->parentWidget() == upperEdge->parentWidget()) {
-        const auto siblings = settings->parentWidget()->children();
-        if (siblings.indexOf(settings) > siblings.indexOf(upperEdge))
-            settings->stackUnder(upperEdge);
+    if (state.settings->isVisible()) {
+        upperEdge->hide();
+        lowerEdge->hide();
     }
 }
 bool Navigation::contains(QPoint global) const {

@@ -29,12 +29,14 @@
 #include "interfaces/reader/ui/style/metrics.h"
 #include "reading/reading_density.h"
 #include "storage/reader_storage.h"
+#include "storage/highlight_store.h"
 #include "support/strings.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QBuffer>
 #include <QCommandLineParser>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
 #include <QJsonArray>
@@ -49,6 +51,8 @@
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSlider>
 #include <QTemporaryDir>
 #include <QTest>
@@ -131,9 +135,9 @@ private:
 class Tour {
 public:
     Tour(const QString &book, const QString &output, const QString &group, const QString &theme,
-         const EngineFontInputs &fonts, const QString &placeholder, QSize size)
-        : output(output), group(group), theme(theme), size(size), paths{temporary.path()},
-          host(paths, fonts, placeholder), lookup(std::make_shared<LookupState>()) {
+         const EngineFontInputs &fonts, const QString &placeholder, QSize size, const QString &fixtureDate)
+        : output(output), group(group), theme(theme), bookPath(book), fixtureDate(fixtureDate), size(size),
+          paths{temporary.path()}, host(paths, fonts, placeholder), lookup(std::make_shared<LookupState>()) {
         try {
             require(temporary.isValid(), "Cannot create isolated reader state");
             QDir().mkpath(output);
@@ -168,6 +172,9 @@ public:
             host.configureServices = [this, state = lookup, desktop = group == "native-ui",
                                       catalogue = discoverReadingFonts(fonts.sources)](ReaderHostServices &services) {
                 services.desktopUi = desktop;
+                services.colorDisplay = [] {
+                    return qEnvironmentVariableIsEmpty("KOBALT_MONO_DISPLAY");
+                };
                 services.pageButtons = [this] {
                     return pageButtonsSupported;
                 };
@@ -247,6 +254,62 @@ public:
             qFatal("%s", error.what());
         }
     }
+    void reloadCreatedFixtures() {
+        close();
+        canvas.reset();
+        int stores = 0;
+        QDirIterator files(paths.annotations(), {"bookmarks.json", "highlights.json"}, QDir::Files,
+                           QDirIterator::Subdirectories);
+        while (files.hasNext()) {
+            const QString file = files.next();
+            const auto saved = storage::readJsonFile(file, 1024 * 1024);
+            require(saved.status == storage::ReadStatus::Ok, "Creation-date fixture store is unreadable");
+            auto object = saved.object;
+            const QString key = QFileInfo(file).fileName() == "bookmarks.json" ? "bookmarks" : "highlights";
+            require(object.value(key).isArray(), "Creation-date fixture has no entry array");
+            const auto original = object.value(key).toArray();
+            require(!original.isEmpty(), "Creation-date fixture has no entries");
+            QJsonArray entries;
+            for (const auto &value : original) {
+                require(value.isObject(), "Creation-date fixture entry is not an object");
+                const auto before = value.toObject();
+                require(QDateTime::fromString(before.value("created").toString(), Qt::ISODate).isValid(),
+                        "Creation-date fixture entry has an invalid date");
+                auto after = before;
+                after["created"] = fixtureDate;
+                auto beforeFields = before, afterFields = after;
+                beforeFields.remove("created");
+                afterFields.remove("created");
+                require(beforeFields == afterFields, "Creation-date fixture changed entry fields");
+                entries.append(after);
+            }
+            require(entries.size() == original.size(), "Creation-date fixture changed entry count");
+            object[key] = entries;
+            auto beforeFields = saved.object, afterFields = object;
+            beforeFields.remove(key);
+            afterFields.remove(key);
+            require(beforeFields == afterFields, "Creation-date fixture changed store metadata");
+            require(storage::writeJson(file, object), "Cannot save creation-date fixture");
+            const auto written = storage::readJsonFile(file, 1024 * 1024);
+            require(written.status == storage::ReadStatus::Ok && written.object == object,
+                    "Creation-date fixture did not round trip");
+            ++stores;
+        }
+        require(stores > 0, "Creation-date fixture did not find a saved store");
+        QSignalSpy opened(&host, &test::ReaderHost::opened), failed(&host, &test::ReaderHost::failed);
+        host.open(bookPath, size);
+        waitFor(
+            [&] {
+                return !opened.isEmpty() || !failed.isEmpty();
+            },
+            "Fixture reopen timed out", 60000);
+        require(failed.isEmpty(), "Creation-date fixture could not reopen the book");
+        canvas = std::make_unique<test::ReaderCanvas>(host.window(), size);
+        canvas->resize(size);
+        canvas->show();
+        settled();
+        createdFixturesReloaded = true;
+    }
     ~Tour() {
         close();
     }
@@ -278,6 +341,9 @@ public:
                 return target && target->isVisible() && target->isEnabled();
             },
             "Unavailable control: " + name);
+        auto *pages = host.window()->findChild<QWidget *>("rrSettingsPages");
+        if (pages && pages->isAncestorOf(target))
+            revealControlOption(name);
         clickAt(target->mapTo(canvas->surface(), target->rect().center()), target);
         settled();
     }
@@ -292,6 +358,29 @@ public:
         require(canvas->windowHandle(), "Canvas input window is unavailable");
         QTest::mouseClick(canvas->windowHandle(), Qt::LeftButton, Qt::NoModifier,
                           canvas->surface()->mapTo(canvas.get(), point));
+    }
+    void revealControlOption(const QString &name) {
+        auto *option = widget(name);
+        require(option->isVisible(), "Controls option is hidden: " + name);
+        auto *pages = host.window()->findChild<QWidget *>("rrSettingsPages");
+        auto *clip = host.window()->findChild<QWidget *>("rrSettingsPageClip");
+        if (pages && clip && pages->isAncestorOf(option)) {
+            auto *previous = qobject_cast<QPushButton *>(widget("rrSettingsOptionsPrevious"));
+            auto *next = qobject_cast<QPushButton *>(widget("rrSettingsOptionsNext"));
+            const auto contains = [&] {
+                return clip->rect().contains(option->mapTo(clip, option->rect().center()));
+            };
+            while (!contains() && previous->isVisible() && previous->isEnabled()) {
+                clickAt(previous->mapTo(canvas->surface(), previous->rect().center()), previous);
+                settled();
+            }
+            for (int turn = 0; !contains() && next->isVisible() && next->isEnabled() && turn < 100; ++turn) {
+                clickAt(next->mapTo(canvas->surface(), next->rect().center()), next);
+                settled();
+            }
+            require(contains(), "Settings option is not reachable: " + name);
+        }
+        settled();
     }
     bool lastListPage(const QString &prefix) {
         auto *counter = qobject_cast<QLabel *>(widget(prefix + "Page"));
@@ -408,6 +497,8 @@ public:
                              {"width", size.width()},
                              {"height", size.height()},
                              {"clock", "09:00"},
+                             {"fixture_date", fixtureDate},
+                             {"created_fixtures_reloaded", createdFixturesReloaded},
                              {"battery_percent", 100},
                              {"required_widget", required},
                              {"selected_word", lookup->word},
@@ -657,7 +748,7 @@ public:
                 preview.setProperty("sleep_status", reader::sleepStatusText(status));
                 preview.setProperty("sleep_background", useCover ? "cover" : "page");
                 preview.setPixmap(QPixmap::fromImage(reader::sleepScreenImage(
-                    useCover ? reader::sleepCoverBackground(cover, reading.size(), theme == "dark") : reading,
+                    useCover ? reader::sleepCoverBackground(cover, reading.size()) : reading,
                     strings::get("sleep.percent_read").arg(42), reader::sleepTimeLeft(remaining), theme == "dark",
                     battery, status, !useCover)));
                 preview.show();
@@ -685,12 +776,11 @@ public:
             menu();
             tap("rrSettings");
             capture("display-defaults", "rrDarkMode");
-            tap("rrSettingsAdvanced");
+            tap("rrSettingsDefaults");
             capture("advanced-defaults", "rrInheritTextLayout");
             tap("rrSettingsUI");
             capture("ui-defaults", "rrHideStatusBar");
             tap("rrHideStatusBar");
-            tap("rrHideDeviceOptions");
             tap("rrSettings");
             menu();
             capture("menu-device-chrome", "rrMenuClock");
@@ -739,7 +829,8 @@ public:
                     "Dense chart is clipped by its panel");
             // Dense mode fits all chapters; sparse mode exposes the supported pager.
             tap("rrSettings");
-            tap("rrSettingsStats");
+            tap("rrSettingsDisplay");
+            revealControlOption("rrDenseGraph");
             tap("rrDenseGraph");
             tap("rrSettings");
             pageTap();
@@ -904,6 +995,14 @@ public:
             capture("reading");
             menu();
             capture("menu", "rrBottomNavigation");
+            tap("rrNavSeek");
+            auto *initialThumbnails = static_cast<ui::PageScrubber *>(widget("rrPageScrubber"));
+            waitFor(
+                [&] {
+                    return initialThumbnails->previewsReady();
+                },
+                "Initial menu thumbnails did not render");
+            capture("seek", "rrBottomNavigation");
             const int original = host.session()->page();
             auto *scrubber = dynamic_cast<ui::PageScrubber *>(widget("rrPageScrubber"));
             require(scrubber, "Missing page scrubber");
@@ -915,7 +1014,6 @@ public:
                 "Page preview did not render");
             require(host.session()->page() == original, "Preview moved the reading position");
             capture("page-preview", "rrPageScrubber");
-            scrubber->cancel();
             if (visible("rrScrubberOverviewToggle")) {
                 tap("rrScrubberOverviewToggle");
                 capture("map-expanded", "rrPageScrubber");
@@ -929,7 +1027,6 @@ public:
                     },
                     "Zoomed page preview did not render");
                 capture("zoomed-preview", "rrPageScrubber");
-                scrubber->cancel();
                 int zoomSteps = 0;
                 while (widget("rrScrubberZoomIn")->isEnabled()) {
                     tap("rrScrubberZoomIn");
@@ -951,7 +1048,18 @@ public:
                 },
                 "Chapter preview did not render");
             capture("chapter-preview", "rrPageScrubber");
-            scrubber->cancel();
+            const int destination = scrubber->selectedPage();
+            clickAt(scrubber->mapTo(canvas->surface(), scrubber->previewBounds().center()), scrubber);
+            settled();
+            require(host.session()->page() == destination, "Thumbnail selection missed its destination");
+            require(!visible("rrControlsTop") && !visible("rrBottomNavigation") && !scrubber->isVisible(),
+                    "Thumbnail selection left the reading controls open");
+            capture("preview-destination");
+            menu();
+            capture("preview-return", "rrScrubberReturn");
+            tap("rrScrubberReturn");
+            require(host.session()->page() == original, "Thumbnail return missed the original passage");
+            capture("preview-returned");
             supplementalFonts();
             return;
         }
@@ -995,7 +1103,7 @@ public:
             pageTap();
             menu();
             tap("rrSettings");
-            tap("rrSettingsAdvanced");
+            tap("rrSettingsControls");
             auto *indicatorOption = qobject_cast<QCheckBox *>(widget("rrShowLinkIndicator"));
             require(indicatorOption, "Link indicator setting missing");
             indicatorOption->setChecked(true);
@@ -1068,14 +1176,79 @@ public:
             tap("rrFont");
             tap("rrFontClose");
             tap("rrSettings");
-            for (const auto &tab : {"Display", "Controls", "Advanced", "Stats", "System", "About"}) {
+            for (const auto &tab : {"Display", "Controls", "Defaults", "Styling", "System", "About"}) {
                 tap("rrSettings" + QString(tab));
                 capture(QString(tab).toLower(), "rrGeneralSettings");
-                if (QString(tab) == "Advanced") {
-                    auto *scroll = host.window()->findChild<QScrollArea *>("rrSettingsScroll");
-                    require(scroll, "Settings scroll area missing");
-                    scroll->ensureWidgetVisible(widget("rrAvoidWastefulStyling"));
-                    capture("advanced-content", "rrAvoidWastefulStyling");
+                auto *next = qobject_cast<QPushButton *>(widget("rrSettingsOptionsNext"));
+                int page = 1;
+                while (next->isVisible() && next->isEnabled()) {
+                    tap("rrSettingsOptionsNext");
+                    capture(QString(tab).toLower() + QString("-page-%1").arg(++page), "rrGeneralSettings");
+                    require(page < 100, "Settings pager did not reach its end");
+                }
+                auto *previous = qobject_cast<QPushButton *>(widget("rrSettingsOptionsPrevious"));
+                while (previous->isVisible() && previous->isEnabled())
+                    tap("rrSettingsOptionsPrevious");
+                if (QString(tab) == "System") {
+                    for (const auto &font : {"Ui", "UiMono", "HeaderFooter"}) {
+                        revealControlOption("rr" + QString(font) + "Font");
+                        tap("rr" + QString(font) + "Font");
+                        capture(QString(font).toLower() + "-font-picker", "rrSettingsFontPopup");
+                        QTest::keyClick(widget("rrSettingsFontPopup"), Qt::Key_Escape);
+                        settled();
+                    }
+                    revealControlOption("rrHeaderFooterWeight");
+                    tap("rrHeaderFooterWeight");
+                    capture("headerfooter-weight-picker", "rrHeaderFooterWeightPopup");
+                    QTest::keyClick(widget("rrHeaderFooterWeightPopup"), Qt::Key_Escape);
+                    settled();
+                    revealControlOption("rrHideTabLabels");
+                    capture("hide-tab-labels", "rrHideTabLabels");
+                    tap("rrHideTabLabels");
+                    tap("rrSettings");
+                    capture("tabs-icons-only", "rrBottomNavigation");
+                    tap("rrSettings");
+                    tap("rrSettingsSystem");
+                    revealControlOption("rrHideTabLabels");
+                    tap("rrHideTabLabels");
+                    tap("rrSettings");
+                    capture("tabs-with-labels", "rrBottomNavigation");
+                    tap("rrSettings");
+                }
+                if (QString(tab) == "Defaults") {
+                    revealControlOption("rrDefaultFont");
+                    tap("rrDefaultFont");
+                    capture("default-font", "rrSettingsFontPopup");
+                    QTest::keyClick(widget("rrSettingsFontPopup"), Qt::Key_Escape);
+                    settled();
+                }
+                if (QString(tab) == "Styling") {
+                    for (const auto &family : {"Serif", "Sans", "Mono"}) {
+                        tap("rr" + QString(family) + "Font");
+                        capture("font-fallback-" + QString(family).toLower(), "rrSettingsFontPopup");
+                        if (QString(family) == "Serif") {
+                            auto *next = qobject_cast<QPushButton *>(widget("rrSettingsFontNext"));
+                            int fontPage = 1;
+                            while (next->isVisible() && next->isEnabled()) {
+                                tap("rrSettingsFontNext");
+                                capture(QString("font-fallback-serif-page-%1").arg(++fontPage), "rrSettingsFontPopup");
+                                require(fontPage < 100, "Fallback font pager did not reach its end");
+                            }
+                        }
+                        auto *popup = widget("rrSettingsFontPopup");
+                        QTest::keyClick(popup, Qt::Key_Escape);
+                        settled();
+                    }
+                }
+                if (QString(tab) == "Styling") {
+                    revealControlOption("rrAvoidWastefulStyling");
+                    capture("styling-content", "rrAvoidWastefulStyling");
+                }
+                if (QString(tab) == "Controls") {
+                    revealControlOption("rrEdgeLight");
+                    capture("controls-frontlight", "rrEdgeLight");
+                    tap("rrSettingsDisplay");
+                    tap("rrSettingsControls");
                 }
             }
             tap("rrSettingsDictionaries");
@@ -1100,12 +1273,27 @@ public:
             capture("dictionaries-other", "rrDictionaries");
             dictionaryManagementFixture = false;
             tap("rrSettingsControls");
+            for (const auto &name :
+                 {"rrPageNavigation", "rrTapZones", "rrNavigationBarButtons", "rrShowLinkIndicator"}) {
+                revealControlOption(name);
+                auto *row = widget(name);
+                QTest::mousePress(row, Qt::LeftButton);
+                capture(QString(name).mid(2).toLower() + "-pressed", name);
+                QTest::mouseMove(row, QPoint(-10, -10));
+                QTest::mouseRelease(row, Qt::LeftButton, Qt::NoModifier, QPoint(-10, -10));
+            }
+            revealControlOption("rrDefaultMenuView");
+            tap("rrDefaultMenuView");
+            capture("default-menu-view", "rrMenuViewPopup");
+            tap("rrMenuView_none");
+            revealControlOption("rrNavigationBarButtons");
             tap("rrNavigationBarButtons");
             capture("navigation-bar-buttons", "rrNavigationBarPopup");
             tap("rrNavigationBar_chapters");
             capture("navigation-bar-chapters-selected", "rrNavigationBarButtons");
             tap("rrNavigationBarButtons");
             tap("rrNavigationBar_pages");
+            revealControlOption("rrPageNavigation");
             tap("rrPageNavigation");
             capture("page-navigation", "rrPageNavigationPopup");
             tap("rrNavigation_swipes_only");
@@ -1119,6 +1307,10 @@ public:
             pageButtonsSupported = true;
             tap("rrTapZones");
             capture("tap-zones", "rrTapZonesPopup");
+            tap("rrTapZones_reversed");
+            capture("tap-zones-reversed-selected", "rrTapZones");
+            tap("rrTapZones");
+            capture("tap-zones-reversed", "rrTapZonesPopup");
             tap("rrTapZones_top_bottom");
             tap("rrTapZones");
             capture("tap-zones-top-bottom", "rrTapZonesPopup");
@@ -1132,7 +1324,7 @@ public:
             tap("rrNavigation_taps_and_swipes");
             tap("rrTapZones");
             tap("rrTapZones_left_right");
-            tap("rrSettingsAdvanced");
+            tap("rrSettingsDefaults");
             tap("rrRestoreDefaults");
             capture("restore-confirmation", "rrConfirmDefaults");
             tap("rrKeepDefaults");
@@ -1365,7 +1557,7 @@ public:
             return;
         }
         if (group == "search") {
-            tap("rrNavSearch");
+            tap("rrSearchOpen");
             capture("empty", "rrSearch");
             auto *query = qobject_cast<QLineEdit *>(widget("rrSearchQuery"));
             require(query, "Search editor missing");
@@ -1388,7 +1580,7 @@ public:
             }
             tap("rrSearchResult0");
             menu();
-            tap("rrNavSearch");
+            tap("rrSearchOpen");
             capture("return-and-edit", "rrSearch");
             require(visible("rrSearchOriginal"), "Search original-position action missing");
             query->setText("zzzzmissingword");
@@ -1425,6 +1617,578 @@ public:
             require(clear->grab().toImage() == replayed, "Repeated search clear replay changes pixels");
             return;
         }
+        if (group == "annotations" || group == "menu-thumbnails") {
+            auto savedHighlights = [&] {
+                QDirIterator files(paths.annotations(), {"highlights.json"}, QDir::Files, QDirIterator::Subdirectories);
+                QJsonArray entries;
+                int stores = 0;
+                while (files.hasNext()) {
+                    const auto saved = storage::readJsonFile(files.next(), HighlightStore::maxFileBytes);
+                    require(saved.status == storage::ReadStatus::Ok, "Saved highlights are unreadable");
+                    entries = saved.object.value("highlights").toArray();
+                    ++stores;
+                }
+                require(stores <= 1, "Annotation tour created multiple highlight stores");
+                return entries;
+            };
+            auto waitForSavedPaint = [&] {
+                // Saving first resolves stored pages, then queues their visible geometry.
+                // Two following replies let both earlier jobs finish before image checks.
+                const auto saved = savedHighlights();
+                const auto entry = saved.isEmpty() ? QJsonObject{{"start", host.session()->state().value("position")},
+                                                                 {"end", host.session()->state().value("position")}}
+                                                   : saved.first().toObject();
+                for (int phase = 0; phase < 2; ++phase) {
+                    auto done = std::make_shared<bool>(false);
+                    host.session()->rangeRects(entry.value("start").toString(), entry.value("end").toString(),
+                                               [done](QVector<QRect>) {
+                                                   *done = true;
+                                               });
+                    waitFor(
+                        [&] {
+                            return *done;
+                        },
+                        "Saved annotation geometry barrier timed out");
+                }
+            };
+            auto chooseBoundary = [&](const QString &action) {
+                const auto before = savedHighlights();
+                tap(action);
+                waitFor(
+                    [&] {
+                        return savedHighlights() != before;
+                    },
+                    "Boundary choice did not persist its changed range");
+                require(!visible("rrAnnotationPopover"), "Successful save opened another popup");
+                require(visible("rrAnnotationHeader"), "Successful save left annotation mode");
+                require(!host.window()->findChild<QWidget *>("rrAnnotationUndo"), "Removed saved Undo control remains");
+                waitForSavedPaint();
+            };
+            auto editSavedAt = [&](QPoint point) {
+                auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+                clickAt(page->mapTo(canvas->surface(), point + QPoint(0, page->topHeight())), page);
+                waitFor(
+                    [&] {
+                        return visible("rrAnnotationEdit") && visible("rrAnnotationRemove");
+                    },
+                    "Saved range did not reopen its deliberate actions");
+                tap("rrAnnotationEdit");
+            };
+            tap("rrBookmarks");
+            tap("rrAnnotationsTab");
+            capture("empty", "rrBookmarkList");
+            tap("rrBookmarkListClose");
+            const auto first = find("Alice was beginning");
+            const auto firstPoint = selection(first);
+            menu();
+            const QImage image = host.window()->findChild<ReadingPage *>("rrPage")->image;
+            const auto position = host.session()->state().value("position");
+            tap("rrAnnotate");
+            require(!host.window()->findChild<QWidget *>("rrAnnotationFooter"), "Annotation mode kept its bottom bar");
+            require(host.window()->findChild<ReadingPage *>("rrPage")->image == image &&
+                        host.session()->state().value("position") == position,
+                    "Annotation mode changed the reading image or position");
+            capture("mode", "rrAnnotationHeader");
+            auto startAt = [&](QPoint point) {
+                auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+                clickAt(page->mapTo(canvas->surface(), point + QPoint(0, page->topHeight())), page);
+                waitFor(
+                    [&] {
+                        return page->annotationContains(point);
+                    },
+                    "First tap did not mark its start");
+                require(!visible("rrAnnotationPopover"), "First tap opened a word menu");
+                require(savedHighlights().isEmpty(), "First tap persisted a highlight");
+            };
+            auto tapWord = [&](QPoint point) {
+                auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+                clickAt(page->mapTo(canvas->surface(), point + QPoint(0, page->topHeight())), page);
+                waitFor(
+                    [&] {
+                        return visible("rrAnnotationHighlightWord") || visible("rrAnnotationEnd");
+                    },
+                    "Word-specific annotation menu did not open");
+                require(visible("rrAnnotationStop") && visible("rrAnnotationCancel") && visible("rrAnnotationDismiss"),
+                        "Draft word menu lost Cancel, Stop or Dismiss");
+                require(!visible("rrAnnotationStart") && !visible("rrAnnotationSavedOptions"),
+                        "Draft word menu retained removed actions");
+                require(visible("rrAnnotationHighlightWord") != visible("rrAnnotationEnd"),
+                        "Same-start and other-word actions appeared together");
+                waitForSavedPaint();
+            };
+            startAt(firstPoint);
+            capture("start-outline", "rrAnnotationHeader");
+            tapWord(firstPoint);
+            auto *annotationPopup = widget("rrAnnotationPopover");
+            auto *pointer = annotationPopup->findChild<QWidget *>("rrAnchorPointer");
+            require(pointer && pointer->isVisible() && pointer->property("card_below").toBool(),
+                    "First-word menu did not use the native pointer below its word");
+            capture("start-choice", "rrAnnotationPopover");
+            if (visible("rrAnnotationPalette")) {
+                tap("rrAnnotationColor_green");
+                capture("color-green-choice", "rrAnnotationPopover");
+            } else {
+                capture("monochrome-boundary", "rrAnnotationPopover");
+            }
+            require(!visible("rrAnnotationEnd"), "Retapping the chosen start offered End");
+            tap("rrAnnotationDismiss");
+            require(!visible("rrAnnotationPopover"), "Dismiss kept the word menu open");
+            capture("candidate-dismissed", "rrAnnotationHeader");
+            tapWord(firstPoint);
+            capture("cancel-original-word", "rrAnnotationPopover");
+            tap("rrAnnotationCancel");
+            require(!visible("rrAnnotationPopover") && visible("rrAnnotationHeader"),
+                    "Cancel did not clear the draft while keeping mode");
+            require(savedHighlights().isEmpty(), "Cancel saved an unfinished range");
+            capture("selection-cancelled", "rrAnnotationHeader");
+            startAt(firstPoint);
+            auto *cancelPage = host.window()->findChild<ReadingPage *>("rrPage");
+            clickAt(cancelPage->mapTo(canvas->surface(), QPoint(0, cancelPage->height() / 2)), cancelPage);
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationCancel");
+                },
+                "Blank-space draft menu did not expose Cancel");
+            capture("cancel-blank-space", "rrAnnotationPopover");
+            tap("rrAnnotationDismiss");
+            tapWord(firstPoint);
+            tap("rrAnnotationStop");
+            require(!visible("rrAnnotationSave"), "Incomplete draft offered a save");
+            capture("unsaved-choice", "rrAnnotationPopover");
+            tap("rrAnnotationDismiss");
+            tap("rrAnnotationClose");
+            require(!visible("rrAnnotationHeader") && !visible("rrAnnotationPopover"),
+                    "Close did not immediately discard the unfinished selection");
+            require(savedHighlights().isEmpty(), "Close saved an unfinished range");
+            capture("closed-unfinished-selection", "rrPage");
+            menu();
+            tap("rrAnnotate");
+            startAt(firstPoint);
+            tapWord(firstPoint);
+            require(visible("rrAnnotationHighlightWord"), "Fresh word has no immediate highlight action");
+            capture("highlight-word-choice", "rrAnnotationPopover");
+            chooseBoundary("rrAnnotationHighlightWord");
+            capture("highlight-word-saved", "rrAnnotationHeader");
+            capture("one-word-saved", "rrAnnotationHeader");
+            require(savedHighlights().size() == 1, "Highlight word did not autosave exactly one entry");
+            if (group == "menu-thumbnails") {
+                tap("rrAnnotationClose");
+                auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+                clickAt(page->mapTo(canvas->surface(), page->bookmarkCorner().center()), page);
+                waitFor(
+                    [&] {
+                        return page->bookmarked;
+                    },
+                    "Thumbnail bookmark did not save");
+                menu();
+                tap("rrNavSeek");
+                auto *thumbnails = static_cast<ui::PageScrubber *>(widget("rrPageScrubber"));
+                waitFor(
+                    [&] {
+                        return thumbnails->previewsReady();
+                    },
+                    "Highlighted menu thumbnails did not render");
+                capture("menu-thumbnails-highlights", "rrPageScrubber");
+                auto *next = widget("rrPreviewNextPage");
+                const QRect visibleCard = next->geometry().intersected(thumbnails->rect());
+                require(!visibleCard.isEmpty(), "Next thumbnail has no visible touch area");
+                clickAt(thumbnails->mapTo(canvas->surface(), visibleCard.center()), next);
+                waitFor(
+                    [&] {
+                        return thumbnails->previewsReady();
+                    },
+                    "Adjacent thumbnail did not render");
+                capture("menu-thumbnails-bookmark-previous", "rrPageScrubber");
+                return;
+            }
+            auto *readyPage = host.window()->findChild<ReadingPage *>("rrPage");
+            clickAt(readyPage->mapTo(canvas->surface(), firstPoint + QPoint(0, readyPage->topHeight())), readyPage);
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationEdit") && visible("rrAnnotationRemove");
+                },
+                "Saved highlight could not reopen its actions");
+            capture("ready-retap", "rrAnnotationPopover");
+            if (visible("rrAnnotationPalette")) {
+                const auto beforeColor = savedHighlights().first().toObject();
+                tap("rrAnnotationColor_blue");
+                waitFor(
+                    [&] {
+                        return savedHighlights().first().toObject().value("color") == "blue";
+                    },
+                    "Saved palette did not persist blue");
+                waitForSavedPaint();
+                require(savedHighlights().first().toObject().value("id") == beforeColor.value("id") &&
+                            savedHighlights().first().toObject().value("text") == beforeColor.value("text"),
+                        "Recolor changed highlight identity or text");
+                capture("saved-color-blue", "rrAnnotationPopover");
+            } else {
+                capture("monochrome-saved-actions", "rrAnnotationPopover");
+            }
+            tap("rrAnnotationEdit");
+            auto *readingPage = host.window()->findChild<ReadingPage *>("rrPage");
+            QPoint bottomWord;
+            const QRect banner = widget("rrAnnotationHeader")->geometry();
+            for (int y = readingPage->image.height() - ui::px(70);
+                 bottomWord.isNull() && y > readingPage->image.height() * 4 / 5; y -= ui::px(20)) {
+                for (int fraction : {2, 1, 3}) {
+                    auto word = std::make_shared<WordSelection>();
+                    auto done = std::make_shared<bool>(false);
+                    host.session()->wordAt({readingPage->image.width() * fraction / 4, y},
+                                           [word, done](WordSelection value) {
+                                               *word = std::move(value);
+                                               *done = true;
+                                           });
+                    waitFor(
+                        [&] {
+                            return *done;
+                        },
+                        "Bottom-word lookup timed out");
+                    if (!word->rectangles.isEmpty()) {
+                        const QRect wordBounds(
+                            readingPage->mapTo(host.window(), word->rectangles.first().topLeft() +
+                                                                  QPoint(0, readingPage->topHeight())),
+                            word->rectangles.first().size());
+                        if (banner.intersects(wordBounds)) {
+                            continue;
+                        }
+                        bottomWord = word->rectangles.first().center();
+                        break;
+                    }
+                }
+            }
+            require(!bottomWord.isNull(), "No bottom-of-page annotation word available");
+            tapWord(bottomWord);
+            require(!pointer->property("card_below").toBool(), "Bottom-word menu did not point down from above");
+            capture("bottom-boundary-choice", "rrAnnotationPopover");
+            chooseBoundary("rrAnnotationEnd");
+            const auto expandedStored = savedHighlights();
+            const QImage expandedDraft = readingPage->snapshot();
+            editSavedAt(bottomWord);
+            tapWord(bottomWord);
+            capture("edit-end-only", "rrAnnotationPopover");
+            tap("rrAnnotationCancel");
+            waitForSavedPaint();
+            require(savedHighlights() == expandedStored && readingPage->snapshot() == expandedDraft,
+                    "Cancelling an end adjustment changed the original range");
+            const QPoint nearerEnd = selection(find("getting"));
+            editSavedAt(firstPoint);
+            tapWord(nearerEnd);
+            chooseBoundary("rrAnnotationEnd");
+            require(readingPage->snapshot() != expandedDraft, "Moving the end inward left the draft unchanged");
+            editSavedAt(firstPoint);
+            tapWord(bottomWord);
+            chooseBoundary("rrAnnotationEnd");
+            require(savedHighlights() == expandedStored, "Moving the end outward failed to restore the stored range");
+            require(readingPage->snapshot() == expandedDraft, "Moving the end outward failed to restore the range");
+            editSavedAt(bottomWord);
+            require(!visible("rrAnnotationPopover"), "Adjust kept the saved popup open");
+            const auto last = find("Dinah");
+            const auto lastPoint = selection(last);
+            tapWord(lastPoint);
+            capture("extend-choice", "rrAnnotationPopover");
+            chooseBoundary("rrAnnotationEnd");
+            capture("cross-page-saved", "rrAnnotationHeader");
+            editSavedAt(lastPoint);
+            waitForSavedPaint();
+            capture("cross-page-outline", "rrAnnotationHeader");
+            tap("rrAnnotationClose");
+            require(!visible("rrAnnotationHeader"), "Closing unchanged edit requested a confirmation");
+            capture("saved-passage");
+            menu();
+            auto *thumbnails = static_cast<ui::PageScrubber *>(widget("rrPageScrubber"));
+            waitFor(
+                [&] {
+                    return thumbnails->previewsReady();
+                },
+                "Highlighted page thumbnails did not render");
+            capture("menu-thumbnails-highlights", "rrPageScrubber");
+            pageTap();
+            require(!visible("rrControlsTop"), "Tapping the current thumbnail did not close the menu");
+            const auto persisted = savedHighlights();
+            require(persisted.size() == 1, "Cross-page highlight did not persist as one entry");
+            const auto interior = find("pictures");
+            const auto interiorPoint = selection(interior);
+            menu();
+            tap("rrAnnotate");
+            auto tapInterior = [&] {
+                auto *page = host.window()->findChild<ReadingPage *>("rrPage");
+                clickAt(page->mapTo(canvas->surface(), interiorPoint + QPoint(0, page->topHeight())), page);
+            };
+            auto tapSavedWord = [&] {
+                tapInterior();
+                waitFor(
+                    [&] {
+                        return visible("rrAnnotationEdit") && visible("rrAnnotationRemove");
+                    },
+                    "Saved highlight word did not open its actions");
+            };
+            const auto overlappingStart = find("Alice was");
+            auto *overlapPage = host.window()->findChild<ReadingPage *>("rrPage");
+            const QPoint overlapPoint = selection(overlappingStart);
+            clickAt(overlapPage->mapTo(canvas->surface(), overlapPoint + QPoint(0, overlapPage->topHeight())),
+                    overlapPage);
+            waitFor(
+                [&] {
+                    return overlapPage->annotationContains(overlapPoint);
+                },
+                "Overlapping draft start was not marked");
+            require(!visible("rrAnnotationPopover"), "Overlapping draft first tap opened a menu");
+            find("pictures");
+            const QImage growingDraft = host.window()->findChild<ReadingPage *>("rrPage")->snapshot();
+            tapWord(interiorPoint);
+            require(!visible("rrAnnotationSavedOptions") && !visible("rrAnnotationStart"),
+                    "Draft overlap retained removed actions");
+            require(visible("rrAnnotationEnd") && !visible("rrAnnotationHighlightWord"),
+                    "Other saved word did not offer End alone");
+            capture("draft-over-saved-word", "rrAnnotationPopover");
+            tap("rrAnnotationDismiss");
+            require(host.window()->findChild<ReadingPage *>("rrPage")->snapshot() == growingDraft,
+                    "Dismissing saved options changed the growing draft");
+            tapWord(interiorPoint);
+            chooseBoundary("rrAnnotationEnd");
+            waitFor(
+                [&] {
+                    return savedHighlights().size() == 2;
+                },
+                "Second overlapping passage did not persist");
+            tapInterior();
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationMatch0") && visible("rrAnnotationMatch1");
+                },
+                "Overlapping saved passages did not open a chooser");
+            capture("overlap-choice", "rrAnnotationPopover");
+            tap("rrAnnotationDismiss");
+            require(savedHighlights().size() == 2, "Dismissing overlap choices changed saved passages");
+            tapInterior();
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationMatch1");
+                },
+                "Overlap chooser did not reopen");
+            tap("rrAnnotationMatch1");
+            capture("overlap-target-actions", "rrAnnotationRemove");
+            tap("rrAnnotationRemove");
+            capture("overlap-remove-confirmation", "rrConfirmRemoveAnnotation");
+            tap("rrConfirmRemoveAnnotation");
+            waitFor(
+                [&] {
+                    return savedHighlights() == persisted;
+                },
+                "Removing one overlap changed the other passage");
+            tapSavedWord();
+            capture("saved-word-actions", "rrAnnotationPopover");
+            tap("rrAnnotationDismiss");
+            require(savedHighlights() == persisted, "Dismissing saved actions changed persistence");
+            capture("saved-word-dismissed", "rrAnnotationHeader");
+            tapSavedWord();
+            tap("rrAnnotationEdit");
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationHeader") && !visible("rrAnnotationPopover");
+                },
+                "Page edit did not arm boundary adjustment");
+            capture("edit-from-page", "rrAnnotationHeader");
+            tap("rrAnnotationClose");
+            require(savedHighlights() == persisted, "Canceling page edit changed the saved highlight");
+            reloadCreatedFixtures();
+            menu();
+            tap("rrBookmarks");
+            tap("rrAnnotationsTab");
+            waitFor(
+                [&] {
+                    return visible("rrAnnotation0");
+                },
+                "Saved passage was not listed");
+            require(!visible("rrAnnotation1"), "One cross-page highlight created multiple list entries");
+            capture("list", "rrBookmarkList");
+            tap("rrAnnotation0");
+            waitFor(
+                [&] {
+                    return !host.session()->busy();
+                },
+                "Annotation row did not navigate");
+            require(!visible("rrAnnotationHeader"), "Annotation row unexpectedly entered adjustment mode");
+            menu();
+            tap("rrAnnotate");
+            auto *listedPage = host.window()->findChild<ReadingPage *>("rrPage");
+            clickAt(listedPage->mapTo(canvas->surface(), firstPoint + QPoint(0, listedPage->topHeight())), listedPage);
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationEdit");
+                },
+                "Listed range did not retain in-page adjustment");
+            capture("passage-actions", "rrAnnotationEdit");
+            tap("rrAnnotationEdit");
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationHeader") && !visible("rrAnnotationPopover");
+                },
+                "List edit did not arm boundary adjustment");
+            capture("edit", "rrAnnotationHeader");
+            tap("rrAnnotationClose");
+            menu();
+            tap("rrBookmarks");
+            tap("rrAnnotationsTab");
+            tap("rrAnnotationRemove0");
+            capture("remove-confirmation", "rrConfirmRemoveAnnotation");
+            tap("rrKeepAnnotation");
+            require(visible("rrAnnotation0"), "Canceling removal removed the passage");
+            tap("rrBookmarkListClose");
+            if (visible("rrControlsTop")) {
+                pageTap();
+            }
+            find("pictures");
+            menu();
+            tap("rrAnnotate");
+            tapSavedWord();
+            tap("rrAnnotationRemove");
+            capture("page-remove-confirmation", "rrConfirmRemoveAnnotation");
+            tap("rrConfirmRemoveAnnotation");
+            waitFor(
+                [&] {
+                    return savedHighlights().isEmpty();
+                },
+                "Page removal kept the cross-page highlight");
+            capture("removed-passage", "rrAnnotationHeader");
+            const auto punctuationHit = find(QString::fromUtf8("conversations?”"));
+            const auto punctuationPoint = selection(punctuationHit);
+            startAt(punctuationPoint);
+            tapWord(punctuationPoint);
+            require(visible("rrAnnotationHighlightWord") && !visible("rrAnnotationEnd"),
+                    "Same punctuation-adjacent word did not offer Highlight word alone");
+            capture("punctuation-word-choice", "rrAnnotationPopover");
+            tap("rrAnnotationCancel");
+            const auto fullSentence = find("Alice was beginning");
+            auto sentenceRects = std::make_shared<QVector<QRect>>();
+            auto sentenceDone = std::make_shared<bool>(false);
+            host.session()->rangeRects(fullSentence.start, fullSentence.end,
+                                       [sentenceRects, sentenceDone](QVector<QRect> rectangles) {
+                                           *sentenceRects = std::move(rectangles);
+                                           *sentenceDone = true;
+                                       });
+            waitFor(
+                [&] {
+                    return *sentenceDone;
+                },
+                "Sentence start geometry timed out");
+            require(!sentenceRects->isEmpty(), "Sentence start has no geometry");
+            startAt(QPoint(sentenceRects->first().left() + ui::px(4), sentenceRects->first().center().y()));
+            find(QString::fromUtf8("conversations?”"));
+            tapWord(punctuationPoint);
+            require(visible("rrAnnotationEnd") && !visible("rrAnnotationEndAfterPunctuation") &&
+                        !visible("rrAnnotationStartBeforePunctuation"),
+                    "Punctuation word did not use ordinary boundary actions");
+            // Resolve the range preview's second geometry job before capture.
+            waitForSavedPaint();
+            capture("end-candidate-preview", "rrAnnotationPopover");
+            tap("rrAnnotationDismiss");
+            capture("end-candidate-dismissed", "rrAnnotationHeader");
+            require(savedHighlights().isEmpty(), "Candidate preview persisted an unconfirmed range");
+            tapWord(punctuationPoint);
+            waitForSavedPaint();
+            capture("punctuation-end-choice", "rrAnnotationPopover");
+            chooseBoundary("rrAnnotationEnd");
+            capture("punctuation-saved", "rrAnnotationHeader");
+            waitFor(
+                [&] {
+                    return savedHighlights().size() == 1;
+                },
+                "Automatic punctuation passage did not persist");
+            const auto automaticText = savedHighlights().first().toObject().value("text").toString();
+            require(automaticText.startsWith("Alice was beginning") &&
+                        automaticText.endsWith(QString::fromUtf8("conversations?”")),
+                    "Ordinary End did not save the full sentence and trailing punctuation");
+            auto *punctuationPage = host.window()->findChild<ReadingPage *>("rrPage");
+            clickAt(
+                punctuationPage->mapTo(canvas->surface(), punctuationPoint + QPoint(0, punctuationPage->topHeight())),
+                punctuationPage);
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationRemove");
+                },
+                "Saved punctuation word did not open actions");
+            tap("rrAnnotationRemove");
+            tap("rrConfirmRemoveAnnotation");
+            waitFor(
+                [&] {
+                    return savedHighlights().isEmpty();
+                },
+                "Removing punctuation passage kept its stored entry");
+            const auto quote = find("Curiouser and curiouser");
+            sentenceRects->clear();
+            *sentenceDone = false;
+            host.session()->rangeRects(quote.start, quote.end,
+                                       [sentenceRects, sentenceDone](QVector<QRect> rectangles) {
+                                           *sentenceRects = std::move(rectangles);
+                                           *sentenceDone = true;
+                                       });
+            waitFor(
+                [&] {
+                    return *sentenceDone;
+                },
+                "Quoted sentence start geometry timed out");
+            require(!sentenceRects->isEmpty(), "Quoted sentence start has no geometry");
+            startAt(QPoint(sentenceRects->first().left() + ui::px(4), sentenceRects->first().center().y()));
+            require(!visible("rrAnnotationStartBeforePunctuation") && !visible("rrAnnotationEndAfterPunctuation"),
+                    "Quoted word exposed a manual punctuation action");
+            capture("automatic-quote-start", "rrAnnotationHeader");
+            const QPoint quoteEndPoint = selection(find("and curiouser!"));
+            tapWord(quoteEndPoint);
+            chooseBoundary("rrAnnotationEnd");
+            capture("automatic-quote-saved", "rrAnnotationHeader");
+            waitFor(
+                [&] {
+                    return savedHighlights().size() == 1;
+                },
+                "Quoted sentence did not persist");
+            require(savedHighlights().first().toObject().value("text").toString() ==
+                        QString::fromUtf8("“Curiouser and curiouser!”"),
+                    "Ordinary Start and End did not save paired quotation punctuation");
+            const auto quotedSaved = savedHighlights();
+            auto *savedPage = host.window()->findChild<ReadingPage *>("rrPage");
+            clickAt(savedPage->mapTo(canvas->surface(),
+                                     sentenceRects->first().center() + QPoint(0, savedPage->topHeight())),
+                    savedPage);
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationEdit");
+                },
+                "Saved highlight actions did not open");
+            require(visible("rrAnnotationEdit") && visible("rrAnnotationStop"),
+                    "Saved highlight menu has no edit or Stop action");
+            tap("rrAnnotationStop");
+            require(!visible("rrAnnotationPopover") && savedHighlights() == quotedSaved,
+                    "Stopping highlighting changed the saved passage");
+            menu();
+            tap("rrSettings");
+            tap("rrSettingsControls");
+            qobject_cast<QCheckBox *>(widget("rrMinimalAnnotationMode"))->setChecked(true);
+            tap("rrSettings");
+            readingPage = host.window()->findChild<ReadingPage *>("rrPage");
+            const auto minimalImage = readingPage->image;
+            const auto minimalPosition = host.session()->state().value("position");
+            tap("rrAnnotate");
+            require(!visible("rrAnnotationHeader") && readingPage->image == minimalImage &&
+                        host.session()->state().value("position") == minimalPosition,
+                    "Minimal annotation mode changed the page or showed its bar");
+            capture("minimal-mode", "rrPage");
+            clickAt(readingPage->mapTo(canvas->surface(), QPoint(0, readingPage->height() / 2)), readingPage);
+            waitFor(
+                [&] {
+                    return visible("rrAnnotationStop");
+                },
+                "Blank space did not offer Stop highlighting");
+            require(visible("rrAnnotationDismiss") && !visible("rrAnnotationStart"),
+                    "Blank annotation menu has incorrect actions");
+            capture("minimal-blank-exit", "rrAnnotationPopover");
+            tap("rrAnnotationStop");
+            require(!visible("rrAnnotationPopover") && savedHighlights() == quotedSaved,
+                    "Minimal Stop changed saved highlights or kept its menu");
+            menu();
+            return;
+        }
         if (group == "bookmarks") {
             tap("rrBookmarks");
             capture("empty", "rrBookmarkList");
@@ -1434,6 +2198,7 @@ public:
             clickAt(page->mapTo(canvas->surface(), page->bookmarkCorner().center()), page);
             settled();
             capture("ribbon");
+            reloadCreatedFixtures();
             menu();
             tap("rrBookmarks");
             waitFor(
@@ -1519,7 +2284,8 @@ public:
 private:
     bool dictionaryManagementFixture = false;
     bool pageButtonsSupported = true;
-    QString output, group, theme;
+    QString output, group, theme, bookPath, fixtureDate;
+    bool createdFixturesReloaded = false;
     QSize size;
     QTemporaryDir temporary;
     storage::Paths paths;
@@ -1537,7 +2303,7 @@ int main(int argc, char **argv) {
     test::applyHostStyle();
     QCommandLineParser parser;
     parser.addHelpOption();
-    for (const auto &name : {"book", "output", "group", "theme", "width", "height", "only", "ppi"})
+    for (const auto &name : {"book", "output", "group", "theme", "width", "height", "only", "ppi", "fixture-date"})
         parser.addOption(QCommandLineOption(name, name, "value"));
     parser.process(app);
     qputenv("KOBALT_SCREENSHOT_ONLY", parser.value("only").toUtf8());
@@ -1569,6 +2335,11 @@ int main(int argc, char **argv) {
                 }
                 require(builtIn && sideloaded, "Font fixture sources were not discovered");
             }
+            const QString fixtureDate =
+                parser.isSet("fixture-date") ? parser.value("fixture-date") : "2000-01-01T12:00:00Z";
+            const auto timestamp = QDateTime::fromString(fixtureDate, Qt::ISODate);
+            require(timestamp.isValid() && timestamp.toUTC().toString(Qt::ISODate) == fixtureDate,
+                    "Fixture date must be a canonical UTC timestamp");
             bool densityValid = true;
             const int ppi = parser.isSet("ppi") ? parser.value("ppi").toInt(&densityValid) : 300;
             require(densityValid && ppi > 0, "Density must be positive");
@@ -1578,7 +2349,7 @@ int main(int argc, char **argv) {
             {
                 Tour tour(parser.value("book"), parser.value("output"), parser.value("group"), parser.value("theme"),
                           fonts, placeholderFontFamily(assets, copies),
-                          {parser.value("width").toInt(), parser.value("height").toInt()});
+                          {parser.value("width").toInt(), parser.value("height").toInt()}, fixtureDate);
                 tour.run();
             }
             app.exit(0);

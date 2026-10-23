@@ -68,6 +68,15 @@ int main(int argc, char **argv) {
             if (word.text.isEmpty())
                 continue;
             require(!model.rangeRects(word.start, word.end).isEmpty(), "Vertical selection lost its highlight");
+            const auto geometry = model.annotationGeometry(word.start, word.end);
+            require(geometry.vertical && geometry.start.visible && geometry.end.visible,
+                    "Vertical source endpoints or explicit writing axis are missing");
+            require(geometry.start.outward == QPoint(0, -1) && geometry.end.outward == QPoint(0, 1),
+                    "Vertical endpoint normals did not rotate with the source glyph");
+            require(geometry.start.first.y() == geometry.start.last.y() &&
+                        geometry.end.first.y() == geometry.end.last.y() &&
+                        geometry.start.first.y() < geometry.end.first.y(),
+                    "Vertical endpoint spans did not rotate across the column");
             require(model.goTo(word.start), "Vertical selection position cannot be restored");
             selected = true;
         }

@@ -8,9 +8,33 @@
 #include <memory>
 
 namespace kobalt {
+struct ReaderMarkupRange {
+    QString start, end, color;
+    bool operator==(const ReaderMarkupRange &other) const {
+        return start == other.start && end == other.end && color == other.color;
+    }
+};
+struct ReaderMarkupRequest {
+    QVector<ReaderMarkupRange> saved;
+    QString draftStart, draftEnd;
+    bool operator==(const ReaderMarkupRequest &other) const {
+        return saved == other.saved && draftStart == other.draftStart && draftEnd == other.draftEnd;
+    }
+};
+struct ReaderMarkupFrame {
+    // Geometry belongs to these exact raw pixels and this immutable request.
+    // The request echo lets a closed draft discard only its own stale geometry.
+    ReaderMarkupRequest request;
+    quint64 generation = 0;
+    qint64 imageKey = 0;
+    QVector<QPair<QVector<QRect>, QString>> saved;
+    AnnotationGeometry draft;
+    int resolvedRanges = 0;
+};
 struct ReaderFrame {
     int turnDirection = 0;
     QImage image;
+    ReaderMarkupFrame markup;
     // Changed rectangle against the image with cache key `damageFrom`, if the
     // worker prepared it before this turn. `damageFrom` is 0 otherwise.
     QRect damage;
@@ -113,20 +137,36 @@ public:
     void compareNativePosition(const QString &location, std::function<void(PositionComparison)> finished);
     // Bookmark lookups on the engine thread. They report nothing when the
     // layout changed before they finished; the caller asks again.
-    void bookmarkPages(QStringList positions, std::function<void(QVector<int>)> finished);
+    void bookmarkPages(QStringList positions, std::function<void(QVector<int>)> finished, bool rangeEndpoints = false);
     void pageSummary(int page, std::function<void(QString position, QString excerpt)> finished);
-    // Renders a bounded thumbnail without moving the reading position. Only
+    // Renders a bounded thumbnail with saved highlights without moving the reading position. Only
     // the latest request can finish; navigation, reflow and cancellation drop it.
     void previewPage(int page, QSize bounds, std::function<void(QImage)> finished);
     void cancelPagePreview();
+    // One worker job resolves all eligible passages. Stale replies contain no indices.
+    void intersectingRanges(const QString &start, const QString &end, QVector<QPair<QString, QString>> ranges,
+                            std::function<void(QVector<int>)> finished);
+    void annotationTokenAt(QPoint point, std::function<void(AnnotationToken)> finished);
+    void annotationRange(const QString &startTokenStart, const QString &startTokenEnd, const QString &endTokenStart,
+                         const QString &endTokenEnd, std::function<void(TextRange)> finished,
+                         bool endTokenPolicy = false, bool startTokenPolicy = false);
+    void annotationRange(const QString &start, const QString &end, std::function<void(TextRange)> finished);
+    void textRange(const QString &start, const QString &end, std::function<void(TextRange)> finished);
     void wordAt(QPoint point, std::function<void(WordSelection)> finished);
     void linkDetails(const QString &source, std::function<void(LinkDetails)> finished);
     const QVector<PageLink> &pageLinks() const {
         return frame.links;
     }
+    // Layout changes restart an unfinished query. Its first batch replaces prior results.
+    // Explicit cancellation or a new source discards both running and queued searches.
     void search(const QString &query, std::function<void(SearchBatch)> finished);
     void cancelSearch();
+    void annotationGeometry(const QString &start, const QString &end, std::function<void(AnnotationGeometry)> finished);
     void rangeRects(const QString &start, const QString &end, std::function<void(QVector<QRect>)> finished);
+    void rangeRects(QVector<QPair<QString, QString>> ranges, std::function<void(QVector<QRect>)> finished);
+    // Stable groups for independently colored ranges, resolved in one worker job.
+    void rangeRectGroups(QVector<QPair<QString, QString>> ranges,
+                         std::function<void(QVector<QVector<QRect>>)> finished);
     void resize(QSize size);
     bool busy() const {
         return running;
@@ -154,6 +194,20 @@ public:
     QImage image() const {
         return frame.image;
     }
+    // Stores an immutable source snapshot without rendering or queuing work.
+    // At most 2000 saved ranges and 4096 characters per anchor are accepted.
+    // Invalid requests leave the prior snapshot and generation unchanged.
+    quint64 setMarkup(ReaderMarkupRequest request);
+    quint64 markupGeneration() const {
+        return markupGeneration_;
+    }
+    const ReaderMarkupFrame &markup() const {
+        return frame.markup;
+    }
+    // Prepare markup for an already captured image without rendering it again.
+    // Completion runs while this session lives, false on busy or stale work.
+    // Empty requests complete immediately. No updated notification is emitted.
+    void captureMarkup(std::function<void(bool)> finished);
     QJsonObject state() const {
         return frame.state;
     }
@@ -278,6 +332,10 @@ private:
     QString placeholderFamily_;
     std::shared_ptr<ReaderModel> model;
     ReaderFrame frame;
+    void completeFrameMarkup(ReaderFrame result, quint64 job, const std::shared_ptr<SourceLease> &lease,
+                             std::function<void(ReaderFrame)> finished);
+    ReaderMarkupRequest markupRequest_;
+    quint64 markupGeneration_ = 0;
     QString documentAuthor;
     QImage documentCover;
     OpeningResult openingResult_;
@@ -311,8 +369,12 @@ private:
     std::shared_ptr<std::atomic<quint64>> newest = std::make_shared<std::atomic<quint64>>(0);
     std::shared_ptr<std::atomic<quint64>> newestPreview = std::make_shared<std::atomic<quint64>>(0);
     std::shared_ptr<std::atomic_bool> searchCancelled;
+    QString searchQuery;
+    std::function<void(SearchBatch)> searchFinished;
+    void interruptSearch();
+    void startPendingSearch();
     void searchNext(QString query, int page, int count, quint64 job, std::shared_ptr<std::atomic_bool> cancelled,
-                    std::function<void(SearchBatch)> finished);
+                    std::function<void(SearchBatch)> finished, bool reset);
     void request(bool appearanceChange = false, RenderReason reason = RenderReason::Appearance);
     void dispatch(bool pageTurn = false);
 };

@@ -314,6 +314,8 @@ def main():
         if args.build_only:
             return
         environment = os.environ.copy()
+        # Offscreen Qt must use shipped fonts even on a host without system fonts.
+        environment['QT_QPA_FONTDIR'] = str(ROOT / 'resources/fonts')
         if args.coverage:
             coverage = tests / 'coverage'
             coverage.mkdir(exist_ok=True)

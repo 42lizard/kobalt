@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "paging.h"
 #include "../style/metrics.h"
 #include "../style/styles.h"
@@ -11,7 +12,7 @@ namespace kobalt::ui {
 namespace m = metrics;
 PagerBar::PagerBar(QWidget *parent, const QString &prefix) : QWidget(parent) {
     setAttribute(Qt::WA_OpaquePaintEvent);
-    counter = new QLabel(this);
+    counter = new ui::InterfaceLabel(this);
     counter->setObjectName(prefix + "Page");
     counter->setAlignment(Qt::AlignCenter);
     readerStyle(counter, styles::font(m::chrome::countText) + "background:transparent;");
@@ -62,7 +63,7 @@ PageControls::PageControls(QWidget *parent, const QString &prefix, bool compact)
     // pager must not paint over its dropdown's left and right borders.
     setProperty("reader_paging", true);
     readerStyle(this, "QWidget[reader_paging=\"true\"]{background:transparent;}");
-    counter = new QLabel(this);
+    counter = new ui::InterfaceLabel(this);
     counter->setObjectName(prefix + "Page");
     counter->setAlignment(Qt::AlignCenter);
     previous = new Button(this);

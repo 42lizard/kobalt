@@ -1,4 +1,5 @@
 set(KOBALT_READER_INTERFACE_SOURCES
+    ${CMAKE_CURRENT_LIST_DIR}/window/reader_annotations.cpp
     ${CMAKE_CURRENT_LIST_DIR}/window/reader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/window/reader_build.cpp
     ${CMAKE_CURRENT_LIST_DIR}/window/reader_dialogs.cpp

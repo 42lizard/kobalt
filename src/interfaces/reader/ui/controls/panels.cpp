@@ -1,3 +1,4 @@
+#include "interfaces/reader/ui/controls/text.h"
 #include "panels.h"
 #include "icons.h"
 #include "../style/metrics.h"
@@ -65,9 +66,9 @@ LightSwipeNotice::LightSwipeNotice(QWidget *parent)
     setEdgeWidth(m::chrome::heavyRule);
     setAttribute(Qt::WA_TransparentForMouseEvents);
     setFocusPolicy(Qt::NoFocus);
-    percentage = new QLabel(this);
+    percentage = new ui::InterfaceLabel(this);
     percentage->setObjectName("rrLightSwipeValue");
-    caption = new QLabel(this);
+    caption = new ui::InterfaceLabel(this);
     caption->setObjectName("rrLightSwipeCaption");
     readerStyle(percentage, styles::font(m::lightSwipe::percentText));
     readerStyle(caption, styles::font(m::lightSwipe::captionText) + "color:#666666;");
@@ -243,7 +244,7 @@ void Panel::paintEvent(QPaintEvent *event) {
     // pass as the controls, without repainting the book underneath.
     {
         QPainter painter(this);
-        painter.fillRect(rect(), palette().color(fill));
+        painter.fillRect(rect(), fill == QPalette::Midlight ? sectionColor(this) : palette().color(fill));
     }
     QFrame::paintEvent(event);
     QPainter painter(this);

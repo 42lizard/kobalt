@@ -51,6 +51,8 @@ Registration &registration() {
     return value;
 }
 int requestedSteps = 0;
+int stripAddedWeight = 2;
+QString selectedInterfaceFamily, selectedInterfaceMonoFamily, selectedHeaderFooterFamily;
 int faceCount(const QVector<QVector<int>> &ids) {
     int count = 0;
     for (const auto &family : ids)
@@ -307,11 +309,32 @@ int opticalCenterShift(const QFont &first, const QFont &last) {
 void keepInterfaceUnhinted(QWidget *window) {
     QCoreApplication::instance()->installEventFilter(new UnhintedFonts(window));
 }
+void setInterfaceFontFamily(const QString &family) {
+    selectedInterfaceFamily = family;
+}
+void setInterfaceMonoFontFamily(const QString &family) {
+    selectedInterfaceMonoFamily = family;
+}
+void setHeaderFooterAddedWeight(int steps) {
+    stripAddedWeight = steps >= 0 && steps <= 8 && steps % 2 == 0 ? steps : 2;
+}
+int headerFooterAddedWeight() {
+    return stripAddedWeight;
+}
+int headerFooterTextWeight() {
+    return stripAddedWeight ? interfaceWeight() + stripAddedWeight : -1;
+}
+void setHeaderFooterFontFamily(const QString &family) {
+    selectedHeaderFooterFamily = family;
+}
+QFont headerFooterFont(int pixels) {
+    return sizedFont(selectedHeaderFooterFamily.isEmpty() ? family(Mono) : selectedHeaderFooterFamily, pixels);
+}
 QFont interfaceFont(int pixels) {
-    return sizedFont(family(Sans), pixels);
+    return sizedFont(selectedInterfaceFamily.isEmpty() ? family(Sans) : selectedInterfaceFamily, pixels);
 }
 QFont chromeFont(int pixels) {
-    return sizedFont(family(Mono), pixels);
+    return sizedFont(selectedInterfaceMonoFamily.isEmpty() ? family(Mono) : selectedInterfaceMonoFamily, pixels);
 }
 QFont captionFont(int pixels) {
     QFont font = chromeFont(pixels);

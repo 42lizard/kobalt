@@ -26,7 +26,7 @@ namespace kobalt {
 namespace nickel {
 class NickelPositionCodec;
 }
-// Fixed sans-serif fallback for publisher books without embedded fonts.
+// Bundled defaults for generic families.
 inline constexpr auto publisherSansFontFace = "NV Legible Next";
 // Bundled face for the generic monospace family.
 inline constexpr auto monospaceFontFace = "IBM Plex Mono";
@@ -54,10 +54,38 @@ struct SearchBatch {
     QVector<SearchHit> hits;
     int nextPage = 0;
     bool done = false, limited = false;
+    // A restarted scan replaces results from the previous layout.
+    bool reset = false;
+};
+struct TextRange {
+    QString start, end, text;
+    QString chosenEnd = {};
+    QString chosenStart = {};
+    bool sentenceStartPolicy = false;
+    bool sentenceEndPolicy = false;
 };
 struct WordSelection {
     QString text, start, end;
     QVector<QRect> rectangles;
+};
+
+struct SelectionEndpoint {
+    // True terminal edge span in viewport pixels, never a clipped range edge.
+    QPoint first, last;
+    // Axis unit normal pointing away from selected text. Caps point inward.
+    QPoint outward;
+    bool visible = false; // False for endpoints outside the current page/viewport.
+};
+struct AnnotationGeometry {
+    QVector<QRect> rectangles;
+    SelectionEndpoint start, end;
+    bool vertical = false; // Current page's writing axis, independent of range shape.
+};
+
+struct AnnotationToken : WordSelection {
+    // Source boundaries for automatic paired punctuation. No whitespace is included.
+    QString startBeforePunctuation, endAfterPunctuation;
+    bool punctuation = false;
 };
 
 // All engine calls stay on one owning thread. Images own their pixels.
@@ -126,16 +154,36 @@ public:
     int comparePlatformPosition(const PositionCodec &codec, const QString &location, QString *error) const;
     // The page of each position in the current layout, or -1 where a
     // position no longer resolves.
-    QVector<int> pagesOf(const QStringList &positions) const;
+    QVector<int> pagesOf(const QStringList &positions, bool rangeEndpoints = false) const;
     // The start position of a page and its first words.
     QString pageStart(int page) const;
     QString pageExcerpt(int page) const;
     WordSelection wordAt(QPoint point);
+    AnnotationToken annotationTokenAt(QPoint point);
+    // Resolves and orders source boundaries without changing pagination or position.
+    TextRange textRange(const QString &start, const QString &end);
+    // Indices of source ranges intersecting [start, end), in input order.
+    // Invalid, empty and reversed ranges are ignored. No text or geometry is read.
+    QVector<int> intersectingRanges(const QString &start, const QString &end,
+                                    const QVector<QPair<QString, QString>> &ranges) const;
+    // Crossed boundary edits retain both complete words using wordAt segmentation.
+    TextRange annotationRange(const QString &start, const QString &end);
+    // Complete token boundaries preserve explicit punctuation choices when reversed.
+    // An equal pair resolves the token at a saved start, or before a saved end.
+    TextRange annotationRange(const QString &startTokenStart, const QString &startTokenEnd,
+                              const QString &endTokenStart, const QString &endTokenEnd, bool endTokenPolicy = false,
+                              bool startTokenPolicy = false, std::function<bool()> current = {});
     QVector<PageLink> pageLinks();
     LinkDetails linkDetails(const QString &source);
     SearchBatch searchPage(const QString &query, int page);
+    // Source-only current-page intersection. Does not resolve remote geometry.
+    // Returns input indices in order; at most 2000 saved ranges plus one draft.
+    QVector<int> visibleRanges(const QVector<QPair<QString, QString>> &ranges) const;
     // Text selection excludes images. Links also need their image hit regions.
+    AnnotationGeometry annotationGeometry(const QString &start, const QString &end);
     QVector<QRect> rangeRects(const QString &start, const QString &end, bool includeImages = false);
+    // Bounded saved-range geometry for a preview. Keeps the exact reading bookmark.
+    QVector<QVector<QRect>> pageRangeRects(int page, const QVector<QPair<QString, QString>> &ranges);
     bool applyAppearance(const QJsonObject &settings, QSize size = {}, OpeningProgress progress = {});
     bool style(int pixels, int spacing);
     bool style(int pixels, int spacing, const QString &face, int margin);
@@ -145,10 +193,6 @@ public:
     bool setHyphenation(const QString &mode);
     void setDarkMode(bool enabled);
     void resize(QSize size);
-    // TODO (later): Add text selection and persistent colored highlights.
-    // First investigate Kobo's highlight ranges, colors, markup and note
-    // storage so existing highlights can be imported and survive reflow.
-    // Written annotations are out of scope; prioritize basic reading first.
     QImage image(int page);
     bool loadNextImage();
     // The idle retained book keeps text and pagination, not cached pictures.
@@ -259,6 +303,7 @@ private:
     const ChapterIndex &chapterIndex(ChapterIndex &index, const QVector<ChapterLink> &source, bool toc) const;
     QString face_ = defaultFontFace;
     QString defaultFace_ = defaultFontFace;
+    std::array<QString, 3> fallbackFaces_;
     QString alignment_ = "left";
     int pixels_ = defaultFontPixels(), spacing_ = defaultLineSpacing;
     int margin_ = defaultMarginPixels(), topMargin_ = defaultVerticalMarginPixels(margin_),

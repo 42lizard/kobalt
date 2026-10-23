@@ -6,6 +6,7 @@
 
 namespace kobalt::nickel4 {
 // Adapted from Nico Verbruggen's NickelRotate. See resources/notices/NickelRotate-MIT.
+void ownReaderTouchRotation(bool owned);
 bool reversedTouchForVersion(const QByteArray &record);
 QPoint rotatedTouchPoint(QPoint point, Qt::ScreenOrientation orientation, int width, int height);
 extern QPoint (*nativeMapFromDevice)(const void *, const QPoint &);

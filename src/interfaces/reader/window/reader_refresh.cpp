@@ -68,6 +68,8 @@ void Reader::refresh() {
     const auto previousPageImage = page->image.cacheKey();
     showPageImage(nextImage);
     syncLinkDiscovery();
+    bookmarkList->setExcerptFont(bookFace());
+    syncAnnotations();
     // The panel needs far longer to draw a page than this function needs
     // for the rest of its work. On a plain page turn, paint now and let the
     // controls, the chapter graph and the saved position follow.
@@ -115,6 +117,7 @@ void Reader::refresh() {
     }
     openPendingDestination();
     syncNavigation();
+    finishAnnotationPresentation();
 }
 
 bool Reader::publishPendingDarkMode() {
@@ -429,6 +432,8 @@ void Reader::openPendingDestination() {
                         openGraph();
                     else if (destination == AppearanceDestination::Chapters)
                         showChapters();
+                    else if (destination == AppearanceDestination::Seek)
+                        openSeek();
                     else if (destination == AppearanceDestination::Search)
                         openSearch();
                     else if (destination == AppearanceDestination::Bookmarks)
@@ -472,9 +477,7 @@ void Reader::updateMenuStatus() {
     const auto battery = services.battery();
     menuBattery->setStatus(battery.percent, battery.charging);
     const auto reading = book->readingMilliseconds();
-    // With Stats always shown, its Session cell already gives the reading time.
-    const auto session =
-        reading > 300000 && !statsPinned() ? strings::get("reader.session_minutes").arg(reading / 60000) : QString();
+    const auto session = reading > 300000 ? strings::get("reader.session_minutes").arg(reading / 60000) : QString();
     if (menuSession->text() != session)
         menuSession->setText(session);
     menuSession->setVisible(!hideNativeStatus() && !session.isEmpty());

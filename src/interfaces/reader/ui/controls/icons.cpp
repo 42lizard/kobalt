@@ -43,7 +43,42 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
     };
     // Phosphor has no vertical swipe gesture, and the device drawings show
     // the side buttons, so these stay Kobalt's own artwork.
-    if (icon == ControlIcon::PreviousChapter || icon == ControlIcon::NextChapter) {
+    if (icon == ControlIcon::SelectionStart || icon == ControlIcon::SelectionEnd) {
+        const bool start = icon == ControlIcon::SelectionStart;
+        const int caret = start ? 12 : 52;
+        line(caret, 12, caret, 52);
+        line(caret - 6, 12, caret + 6, 12);
+        line(caret - 6, 52, caret + 6, 52);
+        const int left = start ? 26 : 8, right = start ? 56 : 38;
+        line(left, 20, right, 20);
+        line(left, 32, right, 32);
+        line(left, 44, right - 8, 44);
+    } else if (icon == ControlIcon::Annotate ||
+               (icon >= ControlIcon::SaveHighlight && icon <= ControlIcon::RemoveHighlight)) {
+        const char *name = "highlighter";
+        switch (icon) {
+        case ControlIcon::SaveHighlight:
+            name = "floppy-disk";
+            break;
+        case ControlIcon::ClearSelection:
+            name = "eraser";
+            break;
+        case ControlIcon::ExtendSelection:
+            name = "selection";
+            break;
+        case ControlIcon::EditHighlight:
+            name = "pencil-simple";
+            break;
+        case ControlIcon::RemoveHighlight:
+            name = "trash";
+            break;
+        default:
+            break;
+        }
+        result.canvas = 256;
+        result.filled = true;
+        phosphorGeometry(QString::fromLatin1(name), path);
+    } else if (icon == ControlIcon::PreviousChapter || icon == ControlIcon::NextChapter) {
         result.canvas = 256;
         result.filled = true;
         QPainterPath caret;
@@ -98,6 +133,7 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
                                             "layout",
                                             "x",
                                             "list",
+                                            "compass",
                                             "chart-bar",
                                             "caret-left",
                                             "caret-right",
@@ -125,6 +161,7 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
                                             "bluetooth",
                                             "eye",
                                             "wrench",
+                                            "paint-brush-broad",
                                             "desktop",
                                             "translate",
                                             "info",

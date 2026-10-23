@@ -105,7 +105,8 @@ private:
 class FieldChooser final : public ui::Panel {
 public:
     explicit FieldChooser(QWidget *parent);
-    void open(int slot, headerfooter::Field current, const headerfooter::Values &values, bool uppercase);
+    void open(int slot, headerfooter::Field current, const headerfooter::Values &values, bool uppercase,
+              int textPixels = 0);
     int slot() const {
         return currentSlot;
     }
