@@ -25,6 +25,30 @@ PagerBar::PagerBar(QWidget *parent, const QString &prefix) : QWidget(parent) {
     previous->setRule(Qt::RightEdge);
     next->setRule(Qt::LeftEdge);
     setFixedHeight(m::chrome::actionHeight);
+    continuationHint = new ui::InterfaceLabel(strings::get("common.more_next_page"), parent ? parent : this);
+    continuationHint->setObjectName(prefix + "ContinuationHint");
+    continuationHint->setTextFormat(Qt::PlainText);
+    continuationHint->setAlignment(Qt::AlignCenter);
+    continuationHint->setAttribute(Qt::WA_TransparentForMouseEvents);
+    readerStyle(continuationHint, styles::font(m::chrome::descriptionText) +
+                                     "font-style:italic;color:palette(placeholder-text);background:transparent;");
+    continuationHint->hide();
+}
+PagerBar::~PagerBar() {
+    delete continuationHint.data();
+}
+void PagerBar::setBlankArea(const QRect &bounds) {
+    blankArea = bounds;
+    updateHint();
+}
+void PagerBar::updateHint() {
+    const auto hint = continuationHint->sizeHint();
+    const int minimumHeight = qMax(ui::px(48), hint.height() + 2 * ui::px(8));
+    const bool fits = blankArea.height() >= minimumHeight && blankArea.width() >= hint.width();
+    continuationHint->setGeometry({blankArea.topLeft(),
+                                   QSize(qMax(0, blankArea.width()), qMax(0, blankArea.height()))});
+    continuationHint->setVisible(page + 1 < count && fits);
+    continuationHint->raise();
 }
 void PagerBar::resizeEvent(QResizeEvent *) {
     const int top = m::control::border, cell = m::chrome::cellWidth;
@@ -44,6 +68,8 @@ void PagerBar::setPage(int page, int count, const QString &label, bool wrap) {
     this->page = page;
     this->count = count;
     this->wrap = wrap;
+    blankArea = {};
+    updateHint();
     previous->setEnabled(count > 1 && (wrap || page > 0));
     next->setEnabled(count > 1 && (wrap || page + 1 < count));
     setVisible(count > 1);

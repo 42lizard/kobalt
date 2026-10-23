@@ -343,7 +343,7 @@ int run(int argc, char **argv) {
             require(session->markup().request == request && session->markup().generation == generation &&
                         session->markup().imageKey == rawImage.cacheKey() && session->markup().resolvedRanges == 2,
                     "Markup did not belong to the exact image/request or resolved ranges twice");
-            require(!session->markup().saved.first().first.isEmpty() && !session->markup().draft.rectangles.isEmpty(),
+            require(!session->markup().saved.first().rectangles.isEmpty() && !session->markup().draft.rectangles.isEmpty(),
                     "Current visible saved and draft markup must both be captured");
             int callbacks = 0;
             bool staleAccepted = true, latestAccepted = false;

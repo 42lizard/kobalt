@@ -43,7 +43,15 @@ struct NativeBook {
 };
 // Process-local only. A file replacement invalidates its remembered route.
 QHash<QString, NativeBook> nativeBooks;
-std::function<bool()> ready, defaultReader;
+struct MenuCallbacks {
+    std::function<bool()> ready, defaultReader;
+};
+MenuCallbacks &menuCallbacks() {
+    // NickelHook can initialize the reader before this file's global constructors.
+    // Construct these callbacks on first use so later initialization cannot erase them.
+    static MenuCallbacks callbacks;
+    return callbacks;
+}
 void addReaderChoice(void *controller, const void *volume, QMenu *menu);
 struct Choice {
     QString identity;
@@ -186,8 +194,9 @@ bool eligibleReaderBook(const void *volume, QString *identity, QString *path) {
     return readerBookRoute(volume, identity, path) == ReaderBookRoute::Direct;
 }
 void configureBookMenu(std::function<bool()> available, std::function<bool()> preferred) {
-    ready = std::move(available);
-    defaultReader = std::move(preferred);
+    auto &callbacks = menuCallbacks();
+    callbacks.ready = std::move(available);
+    callbacks.defaultReader = std::move(preferred);
     static auto *lifetime = new ChoiceLifetime(qApp);
     qApp->installEventFilter(lifetime);
 }
@@ -219,10 +228,15 @@ extern "C" __attribute__((visibility("default"))) void kobalt_book_menu(void *se
 #endif
 namespace {
 void addReaderChoice(void *controller, const void *volume, QMenu *menu) {
-    if (!menu || !ready || !ready() || !defaultReader || !nativeBookMenu)
+    const auto &callbacks = menuCallbacks();
+    if (!menu || !callbacks.ready || !callbacks.ready() || !callbacks.defaultReader || !nativeBookMenu)
         return;
+    const bool useKobalt = !callbacks.defaultReader();
     QString identity;
-    if (!eligibleReaderBook(volume, &identity))
+    // Only a Kobalt choice needs proof that Kobalt can read the publication.
+    // Nickel must remain available for protected books and remembered fallbacks.
+    const auto route = useKobalt ? readerBookRoute(volume, &identity) : readerBookCandidateRoute(volume, &identity);
+    if (identity.isEmpty() || (useKobalt ? route != ReaderBookRoute::Direct : route == ReaderBookRoute::Unsupported))
         return;
     QPointer<QAction> original;
     const auto readNow = QCoreApplication::translate("ReadBookActionProxy", "Read now");
@@ -247,7 +261,7 @@ void addReaderChoice(void *controller, const void *volume, QMenu *menu) {
         "_ZN22AbstractMenuController12createActionEP5QMenuP7QWidgetbbb");
     if (!item || !action)
         return;
-    const Choice choice{identity, !defaultReader()};
+    const Choice choice{identity, useKobalt};
     auto *widget =
         item(controller, menu,
              (choice.kobalt ? strings::get("native_ui.read_with_kobalt") : strings::get("native_ui.read_with_nickel")),

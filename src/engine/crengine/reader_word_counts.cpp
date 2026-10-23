@@ -1,3 +1,4 @@
+#include "column_view.h"
 #include "reader_model.h"
 
 #include "engine_activity.h"

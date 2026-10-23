@@ -1,6 +1,7 @@
 #pragma once
 #include "engine/crengine/reader_model.h"
 #include "open_request.h"
+#include "highlight_geometry.h"
 #include <QElapsedTimer>
 #include <QObject>
 #include <atomic>
@@ -10,8 +11,9 @@
 namespace kobalt {
 struct ReaderMarkupRange {
     QString start, end, color;
+    QString style = QStringLiteral("shaded");
     bool operator==(const ReaderMarkupRange &other) const {
-        return start == other.start && end == other.end && color == other.color;
+        return start == other.start && end == other.end && color == other.color && style == other.style;
     }
 };
 struct ReaderMarkupRequest {
@@ -27,7 +29,7 @@ struct ReaderMarkupFrame {
     ReaderMarkupRequest request;
     quint64 generation = 0;
     qint64 imageKey = 0;
-    QVector<QPair<QVector<QRect>, QString>> saved;
+    QVector<HighlightGeometry> saved;
     AnnotationGeometry draft;
     int resolvedRanges = 0;
 };
@@ -146,7 +148,8 @@ public:
     // One worker job resolves all eligible passages. Stale replies contain no indices.
     void intersectingRanges(const QString &start, const QString &end, QVector<QPair<QString, QString>> ranges,
                             std::function<void(QVector<int>)> finished);
-    void annotationTokenAt(QPoint point, std::function<void(AnnotationToken)> finished);
+    void annotationTokenAt(QPoint point, std::function<void(AnnotationToken)> finished,
+                           const QString &boundary = {}, bool start = false);
     void annotationRange(const QString &startTokenStart, const QString &startTokenEnd, const QString &endTokenStart,
                          const QString &endTokenEnd, std::function<void(TextRange)> finished,
                          bool endTokenPolicy = false, bool startTokenPolicy = false);

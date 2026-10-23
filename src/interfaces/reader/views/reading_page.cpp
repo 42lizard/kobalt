@@ -4,6 +4,7 @@
 #include "interfaces/reader/ui/controls/text.h"
 #include "interfaces/reader/ui/controls/icons.h"
 #include "reading_page.h"
+#include "engine/crengine/reader_model.h"
 #include "ui/bookmark_paint.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/private_text.h"
@@ -172,6 +173,8 @@ void ReadingPage::cancelHold() {
     animationDirection = 0;
     holdTimer.stop();
     tracking = false;
+    if (std::exchange(annotationDragging, false) && annotationDragFinished)
+        annotationDragFinished(true);
     const bool active = brightnessGesture.active();
     brightnessGesture.cancel();
     if (active && lightFinished)
@@ -274,45 +277,49 @@ QRegion ReadingPage::annotationContour(const QVector<QRect> &rectangles, bool ve
     return QTransform(0, 1, 1, 0, 0, 0).map(region);
 }
 
-QPainterPath ReadingPage::annotationUnderline(const QVector<QRect> &rectangles, bool vertical) {
-    QVector<QRect> lines;
-    auto sorted = rectangles;
-    if (vertical) {
-        for (auto &rect : sorted) {
-            rect = QRect(rect.y(), rect.x(), rect.height(), rect.width());
+void ReadingPage::setAnnotationInputEnabled(bool enabled) {
+    if (annotationInputEnabled == enabled)
+        return;
+    cancelHold();
+    annotationInputEnabled = enabled;
+    if (!enabled)
+        setAnnotationHandles({});
+}
+
+QRect ReadingPage::annotationHandleRect(bool start) const {
+    const auto &handle = annotationHandles[start ? 0 : 1];
+    if (!handle.visible)
+        return {};
+    const int radius = m::selection::handleRadius;
+    return QRect(handle.center - QPoint(radius, radius) + QPoint(0, topHeight()),
+                 QSize(2 * radius + 1, 2 * radius + 1));
+}
+
+void ReadingPage::setAnnotationHandles(const AnnotationGeometry &geometry) {
+    QRegion dirty;
+    for (int i = 0; i < 2; ++i) {
+        const auto &edge = i == 0 ? geometry.start : geometry.end;
+        auto &handle = annotationHandles[i];
+        AnnotationHandle next;
+        next.visible = annotationInputEnabled && edge.visible && !geometry.rectangles.isEmpty();
+        if (next.visible) {
+            const QPoint span = edge.last - edge.first;
+            const QPoint axis(span.x() == 0 ? 0 : (span.x() > 0 ? 1 : -1),
+                              span.y() == 0 ? 0 : (span.y() > 0 ? 1 : -1));
+            const int radius = m::selection::handleRadius;
+            next.center = (i == 0 ? edge.first - axis * radius : edge.last + axis * radius);
+            next.center.setX(qBound(radius, next.center.x(), qMax(radius, width() - radius - 1)));
+            next.center.setY(qBound(radius, next.center.y(),
+                                   qMax(radius, height() - topHeight() - bottomHeight() - radius - 1)));
+            next.target = (edge.first + edge.last) / 2 - edge.outward * ui::px(4);
         }
-    }
-    std::sort(sorted.begin(), sorted.end(), [](const QRect &a, const QRect &b) {
-        return a.bottom() < b.bottom() || (a.bottom() == b.bottom() && a.left() < b.left());
-    });
-    for (const auto &rect : sorted) {
-        if (rect.isEmpty()) {
+        if (handle.visible == next.visible && handle.center == next.center && handle.target == next.target)
             continue;
-        }
-        bool merged = false;
-        for (auto &line : lines) {
-            const int tolerance = qMin(line.height(), rect.height()) / 4;
-            if (qAbs(line.bottom() - rect.bottom()) <= tolerance &&
-                rect.left() <= line.right() + qMin(line.height(), rect.height()) / 2 &&
-                rect.right() >= line.left() - qMin(line.height(), rect.height()) / 2) {
-                line = line.united(rect);
-                merged = true;
-                break;
-            }
-        }
-        if (!merged) {
-            lines.append(rect);
-        }
+        dirty += annotationHandleRect(i == 0).translated(0, -topHeight());
+        handle = next;
+        dirty += annotationHandleRect(i == 0).translated(0, -topHeight());
     }
-    QPainterPath path;
-    const qreal radius = ui::px(4) / 2.0, pitch = ui::px(10);
-    for (const auto &line : lines) {
-        const qreal baseline = line.bottom() - ui::px(2);
-        for (qreal x = line.left(); x <= line.right(); x += pitch) {
-            path.addEllipse(QPointF(x, baseline), radius, radius);
-        }
-    }
-    return vertical ? QTransform(0, 1, 1, 0, 0, 0).map(path) : path;
+    damageAnnotations(dirty);
 }
 
 void ReadingPage::annotate(const QVector<QRect> &draft, const QVector<QRect> &saved, const QVector<QRect> &candidate,
@@ -329,27 +336,33 @@ void ReadingPage::annotate(const QVector<QRect> &draft, const QVector<QRect> &sa
     }
     if (draftAnnotations != draft || annotationVertical != vertical) {
         draftContour = annotationContour(draft, vertical);
-        draftUnderline = annotationUnderline(draft, vertical);
+        draftOutline = {};
+        draftOutline.addRegion(draftContour);
+        draftOutline = draftOutline.simplified();
     }
     dirty += draftContour;
     draftAnnotations = draft;
     savedAnnotations = saved;
     if (saved.isEmpty()) {
-        setAnnotationColors({});
+        setSavedHighlights({});
     }
     candidateAnnotations = candidate;
-    candidateUnderline = annotationUnderline(candidate, vertical);
+    candidateOutline = {};
+    candidateOutline.addRegion(annotationContour(candidate, vertical));
+    candidateOutline = candidateOutline.simplified();
+    if (draft.isEmpty())
+        setAnnotationHandles({});
     annotationVertical = vertical;
     damageAnnotations(dirty);
 }
 
-void ReadingPage::setAnnotationColors(const QVector<QPair<QVector<QRect>, QString>> &groups) {
+void ReadingPage::setSavedHighlights(const QVector<HighlightGeometry> &groups) {
     if (annotationColorGroups == groups) {
         return;
     }
     QRegion dirty;
     for (const auto &tint : annotationTints) {
-        dirty += tint.first;
+        dirty += tint.visible;
     }
     const QRegion previousColor = annotationColorRegion;
     annotationColorRegion = {};
@@ -358,13 +371,13 @@ void ReadingPage::setAnnotationColors(const QVector<QPair<QVector<QRect>, QStrin
     QRegion covered;
     for (int i = groups.size() - 1; i >= 0; --i) {
         QRegion region;
-        for (const auto &r : groups[i].first) {
+        for (const auto &r : groups[i].rectangles) {
             region += r;
         }
         dirty += region;
-        const auto color = ui::highlightTint(groups[i].second);
+        const auto color = ui::highlightTint(groups[i].color);
         const QRegion visible = region - covered;
-        annotationTints.append(qMakePair(visible, color));
+        annotationTints.append({groups[i], visible});
         covered += region;
         if (color.red() != color.green() || color.green() != color.blue()) {
             annotationColorRegion += visible;
@@ -392,14 +405,16 @@ void ReadingPage::damageAnnotations(const QRegion &dirty) {
 }
 
 void ReadingPage::installAnnotationFrame(const QVector<QRect> &draft,
-                                         const QVector<QPair<QVector<QRect>, QString>> &saved, bool vertical) {
+                                         const QVector<HighlightGeometry> &saved, bool vertical,
+                                         const AnnotationGeometry *geometry) {
     QVector<QRect> rectangles;
     for (const auto &group : saved) {
-        rectangles += group.first;
+        rectangles += group.rectangles;
     }
     installingAnnotationFrame = true;
     annotate(draft, rectangles, {}, vertical);
-    setAnnotationColors(saved);
+    setSavedHighlights(saved);
+    setAnnotationHandles(geometry ? *geometry : AnnotationGeometry{});
     installingAnnotationFrame = false;
 }
 
@@ -428,6 +443,10 @@ ReadingPage::ReadingPage(QWidget *parent, std::function<void()> cancelAnimation)
             return;
         consumed = true;
         brightnessGesture.cancel();
+        if (annotationInputEnabled && annotationDragStarted) {
+            annotationDragging = annotationDragStarted(origin.toPoint() - QPoint(0, topHeight()), -1);
+            return;
+        }
         if (held)
             held(origin.toPoint() - QPoint(0, topHeight()));
     });
@@ -550,17 +569,28 @@ void ReadingPage::paintContents(QPainter &painter, bool sleeping) const {
             for (const auto &r : savedAnnotations) {
                 region += r;
             }
-            tints.append(qMakePair(region, ui::highlightTint("gray")));
+            tints.append({{savedAnnotations, "gray"}, region});
         }
         for (const auto &tint : tints) {
-            ui::paintHighlightTint(painter, tint.first.translated(0, topHeight()), tint.second, ui::darkTheme(this));
+            painter.save();
+            painter.translate(0, topHeight());
+            ui::paintHighlightMark(painter, tint.mark.rectangles, tint.visible, ui::highlightTint(tint.mark.color),
+                                   tint.mark.style, ui::darkTheme(this));
+            painter.restore();
         }
     }
     painter.save();
     painter.translate(0, topHeight());
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.fillPath(draftUnderline, palette().color(QPalette::WindowText));
-    painter.fillPath(candidateUnderline, palette().color(QPalette::WindowText));
+    painter.setPen(QPen(palette().color(QPalette::WindowText), int(m::selection::outline)));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPath(draftOutline);
+    painter.drawPath(candidateOutline);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(palette().color(QPalette::WindowText));
+    for (const auto &handle : annotationHandles)
+        if (handle.visible)
+            painter.drawEllipse(handle.center, int(m::selection::handleRadius), int(m::selection::handleRadius));
     painter.restore();
     if (!revealedOutlines.isEmpty()) {
         QRegion linkRegion;
@@ -669,15 +699,10 @@ bool ReadingPage::event(QEvent *event) {
         }
         const auto points = kobalt::ui::touchPositions(static_cast<QTouchEvent *>(event));
         if (event->type() == QEvent::TouchBegin) {
-            cancelHold();
-            tracking = points.size() == 1;
-            moved = consumed = false;
-            if (tracking)
-                holdTimer.start();
-            if (tracking) {
-                origin = latest = points.first();
-                brightnessGesture.begin(origin, size(), brightnessEdge, warmthEdge);
-            }
+            if (points.size() == 1)
+                beginPointer(points.first());
+            else
+                cancelHold();
         }
         if (points.size() != 1)
             cancelHold();
@@ -702,6 +727,39 @@ bool ReadingPage::event(QEvent *event) {
     return QWidget::event(event);
 }
 
+void ReadingPage::beginPointer(QPointF point) {
+    cancelHold();
+    tracking = true;
+    moved = consumed = false;
+    origin = latest = point;
+    annotationDragOffset = {};
+    annotationPointerBoundary = -1;
+    if (annotationInputEnabled) {
+        int nearest = -1;
+        qreal distance = qreal(m::selection::handleHitRadius) * int(m::selection::handleHitRadius);
+        const QPoint body = point.toPoint() - QPoint(0, topHeight());
+        for (int i = 0; i < 2; ++i) {
+            const auto &handle = annotationHandles[i];
+            const QPoint delta = body - handle.center;
+            const qreal squared = QPoint::dotProduct(delta, delta);
+            if (handle.visible && squared <= distance) {
+                nearest = i;
+                distance = squared;
+            }
+        }
+        if (nearest >= 0 && annotationDragStarted) {
+            const auto &handle = annotationHandles[nearest];
+            annotationDragOffset = body - handle.target;
+            // Resolve a press as a drag only after movement. The larger hit
+            // area overlaps nearby words, which must still accept taps.
+            annotationPointerBoundary = nearest;
+            return;
+        }
+    }
+    brightnessGesture.begin(origin, size(), brightnessEdge, warmthEdge);
+    holdTimer.start();
+}
+
 void ReadingPage::mousePressEvent(QMouseEvent *event) {
 #ifdef Q_OS_MAC
     if (ui::isPointerMouse(event) && event->button() == Qt::RightButton) {
@@ -716,12 +774,7 @@ void ReadingPage::mousePressEvent(QMouseEvent *event) {
     rightPressed = false;
     if (!kobalt::ui::isPointerMouse(event) || event->button() != Qt::LeftButton)
         return;
-    cancelHold();
-    tracking = true;
-    moved = consumed = false;
-    origin = latest = kobalt::ui::mousePosition(event);
-    brightnessGesture.begin(origin, size(), brightnessEdge, warmthEdge);
-    holdTimer.start();
+    beginPointer(kobalt::ui::mousePosition(event));
 }
 
 void ReadingPage::mouseMoveEvent(QMouseEvent *event) {
@@ -855,6 +908,20 @@ void ReadingPage::updatePointer() {
     moved |= (latest - origin).manhattanLength() > m::lookup::moveTolerance;
     if (moved)
         holdTimer.stop();
+    if (annotationInputEnabled && annotationPointerBoundary >= 0 && !annotationDragging && !consumed && moved &&
+        annotationDragStarted) {
+        annotationDragging = annotationDragStarted(origin.toPoint() - QPoint(0, topHeight()) - annotationDragOffset,
+                                                   annotationPointerBoundary);
+        if (annotationDragging) {
+            consumed = true;
+            brightnessGesture.cancel();
+        }
+    }
+    if (annotationDragging) {
+        if (annotationDragMoved)
+            annotationDragMoved(latest.toPoint() - QPoint(0, topHeight()) - annotationDragOffset);
+        return;
+    }
     const bool active = brightnessGesture.active();
     if ((!consumed || active) && brightnessGesture.move(latest)) {
         const bool warmth = brightnessGesture.edge() == kobalt::ui::BrightnessGesture::Edge::Right;
@@ -874,6 +941,12 @@ void ReadingPage::finishGesture() {
     if (!tracking)
         return;
     tracking = false;
+    if (std::exchange(annotationDragging, false)) {
+        brightnessGesture.cancel();
+        if (annotationDragFinished)
+            annotationDragFinished(false);
+        return;
+    }
     const bool brightnessActive = brightnessGesture.active();
     brightnessGesture.cancel();
     if (brightnessActive && lightFinished)

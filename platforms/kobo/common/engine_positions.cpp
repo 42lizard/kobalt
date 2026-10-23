@@ -1,3 +1,4 @@
+#include "engine/crengine/column_view.h"
 #include "engine_positions.h"
 #include "engine/crengine/reader_model.h"
 #include "support/strings.h"

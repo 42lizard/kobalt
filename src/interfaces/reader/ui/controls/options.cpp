@@ -67,22 +67,38 @@ DescribedOption::DescribedOption(const QString &text, const QString &description
     setMinimumHeight(description.isEmpty() ? m::control::stepSize : m::settings::optionHeight);
     setFocusPolicy(Qt::NoFocus);
 }
+void DescribedOption::setPreview(QWidget *widget, QSize size) {
+    if (preview != widget)
+        delete preview;
+    preview = widget;
+    previewSize = size;
+    preview->setParent(this);
+    preview->setAttribute(Qt::WA_TransparentForMouseEvents);
+    preview->show();
+    updateGeometry();
+    update();
+}
 int DescribedOption::heightForWidth(int width) const {
-    if (description.isEmpty())
+    if (description.isEmpty() && !preview)
         return m::control::stepSize;
     QFont descriptionFont = font();
     descriptionFont.setPixelSize(appearance.descriptionPixels);
     descriptionFont.setWeight(QFont::Normal);
     descriptionFont.setItalic(false);
     const int textWidth = qMax(1, width - 2 * appearance.horizontalInset - m::settings::labelLeft -
-                                      appearance.indicatorSize.width() - m::settings::toggleGap);
-    return qMax(appearance.minimumRowHeight, m::settings::descriptionTop +
+                                      appearance.indicatorSize.width() - m::settings::toggleGap -
+                                      (preview ? previewSize.width() + m::settings::toggleGap : 0));
+    const int textHeight = description.isEmpty() ? int(m::control::stepSize) : m::settings::descriptionTop +
                                                  wrappedInterfaceTextHeight(description, descriptionFont, textWidth) +
-                                                 m::settings::descriptionBottom);
+                                                 m::settings::descriptionBottom;
+    return qMax(qMax(appearance.minimumRowHeight, textHeight), preview ? previewSize.height() + px(24) : 0);
 }
 void DescribedOption::resizeEvent(QResizeEvent *event) {
     QCheckBox::resizeEvent(event);
     setMinimumHeight(heightForWidth(event->size().width()));
+    if (preview)
+        preview->setGeometry(width() - appearance.horizontalInset - previewSize.width(),
+                             (height() - previewSize.height()) / 2, previewSize.width(), previewSize.height());
 }
 bool DescribedOption::hitButton(const QPoint &position) const {
     return rect().contains(position);
@@ -96,7 +112,8 @@ void DescribedOption::paintEvent(QPaintEvent *) {
     descriptionFont.setWeight(QFont::Normal);
     descriptionFont.setItalic(false);
     const int textWidth = qMax(1, width() - 2 * appearance.horizontalInset - m::settings::labelLeft -
-                                      appearance.indicatorSize.width() - m::settings::toggleGap);
+                                      appearance.indicatorSize.width() - m::settings::toggleGap -
+                                      (preview ? previewSize.width() + m::settings::toggleGap : 0));
     const int textBottom =
         description.isEmpty()
             ? m::settings::checkboxTop + m::settings::checkboxSize

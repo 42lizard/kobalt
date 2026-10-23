@@ -13,6 +13,7 @@
 #include "platforms/kobo/display/annotation_damage.h"
 #include "support/host_presentation.h"
 #include "support/reader_inputs.h"
+#include "engine/crengine/reader_model.h"
 #include <QApplication>
 #include <QFontDatabase>
 #include <QPaintEvent>
@@ -526,33 +527,16 @@ private slots:
         QCOMPARE(draft.pixelColor(interior), plain.pixelColor(interior));
         const int y = passage.top() + page.topHeight();
         const int x = passage.center().x();
-        const int baseline = passage.bottom() - ui::px(2) + page.topHeight();
-        const int radius = (ui::px(4) + 1) / 2;
-        const QRect dotBand(passage.left() - radius - 1, baseline - radius - 1, passage.width() + 2 * radius + 2,
-                            2 * radius + 3);
-        // Every changed pixel must be on the dotted baseline. In particular,
-        // neither terminal edge may contain a full-height bracket stroke.
-        for (int row = 0; row < draft.height(); ++row) {
-            for (int col = 0; col < draft.width(); ++col) {
-                if (!dotBand.contains(col, row)) {
+        const int baseline = passage.bottom() + page.topHeight();
+        const QRect outer = passage.translated(0, page.topHeight()).adjusted(-2, -2, 2, 2);
+        const QRect inner = passage.translated(0, page.topHeight()).adjusted(2, 2, -2, -2);
+        for (int row = 0; row < draft.height(); ++row)
+            for (int col = 0; col < draft.width(); ++col)
+                if (!outer.contains(col, row) || inner.contains(col, row))
                     QCOMPARE(draft.pixelColor(col, row), plain.pixelColor(col, row));
-                }
-            }
-        }
-        int islands = 0, gaps = 0;
-        bool inkBefore = false;
-        for (int col = passage.left(); col <= passage.right(); ++col) {
-            const bool ink = draft.pixelColor(col, baseline) != plain.pixelColor(col, baseline);
-            if (ink && !inkBefore) {
-                ++islands;
-            }
-            if (!ink) {
-                ++gaps;
-            }
-            inkBefore = ink;
-        }
-        QVERIFY(islands >= 10);
-        QVERIFY(gaps > passage.width() / 3);
+        for (const QPoint &edge : {QPoint(x, y), QPoint(x, baseline),
+                                    QPoint(passage.left(), interior.y()), QPoint(passage.right(), interior.y())})
+            QVERIFY(draft.pixelColor(edge) != plain.pixelColor(edge));
         QCoreApplication::processEvents();
         PaintRegions repairs;
         page.installEventFilter(&repairs);
@@ -585,17 +569,40 @@ private slots:
         QCOMPARE(gray.red(), gray.green());
         QCOMPARE(gray.green(), gray.blue());
         QCOMPARE(saved.pixelColor(interior), plain.pixelColor(interior));
-        page.setAnnotationColors({qMakePair(QVector<QRect>{passage, passage}, QString("yellow"))});
+        page.setSavedHighlights({{QVector<QRect>{passage, passage}, "yellow"}});
         const QImage yellow = page.snapshot();
         QCOMPARE(yellow.pixelColor(interior), plain.pixelColor(interior));
         QVERIFY(yellow.pixelColor(x + 10, y + 10) != gray);
         QVERIFY(page.property("reader_colour_regions").toBool());
-        page.setAnnotationColors({qMakePair(QVector<QRect>{passage}, QString("blue"))});
+        page.setSavedHighlights({{QVector<QRect>{passage}, "blue"}});
         const QImage blue = page.snapshot();
         QCOMPARE(blue.pixelColor(interior), plain.pixelColor(interior));
         QVERIFY(blue.pixelColor(x + 10, y + 10) != yellow.pixelColor(x + 10, y + 10));
-        page.setAnnotationColors({qMakePair(QVector<QRect>{passage}, QString("yellow")),
-                                  qMakePair(QVector<QRect>{passage}, QString("gray"))});
+        page.setSavedHighlights({{QVector<QRect>{passage}, "gray", "underline"}});
+        const auto underlined = page.snapshot();
+        QCOMPARE(underlined.pixelColor(interior), plain.pixelColor(interior));
+        QCOMPARE(underlined.pixelColor(x + 10, y + 10), plain.pixelColor(x + 10, y + 10));
+        QVERIFY(underlined != plain && underlined != saved);
+        page.setSavedHighlights({{QVector<QRect>{passage}, "gray", "dotted"}});
+        const auto dotted = page.snapshot();
+        QCOMPARE(dotted.pixelColor(interior), plain.pixelColor(interior));
+        QVERIFY(dotted != plain && dotted != underlined && dotted != saved);
+        bool hasInk = false, hasGap = false;
+        for (int at = passage.left(); at <= passage.right(); ++at) {
+            const QPoint point(at, baseline);
+            hasInk |= dotted.pixelColor(point) != plain.pixelColor(point);
+            hasGap |= dotted.pixelColor(point) == plain.pixelColor(point);
+        }
+        QVERIFY(hasInk && hasGap);
+        page.setSavedHighlights({{QVector<QRect>{passage}, "blue", "underline"}});
+        const auto blueUnderline = page.snapshot();
+        QVERIFY(blueUnderline != underlined);
+        const QColor lineColor = blueUnderline.pixelColor(passage.left() + 10, baseline);
+        QVERIFY(lineColor.blue() > lineColor.red());
+        page.setSavedHighlights({{QVector<QRect>{passage}, "blue", "dotted"}});
+        QVERIFY(page.snapshot() != dotted);
+        page.setSavedHighlights({{QVector<QRect>{passage}, "yellow"},
+                                  {QVector<QRect>{passage}, "gray"}});
         QCOMPARE(page.snapshot(), saved);
         QVERIFY(!page.property("reader_colour_regions").toBool());
         QVERIFY(!page.property("reader_annotation_repairs").value<QRegion>().isEmpty());
@@ -641,8 +648,8 @@ private slots:
         QCOMPARE(paints.painted.rectCount(), 1);
         QVERIFY(paints.painted.contains(lines.first().translated(0, page.topHeight())));
         QVERIFY(paints.painted.contains(lines.last().translated(0, page.topHeight())));
-        const QVector<QPair<QVector<QRect>, QString>> blue{{lines, "blue"}};
-        const QVector<QPair<QVector<QRect>, QString>> pink{{lines.mid(0, 3), "pink"}, {lines.mid(3), "green"}};
+        const QVector<HighlightGeometry> blue{{lines, "blue"}};
+        const QVector<HighlightGeometry> pink{{lines.mid(0, 3), "pink"}, {lines.mid(3), "green"}};
         const QVector<std::function<void()>> changes{[&] {
                                                          page.annotate(lines.mid(0, 2), {}, lines.mid(3));
                                                      },
@@ -653,10 +660,10 @@ private slots:
                                                          page.annotate({}, lines);
                                                      },
                                                      [&] {
-                                                         page.setAnnotationColors(blue);
+                                                         page.setSavedHighlights(blue);
                                                      },
                                                      [&] {
-                                                         page.setAnnotationColors(pink);
+                                                         page.setSavedHighlights(pink);
                                                      },
                                                      [&] {
                                                          page.annotate(lines.mid(1, 4), lines);
@@ -665,7 +672,7 @@ private slots:
                                                          page.annotate({}, lines);
                                                      },
                                                      [&] {
-                                                         page.setAnnotationColors({});
+                                                         page.setSavedHighlights({});
                                                          page.annotate({}, {});
                                                      }};
         for (const auto &change : changes) {
@@ -681,7 +688,7 @@ private slots:
         }
         paints.count = 0;
         page.annotate({}, {});
-        page.setAnnotationColors({});
+        page.setSavedHighlights({});
         QCoreApplication::processEvents();
         QCOMPARE(paints.count, 0);
     }
@@ -711,7 +718,7 @@ private slots:
         PaintRegions paints;
         page.installEventFilter(&paints);
         const QVector<QRect> lines{{30, 70, 450, 25}, {30, 300, 420, 25}};
-        const QVector<QPair<QVector<QRect>, QString>> blue{{lines, "blue"}};
+        const QVector<HighlightGeometry> blue{{lines, "blue"}};
         page.installAnnotationFrame({}, blue);
         QCoreApplication::processEvents();
         QCOMPARE(paints.count, 0);
@@ -747,6 +754,111 @@ private slots:
         QCoreApplication::processEvents();
         QCOMPARE(paints.count, 1);
     }
+    void annotationHandlesDragAndCancel() {
+        ReadingPage page(nullptr, [] {});
+        page.resize(600, 800);
+        page.show();
+        page.image = QImage(600, 700, QImage::Format_RGB32);
+        page.image.fill(Qt::white);
+        page.refreshContent();
+        page.setAnnotationInputEnabled(true);
+        AnnotationGeometry geometry;
+        geometry.rectangles = {{100, 100, 200, 40}};
+        geometry.start = {{100, 100}, {100, 140}, {-1, 0}, true};
+        geometry.end = {{300, 100}, {300, 140}, {1, 0}, true};
+        page.annotate(geometry.rectangles, {});
+        page.setAnnotationHandles(geometry);
+        const auto first = page.annotationHandleRect(true), last = page.annotationHandleRect(false);
+        QVERIFY(!first.isEmpty() && !last.isEmpty());
+        QVERIFY(first.bottom() <= geometry.rectangles.first().top() + page.topHeight());
+        QVERIFY(last.top() >= geometry.rectangles.last().bottom() + page.topHeight());
+        int boundary = -2, taps = 0, swipes = 0, finishes = 0;
+        bool cancelled = false;
+        QPoint moved;
+        page.tapped = [&](QPoint) { ++taps; };
+        page.swiped = [&](int) { ++swipes; };
+        page.annotationDragStarted = [&](QPoint, int value) { boundary = value; return true; };
+        page.annotationDragMoved = [&](QPoint point) { moved = point; };
+        page.annotationDragFinished = [&](bool value) { cancelled = value; ++finishes; };
+        QTest::mousePress(&page, Qt::LeftButton, Qt::NoModifier, first.center());
+        QCOMPARE(boundary, -2);
+        QTest::mouseMove(&page, first.center() + QPoint(150, 80));
+        QTest::mouseRelease(&page, Qt::LeftButton, Qt::NoModifier, first.center() + QPoint(150, 80));
+        QCOMPARE(boundary, 0);
+        QCOMPARE(finishes, 1);
+        QVERIFY(!cancelled);
+        QVERIFY(!moved.isNull());
+        QCOMPARE(taps, 0);
+        QCOMPARE(swipes, 0);
+        QTest::mousePress(&page, Qt::LeftButton, Qt::NoModifier, last.center());
+        QCOMPARE(boundary, 0);
+        QTest::mouseMove(&page, last.center() + QPoint(80, 40));
+        QCOMPARE(boundary, 1);
+        page.cancelHold();
+        QCOMPARE(finishes, 2);
+        QVERIFY(cancelled);
+        QTest::mouseRelease(&page, Qt::LeftButton, Qt::NoModifier, last.center());
+        QCOMPARE(finishes, 2);
+        QCOMPARE(taps, 0);
+        QVERIFY(QTest::qWaitForWindowExposed(&page));
+        auto *device = QTest::createTouchDevice();
+        auto touch = QTest::touchEvent(&page, device, false);
+        touch.press(0, last.center(), &page).commit();
+        QCOMPARE(boundary, 1);
+        touch.move(0, last.center() + QPoint(80, 40), &page).commit();
+        touch.release(0, last.center() + QPoint(80, 40), &page).commit();
+        QCOMPARE(finishes, 3);
+        QVERIFY(!cancelled);
+        QCOMPARE(taps + swipes, 0);
+        touch.press(0, first.center(), &page).commit();
+        touch.move(0, first.center() + QPoint(80, 40), &page).commit();
+        QCOMPARE(boundary, 0);
+        QTouchEvent cancel(QEvent::TouchCancel, device);
+        QApplication::sendEvent(&page, &cancel);
+        QCOMPARE(finishes, 4);
+        QVERIFY(cancelled);
+        touch.release(0, first.center(), &page).commit();
+        QCOMPARE(finishes, 4);
+        const int previousFinishes = finishes;
+        QTest::mouseClick(&page, Qt::LeftButton, Qt::NoModifier,
+                          QPoint(geometry.rectangles.last().right() - 2, geometry.rectangles.last().bottom() - 2) +
+                              QPoint(0, page.topHeight()));
+        QCOMPARE(taps, 1);
+        QCOMPARE(finishes, previousFinishes);
+        geometry.start.visible = false;
+        page.setAnnotationHandles(geometry);
+        QVERIFY(page.annotationHandleRect(true).isEmpty());
+        QVERIFY(!page.annotationHandleRect(false).isEmpty());
+        page.annotate({}, {});
+        QVERIFY(page.annotationHandleRect(false).isEmpty());
+        // A normal text swipe keeps page navigation; only a hold arms selection.
+        const QPoint textPoint(380, 400);
+        boundary = -2;
+        const int previousSwipes = swipes;
+        QTest::mousePress(&page, Qt::LeftButton, Qt::NoModifier, textPoint);
+        QTest::mouseMove(&page, textPoint - QPoint(180, 0));
+        QTest::mouseRelease(&page, Qt::LeftButton, Qt::NoModifier, textPoint - QPoint(180, 0));
+        QCOMPARE(swipes, previousSwipes + 1);
+        QCOMPARE(boundary, -2);
+        const int beforeHold = finishes;
+        QTest::mousePress(&page, Qt::LeftButton, Qt::NoModifier, textPoint);
+        QTRY_COMPARE(boundary, -1);
+        QTest::mouseMove(&page, textPoint - QPoint(180, 0));
+        QTest::mouseRelease(&page, Qt::LeftButton, Qt::NoModifier, textPoint - QPoint(180, 0));
+        QCOMPARE(finishes, beforeHold + 1);
+        QCOMPARE(swipes, previousSwipes + 1);
+        QVERIFY(!cancelled);
+        boundary = -2;
+        touch.press(0, textPoint, &page).commit();
+        QTRY_COMPARE(boundary, -1);
+        touch.move(0, textPoint + QPoint(80, 0), &page).commit();
+        touch.release(0, textPoint + QPoint(80, 0), &page).commit();
+        QCOMPARE(finishes, beforeHold + 2);
+        QCOMPARE(swipes, previousSwipes + 1);
+        page.setAnnotationInputEnabled(false);
+        page.setAnnotationHandles(geometry);
+        QVERIFY(page.annotationHandleRect(false).isEmpty());
+    }
     void annotationContourKeepsParagraphGaps() {
         const QVector<QRect> lines{QRect(100, 100, 200, 30), QRect(100, 138, 180, 30), QRect(100, 210, 200, 30)};
         const auto contour = ReadingPage::annotationContour(lines);
@@ -761,12 +873,9 @@ private slots:
         const auto verticalContour = ReadingPage::annotationContour(vertical, true);
         QVERIFY(verticalContour.contains(QPoint(133, 160)));
         QVERIFY(!verticalContour.contains(QPoint(188, 160)));
-        // This is the measured first vertical glyph cell (69x46), not a tall column.
-        // Its explicit writing axis must win over the rectangle's aspect ratio.
-        const auto shortVertical = ReadingPage::annotationUnderline({QRect(483, 24, 69, 46)}, true);
-        QVERIFY(shortVertical.boundingRect().height() > shortVertical.boundingRect().width() * 5);
-        QVERIFY(shortVertical.boundingRect().width() <= ui::px(4) + 0.01);
-        const auto transposedHorizontal = ReadingPage::annotationUnderline({QRect(24, 483, 46, 69)}, false);
+        const auto shortVertical = ReadingPage::annotationContour({QRect(483, 24, 69, 46)}, true);
+        QCOMPARE(shortVertical.boundingRect(), QRect(483, 24, 69, 46));
+        const auto transposedHorizontal = ReadingPage::annotationContour({QRect(24, 483, 46, 69)}, false);
         QCOMPARE(shortVertical, QTransform(0, 1, 1, 0, 0, 0).map(transposedHorizontal));
         // A temporary candidate is separate from the draft and must not join it.
         ReadingPage page(nullptr, [] {});

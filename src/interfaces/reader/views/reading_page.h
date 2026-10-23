@@ -2,6 +2,7 @@
 #include <QPainterPath>
 #include "interfaces/reader/ui/style/metrics.h"
 #include "reading/header_footer.h"
+#include "reading/highlight_geometry.h"
 #include "ui/brightness_gesture.h"
 #include <QWidget>
 #include <QImage>
@@ -16,6 +17,7 @@ class QPainter;
 class QTouchEvent;
 
 namespace kobalt {
+struct AnnotationGeometry;
 class ReadingPage : public QWidget {
 public:
     QImage image;
@@ -69,17 +71,23 @@ public:
     std::function<void(double)> lightChanged;
     std::function<void(bool)> lightFinished;
     static QRegion annotationContour(const QVector<QRect> &rectangles, bool vertical = false);
-    static QPainterPath annotationUnderline(const QVector<QRect> &rectangles, bool vertical = false);
+    void setAnnotationInputEnabled(bool enabled);
+    void setAnnotationHandles(const AnnotationGeometry &geometry);
+    QRect annotationHandleRect(bool start) const;
+    // Boundary -1 starts a new drag; 0 and 1 move the source start and end.
+    std::function<bool(QPoint, int)> annotationDragStarted;
+    std::function<void(QPoint)> annotationDragMoved;
+    std::function<void(bool)> annotationDragFinished;
     bool annotationContains(QPoint point) const {
         return draftContour.contains(point);
     }
     void annotate(const QVector<QRect> &draft, const QVector<QRect> &saved, const QVector<QRect> &candidate = {},
                   bool vertical = false);
-    void setAnnotationColors(const QVector<QPair<QVector<QRect>, QString>> &groups);
+    void setSavedHighlights(const QVector<HighlightGeometry> &groups);
     // Install destination markup without queuing a separate overlay paint.
     // refreshContent consumes its old and new damage with the page image.
-    void installAnnotationFrame(const QVector<QRect> &draft, const QVector<QPair<QVector<QRect>, QString>> &saved,
-                                bool vertical = false);
+    void installAnnotationFrame(const QVector<QRect> &draft, const QVector<HighlightGeometry> &saved,
+                                bool vertical = false, const AnnotationGeometry *geometry = nullptr);
     void mark(const QVector<QRect> &rectangles);
     void revealLinks(const QVector<QRect> &rectangles);
     std::function<void(QPoint)> tapped;
@@ -130,12 +138,22 @@ private:
     QTimer holdTimer;
     QVector<QRect> selection, revealedLinks, draftAnnotations, savedAnnotations, candidateAnnotations;
     QRegion draftContour, annotationColorRegion;
-    QPainterPath draftUnderline, candidateUnderline;
+    QPainterPath draftOutline, candidateOutline;
+    struct AnnotationHandle {
+        QPoint center, target;
+        bool visible = false;
+    };
+    std::array<AnnotationHandle, 2> annotationHandles;
+    bool annotationInputEnabled = false, annotationDragging = false;
+    QPoint annotationDragOffset;
+    int annotationPointerBoundary = -1;
+    void beginPointer(QPointF point);
     bool annotationVertical = false, installingAnnotationFrame = false;
     QRegion annotationFrameDamage;
     void damageAnnotations(const QRegion &dirty);
-    QVector<QPair<QVector<QRect>, QString>> annotationColorGroups;
-    QVector<QPair<QRegion, QColor>> annotationTints;
+    QVector<HighlightGeometry> annotationColorGroups;
+    struct PaintedHighlight { HighlightGeometry mark; QRegion visible; };
+    QVector<PaintedHighlight> annotationTints;
     QVector<QRect> revealedOutlines;
     bool tracking = false, moved = false, consumed = false;
     QElapsedTimer touchClock;

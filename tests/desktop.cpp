@@ -1,7 +1,9 @@
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/private_text.h"
 #include "interfaces/reader/ui/style/scale.h"
+#include "interfaces/reader/ui/style/theme.h"
 #include "interfaces/reader/views/reading_page.h"
 #include "platforms/desktop/window.h"
 #include "platforms/android/start_screen.h"
@@ -38,6 +40,7 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QPushButton>
+#include <QPainter>
 #include <QSaveFile>
 #include <QSignalSpy>
 #include <QSet>
@@ -154,7 +157,7 @@ struct Fixture {
     }
     storage::Paths prepare(bool dark, bool variableFont) {
         paths.stateReport = directory.path() + "/state.json";
-        prepared = directory.isValid() && storage::writeJson(paths.preferences(), {{"dark_mode", dark}});
+        prepared = directory.isValid() && storage::writeJson(paths.preferences(), {{"dark_mode", dark}, {"highlight_help_seen", true}});
         if (variableFont)
             prepared = prepared && QDir().mkpath(directory.path() + "/fonts") &&
                        QFile::copy(QStringLiteral(KOBALT_TEST_VARIABLE_FONT), directory.path() + "/fonts/Amstelvar.ttf");
@@ -207,16 +210,48 @@ struct Fixture {
         return reader ? reader->findChild<QWidget *>(name) : nullptr;
     }
     bool press(const char *name) { return click(widget(name)); }
-    bool hold(QWidget *target, QPoint position) {
+    bool drag(QWidget *target, QPoint from, QPoint to, bool holdFirst = false) {
         auto *reader = window.readerWindow();
         auto *canvas = window.findChild<QGraphicsView *>();
         if (!reader || !canvas || !target)
             return false;
+        const auto start = canvas->mapFromScene(target->mapTo(reader, from));
+        const auto end = canvas->mapFromScene(target->mapTo(reader, to));
+        if (!canvas->viewport()->rect().contains(start) || !canvas->viewport()->rect().contains(end))
+            return false;
+        QTest::mousePress(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, start);
+        bool recognized = true;
+        if (holdFirst)
+            recognized = QTest::qWaitFor([this] { return state().value("annotation_dragging").toBool(); }, 2000);
+        for (int i = 1; i <= 8; ++i) {
+            QTest::mouseMove(canvas->viewport(), start + (end - start) * i / 8);
+            QTest::qWait(5);
+        }
+        QTest::mouseRelease(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, end);
+        return recognized;
+    }
+    bool selectWord(QWidget *target, QPoint position) {
+        auto *reader = window.readerWindow();
+        auto *canvas = window.findChild<QGraphicsView *>();
+        auto *page = target && target->objectName() == "rrPage" ? static_cast<ReadingPage *>(target) : nullptr;
+        if (!reader || !canvas || !page)
+            return false;
         const auto at = canvas->mapFromScene(target->mapTo(reader, position));
+        bool recognized = false;
+        auto original = page->annotationDragStarted;
+        page->annotationDragStarted = [&](QPoint point, int boundary) {
+            recognized = true;
+            return original(point, boundary);
+        };
         QTest::mousePress(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, at);
-        const bool ready = QTest::qWaitFor([this] { return visible("rrLinkGo"); }, 2000);
+        const bool ready = QTest::qWaitFor([&] { return recognized; }, 2000);
         QTest::mouseRelease(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, at);
+        page->annotationDragStarted = original;
         return ready;
+    }
+    bool hold(QWidget *target, QPoint position) {
+        return selectWord(target, position) && QTest::qWaitFor([this] { return visible("rrSelectionLink"); }, 2000) &&
+            press("rrSelectionLink");
     }
     bool visible(const char *name) {
         const auto *item = widget(name);
@@ -254,6 +289,26 @@ struct Fixture {
                 }
             }
         return {-1, -1};
+    }
+    QRect wordRect(const QString &text) {
+        auto *page = static_cast<ReadingPage *>(widget("rrPage"));
+        if (!page)
+            return {};
+        const auto current = state();
+        QFile input(book);
+        ReaderModel coordinates(fontInputs);
+        QString error;
+        if (!input.open(QIODevice::ReadOnly) ||
+            !coordinates.open(input.readAll(), page->image.size(), current, &error) ||
+            !coordinates.goTo(current.value("position").toString()))
+            return {};
+        for (int y = 0; y < page->image.height(); y += 12)
+            for (int x = 0; x < page->image.width(); x += 16) {
+                const auto word = coordinates.wordAt({x, y});
+                if (word.text == text && !word.rectangles.isEmpty())
+                    return word.rectangles.first().translated(0, page->topHeight());
+            }
+        return {};
     }
     QPoint linkPoint(const QString &path, const QString &label) {
         auto *page = static_cast<ReadingPage *>(widget("rrPage"));
@@ -455,6 +510,13 @@ void tour(Fixture &fixture, const QString &name, bool screenshots) {
     }
     QVERIFY(fixture.press("rrAnnotationsTab"));
     QTRY_VERIFY(fixture.visible("rrBookmarkListEmpty"));
+    QVERIFY(fixture.widget("rrAnnotationsTab")->x() < fixture.widget("rrBookmarksTab")->x());
+    for (const auto *name : {"rrBookmarksTab", "rrAnnotationsTab"}) {
+        auto *heading = fixture.widget(name);
+        QVERIFY(heading);
+        QCOMPARE(heading->font().family(), ui::brandFont(ui::metrics::chrome::titleText).family());
+        QCOMPARE(heading->font().pixelSize(), int(ui::metrics::chrome::titleText));
+    }
     QVERIFY(scene("annotations"));
     QVERIFY(fixture.press("rrBookmarkListClose"));
     if (!fixture.visible("rrSearchOpen"))
@@ -502,7 +564,7 @@ void tour(Fixture &fixture, const QString &name, bool screenshots) {
     QVERIFY(fixture.press("rrSettingsAbout"));
     QTRY_VERIFY(fixture.visible("rrAboutVersion"));
     QVERIFY(scene("about"));
-    QVERIFY(fixture.press("rrSettings"));
+    QVERIFY(fixture.press("rrSettingsClose"));
     QTRY_VERIFY(!fixture.visible("rrGeneralSettings"));
     if (screenshots) {
         openPrologueBody(fixture);
@@ -510,29 +572,35 @@ void tour(Fixture &fixture, const QString &name, bool screenshots) {
     }
     QTRY_VERIFY(fixture.visible("rrAnnotate"));
     QVERIFY(fixture.press("rrAnnotate"));
-    QTRY_VERIFY(fixture.visible("rrAnnotationHeader"));
+    QVERIFY(!fixture.visible("rrControlsTop"));
+    QVERIFY(!fixture.visible("rrAnnotationHeader"));
+    QVERIFY(fixture.press("rrPage"));
+    QVERIFY(qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
     QVERIFY(scene("annotating"));
+    QVERIFY(fixture.press("rrPage"));
     if (screenshots) {
         const auto word = fixture.wordPoint();
         QVERIFY(word.x() >= 0);
-        QVERIFY(fixture.click(page, word));
-        auto *hint = fixture.window.readerWindow()->findChild<QLabel *>("rrAnnotationHint");
-        QVERIFY(hint);
-        QTRY_COMPARE(hint->text(), strings::get("annotations.tap_end"));
+        QVERIFY(fixture.selectWord(page, word));
+        QTRY_VERIFY(!page->annotationHandleRect(true).isEmpty());
         QVERIFY(scene("annotation-start"));
         QVERIFY(fixture.click(page, word));
-        QTRY_VERIFY(fixture.visible("rrAnnotationHighlightWord"));
+        QTRY_VERIFY(fixture.visible("rrAnnotationStyle_shaded"));
         QVERIFY(scene("annotation-actions"));
-        QVERIFY(fixture.press("rrAnnotationHighlightWord"));
+        QVERIFY(fixture.press("rrAnnotationStyle_shaded"));
+        QVERIFY(fixture.press("rrAnnotationSave"));
         QTRY_COMPARE(fixture.stored("highlights.json", "highlights").size(), 1);
         QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
         QVERIFY(scene("annotation-saved"));
-        QVERIFY(fixture.click(page, word));
+        QVERIFY(fixture.selectWord(page, word));
         QTRY_VERIFY(fixture.visible("rrAnnotationEdit"));
         QVERIFY(scene("annotation-edit"));
+        QVERIFY(fixture.click(page, QPoint(10, page->height() / 2)));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
     }
-    QVERIFY(fixture.press("rrAnnotationClose"));
-    QTRY_VERIFY(!fixture.visible("rrAnnotationHeader"));
+    QVERIFY(fixture.press("rrPage"));
+    QTRY_VERIFY(fixture.visible("rrAnnotate"));
+    QVERIFY(fixture.press("rrAnnotate"));
 }
 }
 
@@ -590,7 +658,7 @@ private slots:
         Fixture fixture;
         QVERIFY(fixture.prepared);
         QCOMPARE(fixture.window.findChild<QComboBox *>("desktopScreenPicker")->currentIndex(), 1);
-        QCOMPARE(fixture.window.findChild<QComboBox *>("desktopResolutionPicker")->currentData().toInt(), 300);
+        QCOMPARE(fixture.window.findChild<QComboBox *>("desktopResolutionPicker")->currentData().toInt(), 0);
         QVERIFY(!fixture.window.readerWindow());
         QVERIFY(fixture.window.findChild<QPushButton *>("androidOpenBook"));
     }
@@ -773,10 +841,433 @@ private slots:
         QTRY_COMPARE(fixture.state().value("bookmark_count").toInt(), 0);
         QVERIFY(fixture.stored("bookmarks.json", "bookmarks").isEmpty());
     }
+    void touchCursor() {
+        Fixture fixture(false);
+        QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
+        fixture.window.openBook(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 10000);
+        auto *canvas = fixture.window.findChild<QGraphicsView *>();
+        QVERIFY(canvas);
+        const QPoint point = canvas->viewport()->rect().center();
+        QMouseEvent hoverEvent(QEvent::MouseMove, point, canvas->viewport()->mapToGlobal(point), Qt::NoButton,
+                               Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(canvas->viewport(), &hoverEvent);
+        QVERIFY(!canvas->cursor().pixmap().isNull());
+        const auto hover = canvas->cursor().pixmap().toImage();
+        QVERIFY(!hover.isNull());
+        QCOMPARE(canvas->cursor().hotSpot(), QPoint(14, 14));
+        QCOMPARE(hover.pixelColor(0, 0).alpha(), 0);
+        QCOMPARE(hover.pixelColor(hover.width() / 2, hover.height() / 2).alpha(), 128);
+        QTest::mousePress(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+        const auto pressed = canvas->cursor().pixmap().toImage();
+        QVERIFY(pressed.pixelColor(pressed.width() / 2, pressed.height() / 2).alpha() >
+                hover.pixelColor(hover.width() / 2, hover.height() / 2).alpha());
+        QTest::mouseRelease(canvas->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+        QCOMPARE(canvas->cursor().pixmap().toImage(), hover);
+        QEvent leave(QEvent::Leave);
+        QApplication::sendEvent(canvas->viewport(), &leave);
+        QVERIFY(canvas->cursor().pixmap().isNull());
+        auto *screens = fixture.window.findChild<QComboBox *>("desktopScreenPicker");
+        screens->setCurrentIndex(0);
+        QTest::mouseMove(canvas->viewport(), point + QPoint(1, 0));
+        QVERIFY(canvas->cursor().pixmap().isNull());
+    }
+    void wordSelection() {
+        Fixture fixture(false);
+        QVERIFY(fixture.prepared);
+        QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
+        fixture.window.openBook(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 10000);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        openPrologueBody(fixture);
+        auto *page = static_cast<ReadingPage *>(fixture.widget("rrPage"));
+        const auto first = fixture.wordPoint(0), later = fixture.wordPoint(3);
+        QVERIFY(first.x() >= 0 && later.x() >= 0);
+        QVERIFY(fixture.selectWord(page, first));
+        QTRY_VERIFY(fixture.visible("rrDictionary"));
+        QTRY_VERIFY(!page->annotationHandleRect(true).isEmpty());
+        const auto oldEnd = page->annotationHandleRect(false).center();
+        QVERIFY(fixture.drag(page, oldEnd, oldEnd + later - first));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QTRY_VERIFY(page->annotationHandleRect(false).center() != oldEnd);
+        QTRY_VERIFY(fixture.visible("rrSelectionLookup"));
+        QVERIFY(!fixture.visible("rrDictionary"));
+        QVERIFY(!fixture.widget("rrAnnotationDismiss"));
+        for (const auto *name : {"rrSelectionLookup", "rrSelectionAnnotate", "rrAnnotationCancel"}) {
+            auto *button = qobject_cast<QAbstractButton *>(fixture.widget(name));
+            QVERIFY(button);
+            QCOMPARE(ui::elideInterfaceText(button->text(), button->font(), button->width() - 2 * ui::px(16)),
+                     button->text());
+        }
+        QVERIFY(fixture.press("rrSelectionLookup"));
+        QTRY_VERIFY(fixture.visible("rrDictionary"));
+        QVERIFY(fixture.window.readerWindow()->findChild<QLabel *>("rrDictionaryWord")->text().split(' ').size() >= 3);
+        QVERIFY(fixture.click(page, first));
+        QTRY_VERIFY(fixture.visible("rrSelectionLookup"));
+        QVERIFY(fixture.visible("rrSelectionAnnotate"));
+        QVERIFY(!fixture.visible("rrAnnotationStyles"));
+        QVERIFY(fixture.press("rrSelectionAnnotate"));
+        QTRY_VERIFY(fixture.visible("rrAnnotationStyle_shaded"));
+        QVERIFY(!qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
+        QVERIFY(!fixture.visible("rrAnnotationHeader"));
+        QVERIFY(fixture.stored("highlights.json", "highlights").isEmpty());
+        QVERIFY(fixture.press("rrAnnotationStyle_shaded"));
+        QVERIFY(fixture.stored("highlights.json", "highlights").isEmpty());
+        QVERIFY(fixture.press("rrAnnotationSave"));
+        QTRY_COMPARE(fixture.stored("highlights.json", "highlights").size(), 1);
+        QVERIFY(fixture.stored("highlights.json", "highlights").first().toObject().value("text").toString().split(' ').size() >= 3);
+        QVERIFY(page->annotationHandleRect(true).isEmpty());
+        // A short tap on a saved highlight keeps the normal reading action.
+        QVERIFY(fixture.click(page, first));
+        QVERIFY(!fixture.visible("rrAnnotationEdit"));
+        QVERIFY(!qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
+        if (fixture.visible("rrControlsTop"))
+            QVERIFY(fixture.press("rrPage"));
+        // Saving one selection does not change the next word's lookup behavior.
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        const auto nextFirst = fixture.wordPoint(0), nextLater = fixture.wordPoint(3);
+        QVERIFY(nextFirst.x() >= 0 && nextLater.x() >= 0);
+        QVERIFY(fixture.selectWord(page, nextLater));
+        QTRY_VERIFY(fixture.visible("rrDictionary"));
+        QVERIFY(!fixture.visible("rrAnnotationEdit"));
+        QVERIFY(fixture.click(page, nextLater));
+        QTRY_VERIFY(fixture.visible("rrSelectionAnnotate"));
+        QVERIFY(fixture.press("rrSelectionAnnotate"));
+        QTRY_VERIFY(fixture.visible("rrAnnotationCancel"));
+        QVERIFY(fixture.press("rrAnnotationCancel"));
+        QVERIFY(fixture.drag(page, nextFirst, nextLater, true));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QTRY_VERIFY(fixture.visible("rrSelectionAnnotate"));
+        QVERIFY(!fixture.visible("rrDictionary"));
+        QVERIFY(!qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
+        const auto position = fixture.state().value("position");
+        QVERIFY(fixture.click(page, QPoint(10, page->height() / 2)));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+        QVERIFY(page->annotationHandleRect(true).isEmpty() && page->annotationHandleRect(false).isEmpty());
+        QCOMPARE(fixture.state().value("position"), position);
+        QVERIFY(!fixture.visible("rrControlsTop"));
+        // One-time marking also belongs to normal reading. Dismissal must not
+        // leave its draft or silently enable persistent annotation mode.
+        QVERIFY(fixture.drag(page, nextFirst, nextLater, true));
+        QTRY_VERIFY(fixture.visible("rrSelectionAnnotate"));
+        QVERIFY(fixture.press("rrSelectionAnnotate"));
+        QTRY_VERIFY(fixture.visible("rrAnnotationSave"));
+        QVERIFY(fixture.click(page, QPoint(10, page->height() / 2)));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+        QVERIFY(page->annotationHandleRect(true).isEmpty() && page->annotationHandleRect(false).isEmpty());
+        QVERIFY(!qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
+        QCOMPARE(fixture.state().value("position"), position);
+    }
+    void annotationSelection_data() {
+        QTest::addColumn<bool>("dark");
+        QTest::addColumn<int>("resolution");
+        for (int resolution : {300, 0})
+            for (bool dark : {false, true})
+                QTest::newRow(qPrintable(QString("%1-%2").arg(resolution).arg(dark ? "dark" : "light"))) << dark << resolution;
+    }
+    void annotationSelection() {
+        QFETCH(bool, dark);
+        QFETCH(int, resolution);
+        Fixture fixture(dark);
+        auto *resolutionPicker = fixture.window.findChild<QComboBox *>("desktopResolutionPicker");
+        QVERIFY(resolutionPicker);
+        resolutionPicker->setCurrentIndex(resolutionPicker->findData(resolution));
+        QVERIFY(fixture.prepared);
+        QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
+        fixture.window.openBook(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 10000);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        openPrologueBody(fixture);
+        const QPoint first = fixture.wordPoint(0), second = fixture.wordPoint(1), fourth = fixture.wordPoint(3),
+                     later = fixture.wordPoint(7);
+        QVERIFY(first.x() >= 0 && second.x() >= 0 && fourth.x() >= 0 && later.x() >= 0);
+        auto *page = static_cast<ReadingPage *>(fixture.widget("rrPage"));
+        const auto position = fixture.state().value("position");
+        QVERIFY(fixture.press("rrPage"));
+        QVERIFY(fixture.press("rrAnnotate"));
+        QTRY_VERIFY(!fixture.visible("rrControlsTop"));
+        QVERIFY(!fixture.visible("rrAnnotationHeader"));
+        const int bodyPage = fixture.state().value("page").toInt();
+        fixture.window.readerWindow()->pageButton(-1);
+        QTRY_VERIFY(fixture.state().value("page").toInt() < bodyPage && !fixture.state().value("busy").toBool());
+        const auto division = fixture.wordRect("division"), published = fixture.wordRect("published"),
+                   through = fixture.wordRect("through");
+        QVERIFY(!division.isEmpty() && !published.isEmpty() && !through.isEmpty());
+        QVERIFY(fixture.selectWord(page, division.center()));
+        QTRY_VERIFY(!page->annotationHandleRect(false).isEmpty());
+        const QPoint divisionHandle = page->annotationHandleRect(false).center();
+        QVERIFY(fixture.drag(page, divisionHandle,
+                             divisionHandle + QPoint(published.right() - division.right() + 20,
+                                                     published.center().y() - division.center().y())));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QVERIFY2(page->annotationContains(published.center() - QPoint(0, page->topHeight())),
+                 "Dragging past the line's final word must include published");
+        const QPoint divisionStart = page->annotationHandleRect(true).center();
+        QVERIFY(fixture.drag(page, divisionStart,
+                             divisionStart + QPoint(through.left() - division.left() - 20,
+                                                    through.center().y() - division.center().y())));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QVERIFY2(page->annotationContains(through.center() - QPoint(0, page->topHeight())),
+                 "Dragging before the line's first word must include through");
+        QVERIFY(fixture.click(page, division.center()));
+        QTRY_VERIFY(fixture.visible("rrAnnotationCancel"));
+        QVERIFY(fixture.press("rrAnnotationCancel"));
+        fixture.window.readerWindow()->pageButton(1);
+        QTRY_VERIFY(fixture.state().value("page").toInt() == bodyPage && !fixture.state().value("busy").toBool());
+        QVERIFY(fixture.selectWord(page, first));
+        QTRY_VERIFY(!page->annotationHandleRect(true).isEmpty() && !page->annotationHandleRect(false).isEmpty());
+        const auto originalStart = page->annotationHandleRect(true);
+        const auto end = page->annotationHandleRect(false).center();
+        QVERIFY(fixture.drag(page, end, end + fourth - first));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QTRY_VERIFY(page->annotationHandleRect(false).center() != end);
+        QVERIFY(!fixture.visible("rrAnnotationPopover"));
+        QVERIFY(fixture.stored("highlights.json", "highlights").isEmpty());
+        QCOMPARE(fixture.state().value("position"), position);
+        QCOMPARE(page->annotationHandleRect(true), originalStart);
+        QVERIFY(page->annotationHandleRect(false).center() != end);
+
+        const auto fixedEnd = page->annotationHandleRect(false);
+        const auto start = page->annotationHandleRect(true).center();
+        QVERIFY(fixture.drag(page, start, start + second - first));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QTRY_VERIFY(page->annotationHandleRect(true) != originalStart);
+        QVERIFY(!fixture.visible("rrAnnotationPopover"));
+        QCOMPARE(page->annotationHandleRect(false), fixedEnd);
+        QVERIFY(page->annotationHandleRect(true) != originalStart);
+        QVERIFY(fixture.stored("highlights.json", "highlights").isEmpty());
+
+        const auto extend = page->annotationHandleRect(false).center();
+        QVERIFY(fixture.drag(page, extend, extend + later - fourth));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QTRY_VERIFY(page->annotationHandleRect(false) != fixedEnd);
+        QVERIFY(!fixture.visible("rrAnnotationPopover"));
+        QVERIFY(fixture.click(page, fourth));
+        QTRY_VERIFY(fixture.visible("rrAnnotationStyle_underline"));
+        auto *shaded = fixture.widget("rrAnnotationStyle_shaded");
+        auto *underline = fixture.widget("rrAnnotationStyle_underline");
+        auto *dotted = fixture.widget("rrAnnotationStyle_dotted");
+        auto *cancel = fixture.widget("rrAnnotationCancel");
+        QVERIFY(!fixture.widget("rrAnnotationDismiss"));
+        auto *save = fixture.widget("rrAnnotationSave");
+        const auto frame = [page](QWidget *widget) {
+            auto *reader = page->window();
+            return QRect(widget->mapTo(reader, QPoint()) - page->mapTo(reader, QPoint()), widget->size());
+        };
+        QCOMPARE(frame(shaded).right() + 1, frame(underline).left());
+        QCOMPARE(frame(underline).right() + 1, frame(dotted).left());
+        QCOMPARE(frame(save).right() + 1, frame(cancel).left());
+        auto *styleSection = fixture.widget("rrAnnotationStyleSection");
+        auto *actionsSection = fixture.widget("rrAnnotationActionsSection");
+        QVERIFY(styleSection && actionsSection);
+        QVERIFY(styleSection->isVisible() && actionsSection->isVisible());
+        QVERIFY(frame(styleSection).bottom() < frame(shaded).top());
+        if (auto *palette = fixture.widget("rrAnnotationPalette")) {
+            auto *colorSection = fixture.widget("rrAnnotationColorSection");
+            QVERIFY(colorSection && colorSection->isVisible());
+            QCOMPARE(frame(colorSection).bottom() + 1, frame(palette).top());
+            QCOMPARE(frame(palette).bottom() + 1, frame(styleSection).top());
+            const auto swatches = palette->findChildren<QAbstractButton *>();
+            QCOMPARE(swatches.size(), 5);
+            int circleTop = -1;
+            for (auto *swatch : swatches) {
+                const auto image = swatch->grab().toImage();
+                const auto paper = swatch->palette().color(QPalette::Window);
+                QRect content, color;
+                for (int y = 0; y < image.height(); ++y) {
+                    for (int x = 0; x < image.width(); ++x) {
+                        const auto pixel = image.pixelColor(x, y);
+                        if (pixel != paper)
+                            content |= QRect(x, y, 1, 1);
+                        if (qMax(pixel.red(), qMax(pixel.green(), pixel.blue())) -
+                            qMin(pixel.red(), qMin(pixel.green(), pixel.blue())) > 30)
+                            color |= QRect(x, y, 1, 1);
+                    }
+                }
+                QVERIFY(!content.isEmpty());
+                QVERIFY(qAbs(content.top() - (image.height() - 1 - content.bottom())) <= ui::px(10));
+                if (!color.isEmpty()) {
+                    if (circleTop >= 0)
+                        QCOMPARE(color.top(), circleTop);
+                    circleTop = color.top();
+                }
+            }
+        }
+        QCOMPARE(frame(shaded).bottom() + 1, frame(actionsSection).top());
+        QCOMPARE(frame(actionsSection).bottom() + 1, frame(cancel).top());
+        QCOMPARE(frame(shaded).left(), frame(fixture.widget("rrAnnotationSave")).left());
+        QCOMPARE(frame(dotted).right(), frame(cancel).right());
+        for (const auto *name : {"rrAnnotationSave", "rrAnnotationCancel"}) {
+            auto *button = dynamic_cast<ui::CaptionButton *>(fixture.widget(name));
+            QVERIFY(button && button->isIconAboveLabel());
+            QCOMPARE(ui::elideInterfaceText(button->text(), button->font(), button->width() - 2 * ui::px(16)),
+                     button->text());
+            QVERIFY(ui::metrics::chrome::cellIcon + ui::px(8) + QFontMetrics(button->font()).height() +
+                    2 * ui::px(8) <= button->height());
+        }
+        for (auto *header : {styleSection, actionsSection}) {
+            const auto image = header->grab().toImage();
+            QCOMPARE(image.pixelColor(image.width() - 10, image.height() / 2), header->palette().color(QPalette::Window));
+            QCOMPARE(image.pixelColor(image.width() - 10, image.height() - 1), ui::dividerColor(header));
+        }
+        const auto paper = shaded->palette().color(QPalette::Window);
+        const auto selectedSample = shaded->grab().toImage();
+        QCOMPARE(selectedSample.pixelColor(selectedSample.width() / 2, selectedSample.height() - ui::px(6)), paper);
+
+        QVERIFY2(cancel->height() >= QFontMetrics(cancel->font()).height() + 2 * ui::px(20),
+                 qPrintable(QString("Action height %1, font height %2, font pixels %3, padding %4")
+                     .arg(cancel->height()).arg(QFontMetrics(cancel->font()).height()).arg(cancel->font().pixelSize()).arg(ui::px(20))));
+
+        const QRect selection = page->annotationHandleRect(true).united(page->annotationHandleRect(false));
+        auto *card = fixture.widget("rrAnnotationStyles")->parentWidget();
+        const auto cardBounds = QRect(page->mapFromGlobal(card->mapToGlobal(QPoint())), card->size());
+        QVERIFY(cardBounds.bottom() <= selection.top() || cardBounds.top() >= selection.bottom());
+        QVERIFY(fixture.stored("highlights.json", "highlights").isEmpty());
+        QVERIFY(fixture.press("rrAnnotationStyle_underline"));
+        const QRect check(shaded->width() - ui::px(40), ui::px(10), ui::px(24), ui::px(24));
+        QVERIFY(selectedSample.copy(check) != shaded->grab().toImage().copy(check));
+        const auto selectedUnderline = underline->grab().toImage();
+        QCOMPARE(selectedUnderline.pixelColor(selectedUnderline.width() / 2, selectedUnderline.height() - ui::px(6)), paper);
+        QVERIFY(fixture.visible("rrAnnotationPopover"));
+        QVERIFY(fixture.stored("highlights.json", "highlights").isEmpty());
+        // A tap on the selection dismisses the open card instead of rebuilding it.
+        QVERIFY(fixture.click(page, fourth));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+        QCOMPARE(fixture.state().value("position"), position);
+        QVERIFY(fixture.click(page, fourth));
+        QTRY_VERIFY(fixture.visible("rrAnnotationSave"));
+        QVERIFY(qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotationStyle_underline"))->isChecked());
+        for (const auto *name : {"rrAnnotationPalette", "rrAnnotationStyles", "rrAnnotationSave", "rrAnnotationCancel"}) {
+            auto *item = fixture.widget(name);
+            if (!item)
+                continue; // Grayscale omits the color palette.
+            QVERIFY(item->isVisible());
+            QVERIFY(item->visibleRegion().contains(item->rect()));
+            QVERIFY(card->rect().contains(QRect(item->mapTo(card, QPoint()), item->size())));
+        }
+        QVERIFY(fixture.click(page, QPoint(10, page->height() / 2)));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+        QCOMPARE(fixture.state().value("position"), position);
+        QVERIFY(!fixture.visible("rrControlsTop"));
+        QVERIFY(fixture.click(page, fourth));
+        QTRY_VERIFY(fixture.visible("rrAnnotationSave"));
+        QVERIFY(fixture.press("rrAnnotationSave"));
+        QTRY_COMPARE(fixture.stored("highlights.json", "highlights").size(), 1);
+        const auto saved = fixture.stored("highlights.json", "highlights").first().toObject();
+        QCOMPARE(saved.value("style").toString(), QString("underline"));
+        QVERIFY(saved.value("text").toString().split(' ').size() >= 4);
+        QVERIFY(page->annotationHandleRect(true).isEmpty() && page->annotationHandleRect(false).isEmpty());
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrControlsTop"));
+        // Saved passages open their existing actions in either mode. They never
+        // become a new word selection or a second highlight over the same text.
+        QVERIFY(fixture.press("rrAnnotate"));
+        QVERIFY(fixture.press("rrPage"));
+        QVERIFY(fixture.selectWord(page, second));
+        QTRY_VERIFY(fixture.visible("rrAnnotationEdit"));
+        QVERIFY(!fixture.visible("rrAnnotationSave"));
+        QVERIFY(!fixture.visible("rrDictionary"));
+        QVERIFY(page->annotationHandleRect(true).isEmpty() && page->annotationHandleRect(false).isEmpty());
+        QVERIFY(fixture.click(page, QPoint(10, page->height() / 2)));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+
+        const auto previousPage = fixture.state().value("page").toInt();
+        QVERIFY(fixture.drag(page, first, first - QPoint(qMax(120, page->width() / 4), 0)));
+        QTRY_VERIFY(fixture.state().value("page").toInt() != previousPage);
+        QVERIFY(!fixture.visible("rrAnnotationPopover"));
+        QCOMPARE(fixture.stored("highlights.json", "highlights").first().toObject(), saved);
+        fixture.window.readerWindow()->pageButton(-1);
+        QTRY_VERIFY(fixture.state().value("page").toInt() == previousPage && !fixture.state().value("busy").toBool());
+        QVERIFY(fixture.drag(page, QPoint(page->width() - 10, page->height() / 2),
+                             QPoint(page->width() / 2, page->height() / 2)));
+        QTRY_VERIFY(fixture.state().value("page").toInt() != previousPage);
+        QVERIFY(!fixture.visible("rrAnnotationPopover"));
+    }
+    void annotationOverlap_data() { annotations_data(); }
+    void annotationOverlap() {
+        QFETCH(bool, dark);
+        Fixture fixture(dark);
+        QVERIFY(fixture.prepared);
+        QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
+        fixture.window.openBook(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 10000);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        openPrologueBody(fixture);
+        auto *page = static_cast<ReadingPage *>(fixture.widget("rrPage"));
+        const QPoint first = fixture.wordPoint(0), second = fixture.wordPoint(1), fourth = fixture.wordPoint(3),
+                     beyond = fixture.wordPoint(12);
+        QVERIFY(first.x() >= 0 && second.x() >= 0 && fourth.x() >= 0 && beyond.x() >= 0);
+        QVERIFY(fixture.press("rrPage"));
+        QVERIFY(fixture.press("rrAnnotate"));
+        QVERIFY(fixture.press("rrPage"));
+        QVERIFY(fixture.selectWord(page, second));
+        QTRY_VERIFY(!page->annotationHandleRect(false).isEmpty());
+        const QPoint handle = page->annotationHandleRect(false).center();
+        QVERIFY(fixture.drag(page, handle, handle + fourth - second));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QVERIFY(fixture.click(page, second));
+        QTRY_VERIFY(fixture.visible("rrAnnotationSave"));
+        QVERIFY(fixture.press("rrAnnotationSave"));
+        QTRY_COMPARE(fixture.stored("highlights.json", "highlights").size(), 1);
+        const auto saved = fixture.stored("highlights.json", "highlights").first().toObject();
+        // Neither lookup selections nor marking selections may cross a saved
+        // passage. Check both handles, including moves beyond the whole mark.
+        for (bool marking : {true, false}) {
+            for (bool fromLeft : {true, false}) {
+                const QPoint word = fromLeft ? first : beyond;
+                QVERIFY(fixture.selectWord(page, word));
+                QTRY_VERIFY(!page->annotationHandleRect(true).isEmpty());
+                const auto start = page->annotationHandleRect(true), end = page->annotationHandleRect(false);
+                const QPoint grip = (fromLeft ? end : start).center();
+                QVERIFY(fixture.drag(page, grip, grip + (fromLeft ? beyond : first) - word));
+                QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+                QCOMPARE(fromLeft ? page->annotationHandleRect(true) : page->annotationHandleRect(false),
+                         fromLeft ? start : end);
+                QVERIFY(!page->annotationContains(second - QPoint(0, page->topHeight())));
+                QVERIFY(!page->annotationContains(fourth - QPoint(0, page->topHeight())));
+                QVERIFY(!fixture.visible("rrAnnotationOverlap"));
+                QCOMPARE(fixture.stored("highlights.json", "highlights").first().toObject(), saved);
+                if (!fixture.visible("rrAnnotationCancel"))
+                    QVERIFY(fixture.click(page, word));
+                QTRY_VERIFY(fixture.visible("rrAnnotationCancel"));
+                QVERIFY(fixture.press("rrAnnotationCancel"));
+            }
+            if (marking) {
+                QVERIFY(fixture.press("rrPage"));
+                QVERIFY(fixture.press("rrAnnotate"));
+                QVERIFY(fixture.press("rrPage"));
+            }
+        }
+        // Adjust may change its own saved range, but cannot cross another mark.
+        QVERIFY(fixture.selectWord(page, beyond));
+        QTRY_VERIFY(!page->annotationHandleRect(true).isEmpty());
+        QVERIFY(fixture.click(page, beyond));
+        QTRY_VERIFY(fixture.visible("rrSelectionAnnotate"));
+        QVERIFY(fixture.press("rrSelectionAnnotate"));
+        QTRY_VERIFY(fixture.visible("rrAnnotationSave"));
+        QVERIFY(fixture.press("rrAnnotationSave"));
+        QTRY_COMPARE(fixture.stored("highlights.json", "highlights").size(), 2);
+        const auto highlights = fixture.stored("highlights.json", "highlights");
+        QVERIFY(fixture.selectWord(page, beyond));
+        QTRY_VERIFY(fixture.visible("rrAnnotationEdit"));
+        QVERIFY(!fixture.visible("rrAnnotationSave"));
+        QVERIFY(page->annotationHandleRect(true).isEmpty() && page->annotationHandleRect(false).isEmpty());
+        QVERIFY(fixture.press("rrAnnotationEdit"));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+        QTRY_VERIFY(!page->annotationHandleRect(true).isEmpty() && !page->annotationHandleRect(false).isEmpty());
+        const QPoint grip = page->annotationHandleRect(true).center();
+        QVERIFY(fixture.drag(page, grip, grip + first - beyond));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QVERIFY(!page->annotationContains(second - QPoint(0, page->topHeight())));
+        QVERIFY(!page->annotationContains(fourth - QPoint(0, page->topHeight())));
+        QVERIFY(!fixture.visible("rrAnnotationOverlap"));
+        QCOMPARE(fixture.stored("highlights.json", "highlights"), highlights);
+    }
     void annotations() {
         QFETCH(bool, dark);
         Fixture fixture(dark);
         QVERIFY(fixture.prepared);
+        QVERIFY(storage::writeJson(fixture.paths.preferences(), {{"dark_mode", dark}, {"highlight_help_seen", false}}));
         QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
         fixture.window.openBook(book);
         QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 10000);
@@ -792,14 +1283,32 @@ private slots:
         QVERIFY(fixture.press("rrPage"));
         QTRY_VERIFY(fixture.visible("rrAnnotate"));
         QVERIFY(fixture.press("rrAnnotate"));
-        QTRY_VERIFY(fixture.visible("rrAnnotationHeader"));
+        QTRY_VERIFY(!fixture.visible("rrControlsTop"));
+        QVERIFY(!fixture.window.readerWindow()->findChild<QWidget *>("rrAnnotationHeader"));
+        QVERIFY(qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
+        QCOMPARE(page->image, image);
+        QCOMPARE(fixture.state().value("position"), position);
+        QVERIFY(page->annotationHandleRect(true).isEmpty());
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrControlsTop"));
+        QVERIFY(qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
+        QVERIFY(fixture.selectWord(page, word));
+        QTRY_VERIFY(!fixture.visible("rrControlsTop"));
+        QVERIFY(!fixture.visible("rrAnnotationHeader"));
+        QTRY_VERIFY(!page->annotationHandleRect(true).isEmpty());
+        QTRY_VERIFY(!page->annotationHandleRect(false).isEmpty());
+        const QRect draftStart = page->annotationHandleRect(true), draftEnd = page->annotationHandleRect(false);
+        QVERIFY(fixture.click(page, QPoint(page->width() / 2, page->height() / 2)));
+        QTRY_VERIFY(fixture.visible("rrControlsTop"));
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_COMPARE(page->annotationHandleRect(true), draftStart);
+        QTRY_COMPARE(page->annotationHandleRect(false), draftEnd);
         QVERIFY(fixture.click(page, word));
-        auto *hint = fixture.window.readerWindow()->findChild<QLabel *>("rrAnnotationHint");
-        QVERIFY(hint);
-        QTRY_COMPARE(hint->text(), strings::get("annotations.tap_end"));
-        QVERIFY(fixture.click(page, word));
-        QTRY_VERIFY(fixture.visible("rrAnnotationHighlightWord"));
-        QVERIFY(fixture.press("rrAnnotationHighlightWord"));
+        QTRY_VERIFY(fixture.visible("rrAnnotationColor_yellow"));
+        QVERIFY(fixture.press("rrAnnotationColor_yellow"));
+        QVERIFY(fixture.visible("rrAnnotationPopover"));
+        QVERIFY(fixture.stored("highlights.json", "highlights").isEmpty());
+        QVERIFY(fixture.press("rrAnnotationSave"));
         QTRY_COMPARE(fixture.stored("highlights.json", "highlights").size(), 1);
         const auto saved = fixture.stored("highlights.json", "highlights").first().toObject();
         QVERIFY(!saved.value("text").toString().isEmpty());
@@ -807,36 +1316,81 @@ private slots:
         QVERIFY(!saved.value("end").toString().isEmpty());
         QCOMPARE(fixture.state().value("position"), position);
         QCOMPARE(page->image, image);
-        QVERIFY(fixture.click(page, word));
+        QVERIFY(fixture.selectWord(page, word));
         QTRY_VERIFY(fixture.visible("rrAnnotationEdit"));
         QTRY_VERIFY(fixture.visible("rrAnnotationColor_blue"));
+        QVERIFY(fixture.press("rrAnnotationColor_blue"));
+        QCOMPARE(fixture.stored("highlights.json", "highlights").first().toObject(), saved);
         {
             BlockedFile blocked(fixture.storedPath("highlights.json"));
             QVERIFY(blocked.active());
-            QVERIFY(fixture.press("rrAnnotationColor_blue"));
-            QTRY_VERIFY(fixture.visible("rrAnnotationPaletteError"));
-            QVERIFY(!fixture.window.readerWindow()->findChild<QLabel *>("rrAnnotationPaletteError")->text().isEmpty());
+            QVERIFY(fixture.press("rrAnnotationApply"));
+            QTRY_VERIFY(fixture.visible("rrAnnotationStyleError"));
+            QVERIFY(!fixture.window.readerWindow()->findChild<QLabel *>("rrAnnotationStyleError")->text().isEmpty());
             QVERIFY(blocked.restore());
         }
         QCOMPARE(fixture.stored("highlights.json", "highlights").first().toObject(), saved);
-        QVERIFY(fixture.press("rrAnnotationColor_blue"));
+        QVERIFY(fixture.press("rrAnnotationApply"));
         QTRY_COMPARE(fixture.stored("highlights.json", "highlights").first().toObject().value("color").toString(), QString("blue"));
         QCOMPARE(fixture.stored("highlights.json", "highlights").first().toObject().value("id"), saved.value("id"));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+        QVERIFY(fixture.selectWord(page, word));
+        QTRY_VERIFY(fixture.visible("rrAnnotationEdit"));
+        QVERIFY(!fixture.visible("rrAnnotationSave"));
         QVERIFY(fixture.press("rrAnnotationEdit"));
+        QTRY_VERIFY(!page->annotationHandleRect(false).isEmpty());
+        const auto handle = page->annotationHandleRect(false).center();
+        QVERIFY(fixture.drag(page, handle, handle + end - word));
+        QTRY_VERIFY(!fixture.state().value("annotation_dragging").toBool());
+        QTRY_VERIFY(!page->annotationHandleRect(false).isEmpty());
+        QVERIFY(!fixture.visible("rrAnnotationPopover"));
         QVERIFY(fixture.click(page, end));
-        QTRY_VERIFY(fixture.visible("rrAnnotationEnd"));
-        QVERIFY(fixture.press("rrAnnotationEnd"));
+        QTRY_VERIFY(fixture.visible("rrAnnotationStyle_dotted"));
+        QVERIFY(fixture.press("rrAnnotationStyle_dotted"));
+        QVERIFY(fixture.press("rrAnnotationSave"));
         QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
         QCOMPARE(fixture.stored("highlights.json", "highlights").size(), 1);
         QTRY_VERIFY(fixture.stored("highlights.json", "highlights").first().toObject().value("text") != saved.value("text"));
         QVERIFY(fixture.stored("highlights.json", "highlights").first().toObject().value("text").toString().contains(saved.value("text").toString()));
         QCOMPARE(fixture.stored("highlights.json", "highlights").first().toObject().value("id"), saved.value("id"));
-        QVERIFY(fixture.press("rrAnnotationClose"));
+        QCOMPARE(fixture.stored("highlights.json", "highlights").first().toObject().value("style").toString(), QString("dotted"));
+        QVERIFY(fixture.selectWord(page, word));
+        QTRY_VERIFY(fixture.visible("rrAnnotationColor_blue"));
+        QVERIFY(fixture.press("rrAnnotationColor_blue"));
+        QVERIFY(fixture.visible("rrAnnotationPopover"));
+        QVERIFY(fixture.press("rrAnnotationApply"));
+        QTRY_COMPARE(fixture.stored("highlights.json", "highlights").first().toObject().value("style").toString(), QString("dotted"));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrControlsTop"));
+        QVERIFY(fixture.press("rrAnnotate"));
         QTRY_VERIFY(!fixture.visible("rrAnnotationHeader"));
+        QVERIFY(!qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
+        QVERIFY(fixture.visible("rrControlsTop"));
+        QVERIFY(fixture.press("rrAnnotate"));
+        QTRY_VERIFY(!fixture.visible("rrControlsTop"));
+        QVERIFY(qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrControlsTop"));
+        QVERIFY(fixture.press("rrAnnotate"));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationHeader"));
+        QVERIFY(!qobject_cast<QAbstractButton *>(fixture.widget("rrAnnotate"))->isChecked());
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(!fixture.visible("rrControlsTop"));
+        QVERIFY(fixture.click(page, page->bookmarkCorner().center()));
+        QTRY_COMPARE(fixture.state().value("bookmark_count").toInt(), 1);
         QVERIFY(fixture.press("rrPage"));
         QTRY_VERIFY(fixture.visible("rrBookmarks"));
         QVERIFY(fixture.press("rrBookmarks"));
-        QVERIFY(fixture.press("rrAnnotationsTab"));
+        auto *annotationsTab = qobject_cast<QPushButton *>(fixture.widget("rrAnnotationsTab"));
+        auto *bookmarksTab = qobject_cast<QPushButton *>(fixture.widget("rrBookmarksTab"));
+        QVERIFY(annotationsTab && bookmarksTab);
+        QVERIFY(annotationsTab->isChecked());
+        QVERIFY(fixture.press("rrBookmarksTab"));
+        QTRY_VERIFY(fixture.visible("rrBookmark0"));
+        QVERIFY(fixture.press("rrBookmarkListClose"));
+        QVERIFY(fixture.press("rrBookmarks"));
+        QVERIFY(annotationsTab->isChecked());
         QTRY_VERIFY(fixture.visible("rrAnnotationRemove0"));
         QVERIFY(fixture.press("rrAnnotationRemove0"));
         QTRY_VERIFY(fixture.visible("rrKeepAnnotation"));
@@ -847,6 +1401,18 @@ private slots:
         QTRY_VERIFY(fixture.visible("rrConfirmRemoveAnnotation"));
         QVERIFY(fixture.press("rrConfirmRemoveAnnotation"));
         QTRY_COMPARE(fixture.stored("highlights.json", "highlights").size(), 0);
+        QVERIFY(fixture.visible("rrBookmarkListEmpty"));
+        QVERIFY(fixture.press("rrBookmarkListClose"));
+        QVERIFY(fixture.press("rrBookmarks"));
+        QVERIFY(bookmarksTab->isChecked());
+        QTRY_VERIFY(fixture.visible("rrBookmark0"));
+        QVERIFY(fixture.press("rrBookmarkRemove0"));
+        QTRY_VERIFY(fixture.visible("rrConfirmRemoveBookmark"));
+        QVERIFY(fixture.press("rrConfirmRemoveBookmark"));
+        QTRY_COMPARE(fixture.state().value("bookmark_count").toInt(), 0);
+        QVERIFY(fixture.press("rrBookmarkListClose"));
+        QVERIFY(fixture.press("rrBookmarks"));
+        QVERIFY(bookmarksTab->isChecked());
         QVERIFY(fixture.visible("rrBookmarkListEmpty"));
     }
     void links_data() { bookmarks_data(); }
@@ -864,17 +1430,48 @@ private slots:
         const auto origin = fixture.state().value("position");
         const auto note = fixture.linkPoint(path, "short note");
         QVERIFY(note.x() >= 0);
-        QVERIFY(fixture.hold(page, note));
+        QVERIFY(fixture.selectWord(page, note));
+        QTRY_VERIFY(fixture.visible("rrSelectionLink"));
+        QVERIFY(!fixture.visible("rrDictionary"));
+        auto *lookup = fixture.widget("rrSelectionLookup"), *follow = fixture.widget("rrSelectionLink"),
+             *annotate = fixture.widget("rrSelectionAnnotate"), *clear = fixture.widget("rrAnnotationCancel");
+        QCOMPARE(lookup->geometry().top(), follow->geometry().top());
+        QCOMPARE(annotate->geometry().top(), clear->geometry().top());
+        QVERIFY(lookup->geometry().left() < follow->geometry().left());
+        QVERIFY(annotate->geometry().left() < clear->geometry().left());
+        QVERIFY(lookup->geometry().bottom() < annotate->geometry().top());
+        QVERIFY(fixture.click(page, QPoint(10, page->height() / 2)));
+        QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+        auto *reading = static_cast<ReadingPage *>(page);
+        QVERIFY(reading->annotationHandleRect(true).isEmpty() && reading->annotationHandleRect(false).isEmpty());
         QCOMPARE(fixture.state().value("position"), origin);
-        QVERIFY(fixture.press("rrLinkGo"));
+        QVERIFY(fixture.selectWord(page, note));
+        QTRY_VERIFY(fixture.visible("rrSelectionLookup"));
+        QVERIFY(fixture.press("rrSelectionLookup"));
+        QTRY_VERIFY(fixture.visible("rrDictionary"));
+        auto *headword = qobject_cast<QLabel *>(fixture.widget("rrDictionaryWord"));
+        QVERIFY(headword);
+        QVERIFY(headword->text() == "short" || headword->text() == "note");
+        QVERIFY(!reading->annotationHandleRect(true).isEmpty() && !reading->annotationHandleRect(false).isEmpty());
+        QVERIFY(fixture.click(page, note));
+        QTRY_VERIFY(fixture.visible("rrSelectionLink"));
+        // Link navigation belongs to the regular selection popover.
+        QVERIFY(fixture.press("rrSelectionAnnotate"));
+        QTRY_VERIFY(fixture.visible("rrAnnotationSave"));
+        QVERIFY(!fixture.visible("rrSelectionLink"));
+        QVERIFY(fixture.press("rrAnnotationCancel"));
+        QVERIFY(fixture.selectWord(page, note));
+        QTRY_VERIFY(fixture.visible("rrSelectionLink"));
+        QVERIFY(fixture.stored("highlights.json", "highlights").isEmpty());
+        QVERIFY(fixture.press("rrSelectionLink"));
         QTRY_VERIFY(fixture.visible("rrLinkPanel"));
+        QVERIFY(!fixture.widget("rrLinkActions"));
         QVERIFY(fixture.press("rrLinkClose"));
         QTRY_VERIFY(!fixture.visible("rrLinkPanel"));
         QCOMPARE(fixture.state().value("position"), origin);
         const auto passage = fixture.linkPoint(path, "later passage");
         QVERIFY(passage.x() >= 0);
         QVERIFY(fixture.hold(page, passage));
-        QVERIFY(fixture.press("rrLinkGo"));
         QTRY_VERIFY(!fixture.state().value("busy").toBool() && fixture.state().value("position") != origin);
         QVERIFY(fixture.press("rrPage"));
         QTRY_VERIFY(fixture.visible("rrScrubberReturn"));
@@ -886,8 +1483,8 @@ private slots:
         const auto website = fixture.linkPoint(path, "website");
         QVERIFY(website.x() >= 0);
         QVERIFY(fixture.hold(page, website));
-        QVERIFY(fixture.press("rrLinkGo"));
         QTRY_VERIFY(fixture.visible("rrBrowserConfirmation"));
+        QVERIFY(!fixture.widget("rrLinkActions"));
         QCOMPARE(fixture.state().value("position"), origin);
         // Cancel through the actual reader. External browser dispatch is
         // checked separately by the component's controlled browser service.
@@ -972,7 +1569,7 @@ private slots:
             expected[option.key] = !previous;
         }
         // Settings are a draft until the panel closes.
-        QVERIFY(fixture.press("rrSettings"));
+        QVERIFY(fixture.press("rrSettingsClose"));
         QTRY_VERIFY(!fixture.visible("rrGeneralSettings"));
         QTRY_VERIFY(!fixture.state().value("busy").toBool());
         for (auto it = expected.begin(); it != expected.end(); ++it)
@@ -999,7 +1596,7 @@ private slots:
             QVERIFY(blocked.active());
             QVERIFY(fixture.press("rrShowLinkIndicator"));
             QCOMPARE(indicator->isChecked(), !previous);
-            QVERIFY(fixture.press("rrSettings"));
+            QVERIFY(fixture.press("rrSettingsClose"));
             QTRY_VERIFY(fixture.visible("rrSettingsWriteError"));
             QVERIFY(blocked.restore());
         }
@@ -1007,9 +1604,490 @@ private slots:
         QVERIFY(fixture.press("rrSettingsWriteErrorConfirm"));
         QTRY_VERIFY(!fixture.visible("rrSettingsWriteError"));
         QTRY_VERIFY(fixture.visible("rrGeneralSettings"));
-        QVERIFY(fixture.press("rrSettings"));
+        QVERIFY(fixture.press("rrSettingsClose"));
         QTRY_VERIFY(!fixture.visible("rrGeneralSettings"));
         QTRY_COMPARE(storage::readJson(fixture.paths.preferences()).value("show_link_indicator").toBool(), !previous);
+    }
+    void advancedText_data() {
+        QTest::addColumn<int>("dpi");
+        QTest::addColumn<QString>("bookFont");
+        QTest::addColumn<QString>("alignment");
+        QTest::newRow("300dpi") << 300 << QString("NV Literata") << QString("left");
+        QTest::newRow("native") << 0 << QString("NV Literata") << QString("justify");
+        QTest::newRow("publisher-300dpi") << 300 << QString() << QString("publisher");
+        QTest::newRow("publisher-native") << 0 << QString() << QString("right");
+    }
+    void advancedText() {
+        QFETCH(int, dpi);
+        QFETCH(QString, bookFont);
+        QFETCH(QString, alignment);
+        Fixture fixture;
+        QVERIFY(fixture.prepared);
+        auto preferences = storage::readJson(fixture.paths.preferences());
+        preferences["last_text_layout"] = QJsonObject{{"font_face", bookFont}, {"text_alignment", alignment}};
+        QVERIFY(storage::writeJson(fixture.paths.preferences(), preferences));
+        auto *resolution = fixture.window.findChild<QComboBox *>("desktopResolutionPicker");
+        QVERIFY(resolution);
+        resolution->setCurrentIndex(resolution->findData(dpi));
+        QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
+        fixture.window.openBook(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 10000);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QCOMPARE(fixture.state().value("font_face").toString(), bookFont);
+        const auto sampleFace = bookFont.isEmpty() ? fixture.state().value("text_font_face").toString() : bookFont;
+        QVERIFY(!sampleFace.isEmpty());
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrSettings"));
+        QVERIFY(fixture.press("rrSettings"));
+        QVERIFY(fixture.press("rrSettingsStyling"));
+        QTRY_VERIFY(fixture.visible("rrSettingsClose"));
+        QVERIFY(fixture.visible("rrSettingsTitle"));
+        QCOMPARE(fixture.widget("rrSettingsTitle")->font().family(),
+                 ui::brandFont(ui::metrics::chrome::titleText).family());
+        QCOMPARE(fixture.widget("rrSettingsTitle")->font().pixelSize(), int(ui::metrics::chrome::titleText));
+        for (const auto *name : {"rrReturn", "rrSettings", "rrSearchOpen", "rrBookmarks", "rrAnnotate"})
+            QVERIFY2(!fixture.visible(name), name);
+        auto *continuation = qobject_cast<QLabel *>(fixture.widget("rrSettingsOptionsContinuationHint"));
+        QVERIFY(continuation);
+        QTRY_VERIFY(continuation->isVisible());
+        QVERIFY(continuation->font().italic());
+        QVERIFY(fixture.press("rrSettingsOptionsNext"));
+        QTRY_VERIFY(!continuation->isVisible());
+        QVERIFY(fixture.press("rrSettingsOptionsPrevious"));
+        QTRY_VERIFY(continuation->isVisible());
+        const auto reveal = [&fixture](const char *name) {
+            for (int page = 0; page < 8; ++page) {
+                auto *row = fixture.widget(name);
+                if (row && row->visibleRegion().contains(row->rect().center()))
+                    return true;
+                if (!fixture.press("rrSettingsOptionsNext"))
+                    return false;
+                QCoreApplication::processEvents();
+            }
+            return false;
+        };
+        QVERIFY(reveal("rrWordSpacing"));
+        auto *wordSpacing = dynamic_cast<ui::CaptionButton *>(fixture.widget("rrWordSpacing"));
+        QVERIFY(wordSpacing);
+        QCOMPARE(wordSpacing->caption(), strings::get("settings.word_spacing_normal").toUpper());
+        QVERIFY(fixture.press("rrWordSpacing"));
+        QTRY_VERIFY(fixture.visible("rrWordSpacing_wide"));
+        QCOMPARE(ui::registerPrivateInterfaceFont(QStringLiteral(KOBALT_TEST_ASSETS) + "/fonts/InstrumentSerif-Regular.ttf",
+                                                  "Sample Private Serif", true), ui::PrivateFontRegistration::Private);
+        // Force the private renderer used by fonts that Qt cannot load.
+        // Words with descenders must share the capital's baseline.
+        const auto verifySample = [](QWidget *preview, int tracking, int spacing) {
+            const auto savedFont = preview->font();
+            const auto savedStyle = preview->styleSheet();
+            const auto savedSize = preview->size();
+            preview->setStyleSheet("font-family: 'Sample Private Serif';");
+            auto font = preview->font();
+            font.setPixelSize(32);
+            font.setLetterSpacing(QFont::AbsoluteSpacing, 32 * tracking / 100.0);
+            font.setWordSpacing(0);
+            QVERIFY(ui::needsPrivateText("A quiet evening", font));
+            const QString text = "A quiet evening";
+            font.setWordSpacing(spacing > 0
+                ? ui::interfaceTextWidth(" ", font) * (spacing / 100.0 - 1)
+                : (312 - ui::interfaceTextWidth(text, font)) / 2.0);
+            preview->resize(360, 150);
+            const auto image = preview->grab().toImage().scaled(360, 150);
+            int baseline = -1;
+            for (const auto &word : {QString("A"), QString("quiet"), QString("evening")}) {
+                const int offset = text.indexOf(word);
+                const int x = 24 + (312 - ui::interfaceTextWidth(text, font)) / 2 +
+                              (offset ? ui::measurePrivateText(text.left(offset), font) +
+                                            qRound(font.letterSpacing()) : 0);
+                const auto glyphs = ui::renderPrivateText(word, font);
+                QRect actualInk, expectedInk;
+                for (int y = 24; y < 68; ++y)
+                    for (int column = x; column < x + glyphs.advance; ++column)
+                        if (qGray(image.pixel(column, y)) < 128)
+                            actualInk = actualInk.united(QRect(column, y, 1, 1));
+                for (int y = 0; y < glyphs.image.height(); ++y)
+                    for (int column = 0; column < glyphs.image.width(); ++column)
+                        if (qAlpha(glyphs.image.pixel(column, y)) >= 128)
+                            expectedInk = expectedInk.united(QRect(column, y, 1, 1));
+                QVERIFY(!actualInk.isEmpty() && !expectedInk.isEmpty());
+                QVERIFY(qAbs(actualInk.width() - expectedInk.width()) <= 1);
+                const int wordBaseline = actualInk.bottom() - glyphs.origin.y() - expectedInk.bottom();
+                if (baseline >= 0)
+                    QVERIFY2(qAbs(wordBaseline - baseline) <= 1, "Sample words do not share a baseline");
+                baseline = wordBaseline;
+            }
+            // Compare the first glyph with a direct raster at the output
+            // font size. Scaling an already rendered sample must fail this.
+            preview->resize(320, 134);
+            for (qreal scale : {.73, 1.0, 1.37}) {
+                for (qreal dpr : {1.0, 2.0}) {
+                    QImage output(qCeil((preview->width() * scale + 4) * dpr),
+                                  qCeil((preview->height() * scale + 4) * dpr), QImage::Format_ARGB32);
+                    output.setDevicePixelRatio(dpr);
+                    output.fill(Qt::white);
+                    QRect pixels;
+                    {
+                        QPainter painter(&output);
+                        painter.translate(.33, .47);
+                        painter.scale(scale, scale);
+                        pixels = painter.deviceTransform().mapRect(QRectF(preview->rect())).toAlignedRect();
+                        preview->render(&painter);
+                    }
+                    auto pixelFont = font;
+                    pixelFont.setPixelSize(qRound(pixels.height() * 32 / 150.0));
+                    pixelFont.setLetterSpacing(QFont::AbsoluteSpacing, pixelFont.pixelSize() * tracking / 100.0);
+                    pixelFont.setWordSpacing(0);
+                    const int lineWidth = qRound(pixels.width() * 312 / 360.0);
+                    pixelFont.setWordSpacing(spacing > 0
+                        ? ui::interfaceTextWidth(" ", pixelFont) * (spacing / 100.0 - 1)
+                        : (lineWidth - ui::interfaceTextWidth(text, pixelFont)) / 2.0);
+                    const auto glyph = ui::renderPrivateText("A", pixelFont);
+                    const int left = pixels.left() + qRound(pixels.width() * 24 / 360.0) +
+                                     (lineWidth - ui::interfaceTextWidth(text, pixelFont)) / 2;
+                    const int top = pixels.top() + qRound(pixels.height() * 24 / 150.0);
+                    const int lineHeight = qRound(pixels.height() * 44 / 150.0);
+                    QRect actualInk, expectedInk;
+                    for (int y = top; y < top + lineHeight; ++y)
+                        for (int x = left; x < left + glyph.image.width() + 2; ++x)
+                            if (qGray(output.pixel(x, y)) < 128)
+                                actualInk = actualInk.united(QRect(x, y, 1, 1));
+                    for (int y = 0; y < glyph.image.height(); ++y)
+                        for (int x = 0; x < glyph.image.width(); ++x)
+                            if (qAlpha(glyph.image.pixel(x, y)) >= 128)
+                                expectedInk = expectedInk.united(QRect(x, y, 1, 1));
+                    QRect lineInk;
+                    for (int y = top; y < top + lineHeight; ++y)
+                        for (int x = pixels.left() + 2; x < pixels.right() - 1; ++x)
+                            if (qGray(output.pixel(x, y)) < 128)
+                                lineInk = lineInk.united(QRect(x, y, 1, 1));
+                    QVERIFY(!lineInk.isEmpty());
+                    QVERIFY2(qAbs(lineInk.center().x() - pixels.center().x()) <= 2,
+                             "Sample text is not centered in its box");
+                    QCOMPARE(actualInk.size(), expectedInk.size());
+                    for (int y = 0; y < actualInk.height(); ++y)
+                        for (int x = 0; x < actualInk.width(); ++x)
+                            QVERIFY2(qAbs(qGray(output.pixel(actualInk.topLeft() + QPoint(x, y))) -
+                                          (255 - qAlpha(glyph.image.pixel(expectedInk.topLeft() + QPoint(x, y))))) <= 1,
+                                     "Sample glyph was resampled instead of rasterized at output resolution");
+                }
+            }
+            preview->resize(savedSize);
+            preview->setStyleSheet(savedStyle);
+            preview->setFont(savedFont);
+        };
+        QImage previousSpaces;
+        for (const auto *name : {"rrWordSpacingPreview_narrow", "rrWordSpacingPreview_normal", "rrWordSpacingPreview_wide"}) {
+            auto *preview = fixture.widget(name);
+            QVERIFY(preview && preview->isVisible());
+            QVERIFY(preview->visibleRegion().contains(preview->rect()));
+            auto *defaultFont = dynamic_cast<ui::CaptionButton *>(fixture.widget("rrDefaultFont"));
+            QVERIFY(defaultFont);
+            QCOMPARE(preview->font().family(), sampleFace);
+            if (!bookFont.isEmpty())
+                QVERIFY(preview->font().family() != defaultFont->typefacePreview());
+            const auto image = preview->grab().toImage();
+            QVERIFY(!image.isNull() && image != previousSpaces);
+            previousSpaces = image;
+            verifySample(preview, 0, QString(name).endsWith("narrow") ? 80 : QString(name).endsWith("wide") ? 120 : 100);
+        }
+        QVERIFY(fixture.click(fixture.widget("rrWordSpacingPreview_wide")));
+        QTRY_VERIFY(!fixture.visible("rrWordSpacingPopup"));
+        QCOMPARE(wordSpacing->caption(), strings::get("settings.word_spacing_wide").toUpper());
+        QVERIFY(!storage::readJson(fixture.paths.preferences()).contains("word_spacing"));
+        QVERIFY(reveal("rrJustificationTracking"));
+        auto *tracking = dynamic_cast<ui::CaptionButton *>(fixture.widget("rrJustificationTracking"));
+        auto *widows = dynamic_cast<ui::CaptionButton *>(fixture.widget("rrWidowsOrphans"));
+        QVERIFY(tracking && widows);
+        QCOMPARE(tracking->accessibleDescription(), strings::get("settings.justification_tracking_summary"));
+        QCOMPARE(widows->accessibleDescription(), strings::get("settings.widows_orphans_summary"));
+        QVERIFY(tracking->height() >= tracking->heightForWidth(tracking->width()));
+        const auto *fontsHeading = fixture.widget("rrFontsFamiliesSection");
+        const auto *advancedHeading = fixture.widget("rrAdvancedTextSection");
+        const auto *contentHeading = fixture.widget("rrAdvancedContentSection");
+        QVERIFY(fontsHeading && advancedHeading && contentHeading);
+        QVERIFY(fontsHeading->y() < advancedHeading->y() && advancedHeading->y() < contentHeading->y());
+        QCOMPARE(tracking->caption(), strings::get("settings.justification_tracking_off").toUpper());
+        QCOMPARE(widows->caption(), strings::get("settings.widows_orphans_publisher").toUpper());
+        QVERIFY(fixture.press("rrJustificationTracking"));
+        QTRY_VERIFY(fixture.visible("rrTracking_more"));
+        auto *notice = qobject_cast<QLabel *>(fixture.widget("rrTrackingAlignmentNotice"));
+        QVERIFY(notice && notice->isVisible());
+        QVERIFY(notice->font().italic());
+        QCOMPARE(notice->palette().color(QPalette::WindowText), ui::noteColor(notice));
+        const auto suffix = alignment == "left" ? "left" : alignment == "justify" ? "justified"
+                            : alignment == "publisher" ? "publisher" : "other";
+        QCOMPARE(notice->text(), strings::get((QString("settings.justification_tracking_current_") + suffix).toUtf8().constData()));
+        QVERIFY(notice->visibleRegion().contains(notice->rect()));
+        auto *footer = fixture.widget("rrTrackingAlignmentFooter");
+        QVERIFY(footer);
+        QVERIFY(notice->mapTo(footer, QPoint()).x() >= int(ui::metrics::chrome::inset));
+        QVERIFY(notice->mapTo(footer, QPoint()).y() >= int(ui::metrics::spacing::row));
+        auto *hint = fixture.widget("rrTrackingPopup")->findChild<QLabel *>("rrAdvancedTextHint");
+        QVERIFY(hint && hint->textFormat() == Qt::RichText);
+        QCOMPARE(hint->font().pixelSize(), int(ui::metrics::chrome::descriptionText + ui::Px{1}));
+        QVERIFY(hint->text().contains("data:image/png;base64,"));
+        QVERIFY(hint->visibleRegion().contains(hint->rect()));
+        QImage previousPreview;
+        for (const auto *name : {"rrTrackingPreview_off", "rrTrackingPreview_subtle", "rrTrackingPreview_more"}) {
+            auto *preview = fixture.widget(name);
+            QVERIFY(preview && preview->isVisible());
+            auto *defaultFont = dynamic_cast<ui::CaptionButton *>(fixture.widget("rrDefaultFont"));
+            QVERIFY(defaultFont);
+            QCOMPARE(preview->font().family(), sampleFace);
+            if (!bookFont.isEmpty())
+                QVERIFY(preview->font().family() != defaultFont->typefacePreview());
+            QVERIFY(preview->visibleRegion().contains(preview->rect()));
+            const auto image = preview->grab().toImage();
+            QVERIFY(!image.isNull() && image != previousPreview);
+            previousPreview = image;
+            verifySample(preview, QString(name).endsWith("more") ? 15 : QString(name).endsWith("subtle") ? 5 : 0, 0);
+        }
+        QVERIFY(fixture.click(fixture.widget("rrTrackingPreview_more")));
+        QTRY_VERIFY(!fixture.visible("rrTrackingPopup"));
+        QCOMPARE(tracking->caption(), strings::get("settings.justification_tracking_more").toUpper());
+        QVERIFY(reveal("rrWidowsOrphans"));
+        QVERIFY(fixture.press("rrWidowsOrphans"));
+        QTRY_VERIFY(fixture.visible("rrWidowsOrphans_avoid"));
+        auto *example = fixture.widget("rrPaginationPreview_avoid");
+        QVERIFY(example && example->isVisible());
+        QVERIFY(example->visibleRegion().contains(example->rect()));
+        QVERIFY(fixture.widget("rrWidowsOrphansPopup")->rect().contains(
+            QRect(example->mapTo(fixture.widget("rrWidowsOrphansPopup"), QPoint()), example->size())));
+        // The native canvas paints controls at fractional screen scales.
+        // All four dark paragraph bars must retain one output-pixel height.
+        for (qreal scale : {.73, 1.11, 1.37}) {
+            for (qreal dpr : {1.0, 2.0}) {
+                QImage image(qCeil((example->width() * scale + 4) * dpr),
+                             qCeil((example->height() * scale + 4) * dpr), QImage::Format_ARGB32);
+                image.setDevicePixelRatio(dpr);
+                image.fill(Qt::white);
+                {
+                    QPainter painter(&image);
+                    painter.translate(.33, .47);
+                    painter.scale(scale, scale);
+                    example->render(&painter);
+                }
+                QVector<int> heights;
+                bool inLine = false;
+                for (int y = 0; y < image.height(); ++y) {
+                    int ink = 0;
+                    for (int x = 0; x < image.width(); ++x)
+                        ink += qGray(image.pixel(x, y)) < 50;
+                    if (ink > 10) {
+                        if (!inLine)
+                            heights.append(0);
+                        ++heights.last();
+                        inLine = true;
+                    } else {
+                        inLine = false;
+                    }
+                }
+                QCOMPARE(heights.size(), 4);
+                QCOMPARE(heights[0], heights[1]);
+                QCOMPARE(heights[1], heights[2]);
+                QCOMPARE(heights[2], heights[3]);
+            }
+        }
+        QVERIFY(fixture.click(example));
+        QTRY_VERIFY(!fixture.visible("rrWidowsOrphansPopup"));
+        QVERIFY(!storage::readJson(fixture.paths.preferences()).contains("justification_tracking"));
+        auto *closeSettings = qobject_cast<QPushButton *>(fixture.widget("rrSettingsClose"));
+        QVERIFY(closeSettings);
+        QCOMPARE(closeSettings->accessibleName(), strings::get("settings.close"));
+        QVERIFY(fixture.press("rrSettingsClose"));
+        QTRY_VERIFY(!fixture.visible("rrGeneralSettings"));
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QVERIFY(!fixture.window.idle());
+        QVERIFY(fixture.visible("rrReturn"));
+        QVERIFY(fixture.visible("rrSettings"));
+        QVERIFY(!fixture.visible("rrSettingsClose"));
+        // Closing Settings and exiting the reader share the leftmost cell.
+        // Ignore the second half of a double tap after the header changes.
+        QVERIFY(fixture.press("rrReturn"));
+        QVERIFY(!fixture.window.idle());
+        QTest::qWait(ui::metrics::contents::exitGuardMilliseconds + 10);
+        QCOMPARE(storage::readJson(fixture.paths.preferences()).value("word_spacing").toInt(), 120);
+        QCOMPARE(storage::readJson(fixture.paths.preferences()).value("justification_tracking").toInt(), 15);
+        QCOMPARE(storage::readJson(fixture.paths.preferences()).value("widows_orphans").toString(), "avoid");
+        QTRY_COMPARE(fixture.state().value("word_spacing").toInt(), 120);
+        QTRY_COMPARE(fixture.state().value("justification_tracking").toInt(), 15);
+        QTRY_COMPARE(fixture.state().value("widows_orphans").toString(), "avoid");
+        if (!fixture.visible("rrReturn"))
+            QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrReturn"));
+        QVERIFY(fixture.press("rrReturn"));
+        QTRY_VERIFY(fixture.window.idle());
+        opened.clear();
+        fixture.window.openBook(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 10000);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QTRY_COMPARE(fixture.state().value("word_spacing").toInt(), 120);
+        QTRY_COMPARE(fixture.state().value("justification_tracking").toInt(), 15);
+        QTRY_COMPARE(fixture.state().value("widows_orphans").toString(), "avoid");
+    }
+    void fullWidthPanels_data() { bookmarks_data(); }
+    void fullWidthPanels() {
+        QFETCH(bool, dark);
+        Fixture fixture(dark);
+        QVERIFY(fixture.prepared);
+        fixture.window.resize(2200, 1000);
+        fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(0);
+        QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
+        fixture.window.openBook(book);
+        QTRY_COMPARE(opened.count(), 1);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrNavChapters"));
+        QVERIFY(fixture.press("rrNavChapters"));
+        QTRY_VERIFY(fixture.visible("rrChapter1"));
+        QVERIFY(fixture.press("rrChapter1"));
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        const auto checkBounds = [&](QWidget *panel) {
+            const auto *reader = fixture.window.readerWindow();
+            QCOMPARE(panel->width(), reader->width());
+            QCOMPARE(panel->x(), 0);
+        };
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrNavLayout"));
+        checkBounds(fixture.widget("rrControlsTop"));
+        checkBounds(fixture.widget("rrBottomNavigation"));
+        QVERIFY(fixture.press("rrNavLayout"));
+        QTRY_VERIFY(fixture.visible("rrMargins"));
+        checkBounds(fixture.widget("rrMenu"));
+        const auto output = qEnvironmentVariable("KOBALT_TEST_CAPTURE_DIR");
+        if (!output.isEmpty()) {
+            QVERIFY(QDir().mkpath(output));
+            QCoreApplication::processEvents();
+            QVERIFY(fixture.window.grab().save(output + (dark ? "/full-width-layout-dark.png" : "/full-width-layout-light.png")));
+        }
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(!fixture.visible("rrNavLayout"));
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrSettings"));
+        QVERIFY(fixture.press("rrSettings"));
+        QTRY_VERIFY(fixture.visible("rrGeneralSettings"));
+        checkBounds(fixture.widget("rrGeneralSettings"));
+        if (!output.isEmpty()) {
+            QCoreApplication::processEvents();
+            QVERIFY(fixture.window.grab().save(output + (dark ? "/full-width-settings-dark.png" : "/full-width-settings-light.png")));
+        }
+        QVERIFY(fixture.press("rrSettingsClose"));
+        QTRY_VERIFY(!fixture.visible("rrGeneralSettings"));
+        fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(2);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        if (!fixture.visible("rrNavLayout"))
+            QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(fixture.visible("rrNavLayout"));
+        auto *reader = fixture.window.readerWindow();
+        QCOMPARE(fixture.widget("rrControlsTop")->width(), reader->width());
+        QCOMPARE(fixture.widget("rrBottomNavigation")->width(), reader->width());
+        reader->resize(720, 1000);
+        QTRY_COMPARE(fixture.widget("rrControlsTop")->width(), 720);
+        QTRY_COMPARE(fixture.widget("rrBottomNavigation")->width(), 720);
+    }
+    void columns_data() { bookmarks_data(); }
+    void columns() {
+        QFETCH(bool, dark);
+        Fixture fixture(dark);
+        QVERIFY(fixture.prepared);
+        fixture.window.findChild<QComboBox *>("desktopScreenPicker")->setCurrentIndex(2);
+        QSignalSpy opened(&fixture.window, &desktop::Window::bookOpened);
+        fixture.window.openBook(book);
+        QTRY_COMPARE(opened.count(), 1);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        openPrologueBody(fixture);
+        const auto reveal = [&fixture](const char *name) {
+            for (int page = 0; page < 8; ++page) {
+                auto *row = fixture.widget(name);
+                if (row && row->visibleRegion().contains(row->rect().center()))
+                    return true;
+                if (!fixture.press("rrSettingsOptionsNext"))
+                    return false;
+                QCoreApplication::processEvents();
+            }
+            return false;
+        };
+        const auto capture = [&fixture, dark](const QString &name) {
+            const auto output = qEnvironmentVariable("KOBALT_TEST_CAPTURE_DIR");
+            if (output.isEmpty()) return true;
+            QCoreApplication::processEvents();
+            return QDir().mkpath(output) && fixture.window.grab().save(output + "/" + name + (dark ? "-dark.png" : "-light.png"));
+        };
+        QVERIFY(fixture.press("rrPage"));
+        QVERIFY(fixture.press("rrNavLayout"));
+        QVERIFY(!fixture.widget("rrColumns1"));
+        QVERIFY(!fixture.widget("rrColumnSpacing"));
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(!fixture.visible("rrNavLayout"));
+        QVERIFY(fixture.press("rrPage"));
+        QVERIFY(fixture.press("rrSettings"));
+        QVERIFY(reveal("rrLandscapeColumns"));
+        QVERIFY(reveal("rrColumnSpacingSetting"));
+        QVERIFY(!fixture.widget("rrColumnSpacingSetting")->isEnabled());
+        QVERIFY(capture("columns-disabled"));
+        QVERIFY(fixture.widget("rrDisplayColumnsSection"));
+        QVERIFY(fixture.press("rrLandscapeColumns"));
+        QVERIFY(fixture.widget("rrColumnSpacingSetting")->isEnabled());
+        QVERIFY(reveal("rrColumnSpacingSetting"));
+        QVERIFY(fixture.press("rrColumnSpacingSetting"));
+        QTRY_VERIFY(fixture.visible("rrColumnSpacing200"));
+        QVERIFY(qobject_cast<QAbstractButton *>(fixture.widget("rrColumnSpacing100"))->isChecked());
+        QVERIFY(capture("column-spacing-choices"));
+        QVERIFY(fixture.press("rrColumnSpacing200"));
+        QVERIFY(capture("landscape-column-settings"));
+        QVERIFY(fixture.press("rrSettingsClose"));
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QTRY_COMPARE(fixture.state().value("columns").toInt(), 1);
+        QCOMPARE(storage::readJson(fixture.paths.preferences()).value("two_columns_landscape").toBool(), true);
+        QCOMPARE(storage::readJson(fixture.paths.preferences()).value("column_spacing_percent").toInt(), 200);
+        auto *rotate = fixture.window.findChild<QAction *>("desktopRotateDevice");
+        QVERIFY(rotate);
+        const auto portrait = fixture.window.readerWindow()->size();
+        rotate->trigger();
+        QTRY_COMPARE(fixture.window.readerWindow()->size(), portrait.transposed());
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QTRY_COMPARE(fixture.state().value("columns").toInt(), 2);
+        QCOMPARE(fixture.state().value("column_spacing").toInt(), fixture.state().value("font_pixels").toInt() * 2);
+        QVERIFY(fixture.press("rrPage"));
+        QTRY_VERIFY(!fixture.visible("rrNavLayout"));
+        QVERIFY(capture("columns-landscape"));
+        rotate->trigger();
+        QTRY_COMPARE(fixture.window.readerWindow()->size(), portrait);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QTRY_COMPARE(fixture.state().value("columns").toInt(), 1);
+        if (!fixture.visible("rrReturn"))
+            QVERIFY(fixture.press("rrPage"));
+        // Settings guards Exit for the release of its Close tap.
+        QTest::qWait(ui::metrics::contents::exitGuardMilliseconds + 20);
+        QVERIFY(fixture.press("rrReturn"));
+        QTRY_VERIFY(fixture.window.idle());
+        QVERIFY(createBook(fixture.directory.path(), "other-columns.epub"));
+        fixture.window.openBook(fixture.directory.path() + "/other-columns.epub");
+        QTRY_COMPARE(opened.count(), 2);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QCOMPARE(fixture.state().value("columns").toInt(), 1);
+        QCOMPARE(fixture.state().value("column_spacing_percent").toInt(), 200);
+        rotate->trigger();
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QTRY_COMPARE(fixture.state().value("columns").toInt(), 2);
+        QVERIFY(fixture.press("rrPage"));
+        QVERIFY(fixture.press("rrSettings"));
+        QVERIFY(reveal("rrLandscapeColumns"));
+        QVERIFY(fixture.press("rrLandscapeColumns"));
+        QVERIFY(reveal("rrColumnSpacingSetting"));
+        QVERIFY(!fixture.widget("rrColumnSpacingSetting")->isEnabled());
+        QVERIFY(fixture.press("rrSettingsClose"));
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QTRY_COMPARE(fixture.state().value("columns").toInt(), 1);
+        if (!fixture.visible("rrReturn"))
+            QVERIFY(fixture.press("rrPage"));
+        // Settings guards Exit for the release of its Close tap.
+        QTest::qWait(ui::metrics::contents::exitGuardMilliseconds + 20);
+        QVERIFY(fixture.press("rrReturn"));
+        QTRY_VERIFY(fixture.window.idle());
+        fixture.window.openBook(book);
+        QTRY_COMPARE(opened.count(), 3);
+        QTRY_VERIFY(!fixture.state().value("busy").toBool());
+        QCOMPARE(fixture.state().value("columns").toInt(), 1);
     }
     void opticalSize() {
         Fixture fixture(false, true);
@@ -1125,6 +2203,25 @@ private slots:
         const int destination = scrubber->selectedPage();
         QVERIFY(destination != fixture.state().value("page").toInt());
         QCOMPARE(fixture.state().value("position"), origin);
+        const auto center = scrubber->previewBounds().center();
+        const int distance = scrubber->previewBounds().width() / 3;
+        QVERIFY(fixture.drag(scrubber, center + QPoint(distance / 2, 0), center - QPoint(distance / 2, 0)));
+        QTRY_COMPARE(scrubber->selectedPage(), destination + 1);
+        QTRY_VERIFY(scrubber->previewReady());
+        QCOMPARE(fixture.state().value("position"), origin);
+        QVERIFY(fixture.drag(scrubber, center - QPoint(distance / 2, 0), center + QPoint(distance / 2, 0)));
+        QTRY_COMPARE(scrubber->selectedPage(), destination);
+        QTRY_VERIFY(scrubber->previewReady());
+        // A vertical drag must neither open the preview nor turn a page.
+        QVERIFY(fixture.drag(scrubber, center, center + QPoint(0, distance)));
+        QCOMPARE(scrubber->selectedPage(), destination);
+        QCOMPARE(fixture.state().value("position"), origin);
+        QVERIFY(fixture.click(fixture.widget("rrPreviewNextPage"), {10, fixture.widget("rrPreviewNextPage")->height() / 2}));
+        QTRY_COMPARE(scrubber->selectedPage(), destination + 1);
+        QTRY_VERIFY(scrubber->previewReady());
+        QVERIFY(fixture.click(fixture.widget("rrPreviewPreviousPage"), {fixture.widget("rrPreviewPreviousPage")->width() - 10, fixture.widget("rrPreviewPreviousPage")->height() / 2}));
+        QTRY_COMPARE(scrubber->selectedPage(), destination);
+        QTRY_VERIFY(scrubber->previewReady());
         QVERIFY(fixture.press("rrNavSeek"));
         QTRY_VERIFY(!scrubber->selecting());
         QCOMPARE(fixture.state().value("position"), origin);
@@ -1137,6 +2234,67 @@ private slots:
         QTRY_VERIFY(!fixture.state().value("busy").toBool());
         QTRY_COMPARE(fixture.state().value("page").toInt(), accepted);
         QCOMPARE(opened.count(), 1);
+
+        // Exercise real touch sequences independently of mouse emulation.
+        ui::PageScrubber touchPreview(nullptr);
+        touchPreview.resize(800, 1200);
+        touchPreview.setBook(1, 3, {}, {600, 900});
+        touchPreview.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&touchPreview));
+        touchPreview.previewRequested = [&](int page, QSize size) {
+            QImage image(size, QImage::Format_RGB32);
+            image.fill(Qt::white);
+            touchPreview.setPreview(page, image);
+        };
+        int committed = -1;
+        touchPreview.accepted = [&](int page) { committed = page; };
+        touchPreview.showCurrentPage();
+        QTRY_VERIFY(touchPreview.previewReady());
+        auto *device = QTest::createTouchDevice();
+        auto touch = QTest::touchEvent(&touchPreview, device, false);
+        const auto middle = touchPreview.previewBounds().center();
+        const QPoint travel(100, 0);
+        const auto swipe = [&](QPoint from, QPoint to) {
+            touch.press(0, from).commit();
+            touch.move(0, to).commit();
+            touch.release(0, to).commit();
+        };
+        swipe(middle + travel, middle - travel);
+        QCOMPARE(touchPreview.selectedPage(), 2);
+        QTRY_VERIFY(touchPreview.previewReady());
+        QCOMPARE(committed, -1);
+        swipe(middle + travel, middle - travel);
+        QCOMPARE(touchPreview.selectedPage(), 2); // Last page clamps.
+        swipe(middle - travel, middle + travel);
+        QCOMPARE(touchPreview.selectedPage(), 1);
+        QTRY_VERIFY(touchPreview.previewReady());
+        swipe(middle - travel, middle + travel);
+        QCOMPARE(touchPreview.selectedPage(), 0);
+        QTRY_VERIFY(touchPreview.previewReady());
+        swipe(middle - travel, middle + travel);
+        QCOMPARE(touchPreview.selectedPage(), 0); // First page clamps.
+        auto *side = touchPreview.findChild<QWidget *>("rrPreviewNextPage");
+        QVERIFY(side && side->isVisible());
+        const auto sideStart = side->pos() + QPoint(10, side->height() / 2);
+        swipe(sideStart, sideStart - travel);
+        QCOMPARE(touchPreview.selectedPage(), 1);
+        QTRY_VERIFY(touchPreview.previewReady());
+        QCOMPARE(committed, -1);
+        // Multiple fingers cancel the whole sequence, even after one lifts.
+        touch.press(0, middle).commit();
+        touch.stationary(0).press(1, middle + travel).commit();
+        touch.move(0, middle - travel).stationary(1).commit();
+        touch.release(0, middle - travel).release(1, middle + travel).commit();
+        QCOMPARE(touchPreview.selectedPage(), 1);
+        QCOMPARE(committed, -1);
+        touch.press(0, middle).commit();
+        QEvent cancel(QEvent::TouchCancel);
+        QApplication::sendEvent(&touchPreview, &cancel);
+        touch.release(0, middle).commit();
+        QCOMPARE(committed, -1);
+        touch.press(0, middle).commit();
+        touch.release(0, middle).commit();
+        QCOMPARE(committed, 1);
     }
     void annotationTwoFingerTapConsumesWholeSequence() {
         ReadingPage page(nullptr, [] {});

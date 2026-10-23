@@ -190,7 +190,9 @@ int main(int argc, char **argv) {
                 "Light indicator is off center in landscape");
     }
     {
-        kobalt::ui::PagerBar pager(nullptr, "test");
+        QWidget host;
+        host.resize(600, 800);
+        kobalt::ui::PagerBar pager(&host, "test");
         for (int count : {0, 1}) {
             pager.setPage(0, count, {}, true);
             require(!pager.previous->isEnabled() && !pager.next->isEnabled(),
@@ -203,6 +205,26 @@ int main(int argc, char **argv) {
         require(pager.next->isEnabled() && pager.turnTarget(1) == 0, "List next did not wrap");
         pager.setPage(2, 3);
         require(!pager.next->isEnabled() && pager.turnTarget(1) == 2, "Bounded content pager wrapped");
+        auto *hint = host.findChild<QLabel *>("testContinuationHint");
+        require(hint, "Paged list has no continuation hint");
+        pager.setPage(0, 3);
+        pager.setBlankArea({0, 500, 600, 100});
+        hint->ensurePolished();
+        require(!hint->isHidden() && hint->font().italic(), "Paged list lost its italic continuation hint");
+        require(hint->geometry() == QRect(0, 500, 600, 100), "Continuation hint escaped the blank area");
+        require(hint->testAttribute(Qt::WA_TransparentForMouseEvents), "Continuation hint intercepts list taps");
+        pager.setBlankArea({0, 500, 600, 1});
+        require(hint->isHidden(), "Continuation hint appeared in a short gap");
+        pager.setBlankArea({0, 500, 1, 100});
+        require(hint->isHidden(), "Continuation hint appeared in a narrow gap");
+        pager.setPage(2, 3, {}, true);
+        pager.setBlankArea({0, 500, 600, 100});
+        require(hint->isHidden(), "Last list page promised more content");
+        pager.setPage(0, 1);
+        pager.setBlankArea({0, 500, 600, 100});
+        require(hint->isHidden(), "Single-page list promised more content");
+        pager.setPage(0, 3);
+        require(hint->isHidden(), "New list content reused a stale blank area");
     }
     {
         using namespace kobalt::ui;
@@ -2044,6 +2066,27 @@ int main(int argc, char **argv) {
             for (int x = 0; x < page.width(); ++x)
                 if (!card->geometry().contains(x, y))
                     require(shown.pixel(x, y) == page.pixel(x, y), "Modal changed pixels outside its card");
+        overlay.setDimmed(true);
+        const auto patterned = host.grab().toImage();
+        int stripedPixels = 0, paperPixels = 0;
+        for (int y = 110; y < 180; ++y) {
+            for (int x = 0; x < 60; ++x) {
+                const auto value = QColor::fromRgba(patterned.pixel(x, y));
+                stripedPixels += value != paper;
+                paperPixels += value == paper;
+            }
+        }
+        require(stripedPixels > 0 && paperPixels > 0, "Modal backdrop is missing its diagonal pattern");
+        require(patterned.pixel(500, 50) != page.pixel(500, 50), "Modal backdrop did not fade background content");
+        for (int y = card->y(); y < card->geometry().bottom(); ++y)
+            for (int x = card->x(); x < card->geometry().right(); ++x)
+                require(patterned.pixel(x, y) == shown.pixel(x, y), "Modal pattern changed the foreground card");
+        overlay.setInputBarrier(false);
+        const auto nonblocking = host.grab().toImage();
+        require(nonblocking.pixel(500, 50) == page.pixel(500, 50),
+                "A nonblocking modal painted a backdrop");
+        overlay.setInputBarrier(true);
+        overlay.setDimmed(false);
         for (int n = 0; n < 6; ++n) {
             QKeyEvent tab(QEvent::KeyPress, Qt::Key_Tab, Qt::NoModifier);
             QApplication::sendEvent(host.focusWidget(), &tab);

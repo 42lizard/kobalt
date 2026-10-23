@@ -21,8 +21,8 @@
 #include <functional>
 #include <utility>
 
-class LVDocView;
 namespace kobalt {
+class ColumnView;
 namespace nickel {
 class NickelPositionCodec;
 }
@@ -160,6 +160,7 @@ public:
     QString pageExcerpt(int page) const;
     WordSelection wordAt(QPoint point);
     AnnotationToken annotationTokenAt(QPoint point);
+    AnnotationToken annotationDragTokenAt(QPoint point, const QString &boundary, bool start);
     // Resolves and orders source boundaries without changing pagination or position.
     TextRange textRange(const QString &start, const QString &end);
     // Indices of source ranges intersecting [start, end), in input order.
@@ -268,7 +269,9 @@ private:
     friend class nickel::NickelPositionCodec;
     std::shared_ptr<ReaderSource> source_;
     QJsonObject openingTimes_;
-    std::unique_ptr<LVDocView> engine_;
+    std::unique_ptr<ColumnView> engine_;
+    int columns_ = 1, columnSpacing_ = readingPixels(60), columnSpacingPercent_ = 0;
+    bool twoColumnsLandscape_ = false;
     QSize size_;
     QString anchor_;
     QString nativeLocation_;
@@ -319,6 +322,9 @@ private:
     bool darkMode_ = false;
     bool hideNonlinearFragments_ = false;
     bool avoidWastefulStyling_ = true;
+    int wordSpacing_ = 100;
+    int justificationTracking_ = 0;
+    QString widowsOrphans_ = "publisher";
     QMap<int, QImage> cache_;
     // One retired page, owned only by this model. Never retain client images.
     QImage spareImage_;

@@ -47,6 +47,8 @@ public:
     };
     void setValue(const QString &value);
     void setValue(const QString &value, const ValueStyle &style);
+    // A non-interactive thumbnail shares the row's click target.
+    void setPreview(QWidget *widget, QSize size);
 
 protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
@@ -58,6 +60,8 @@ private:
     Presentation appearance;
     QString description, value;
     ValueStyle valueStyle;
+    QWidget *preview = nullptr;
+    QSize previewSize;
 };
 
 // A pick-one list: a row per choice with a radio on the left, its label and

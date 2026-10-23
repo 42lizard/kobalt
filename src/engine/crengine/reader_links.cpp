@@ -1,3 +1,4 @@
+#include "column_view.h"
 #include "support/qt_compat.h"
 #include "support/strings.h"
 #include "reader_model.h"

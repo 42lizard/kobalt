@@ -6,7 +6,6 @@
 #include "interfaces/reader/ui/controls/sliders.h"
 #include "interfaces/reader/ui/controls/page_scrubber.h"
 #include "interfaces/reader/ui/controls/panels.h"
-#include "interfaces/reader/ui/controls/mode_banner.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/theme.h"
 #include "interfaces/reader_window.h"
@@ -98,16 +97,23 @@ private:
     int savedNativePage = -1, savedNativePages = -1;
     void buildReadingPage();
     void buildAnnotations();
-    void enterAnnotations();
+    void enterAnnotations(bool persistent = true);
+    bool markingSelection() const { return annotationMode || annotationMarking; }
     void leaveAnnotations();
     void finishAnnotations();
     void annotationTap(QPoint point);
+    bool beginAnnotationDrag(QPoint point, int boundary);
+    void moveAnnotationDrag(QPoint point);
+    void finishAnnotationDrag(bool cancelled);
+    void requestAnnotationDrag();
+    void resolveAnnotationDraft(std::function<void()> after = {}, std::function<void()> reject = {});
     void prepareAnnotation(bool leave = false, std::function<void()> after = {});
     void setAnnotationBoundary(kobalt::AnnotationToken token, bool start);
     void clearAnnotationDraft();
-    void syncAnnotationHint();
-    void layoutAnnotationHeader();
+    bool annotationMenuSelectionEnabled() const;
+    void syncAnnotationControls();
     void saveAnnotation(bool leave = false, std::function<void()> after = {});
+    QPoint selectionLinkPoint() const;
     void showAnnotationActions();
     void updateAnnotationRects(bool showActions = false);
     void paintAnnotationDraft();
@@ -115,6 +121,7 @@ private:
     void syncMarkupRequest();
     void finishAnnotationPresentation();
     void editAnnotation(const QString &id, bool navigate = true);
+    void showSavedAnnotationAt(const QString &id, QRect anchor, bool navigate);
     void showSavedAnnotation(const QString &id, QRect anchor, bool navigate = false);
     void showAnnotationMatches(QVector<QString> ids, QRect anchor, int page = 0);
     void removeAnnotation(const QString &id);
@@ -125,17 +132,20 @@ private:
         QString label;
         std::function<void()> run;
     };
-    void annotationActionsFor(const QVector<AnnotationAction> &actions, QRect anchor, bool includeStop = true,
-                              const QString &paletteColor = {}, std::function<void(QString)> colorChanged = {});
+    void annotationActionsFor(const QVector<AnnotationAction> &actions, QRect anchor, bool compactActions = true,
+                              const QString &paletteColor = {}, std::function<void(QString)> colorChanged = {},
+                              const QString &selectedStyle = {}, std::function<void(QString)> styleChanged = {});
     bool colorAnnotations() const {
         return services.colorDisplay && services.colorDisplay();
     }
     QString annotationColor = "yellow", annotationSelectedColor = "yellow";
-    bool annotationColorChosen = false;
+    QString annotationStyle = "shaded", annotationSelectedStyle = "shaded";
+    void syncAnnotationAppearance();
+    bool annotationColorChosen = false, annotationStyleChosen = false;
     bool minimalAnnotationMode() const {
         return preferences.value("minimal_annotation_mode").toBool(false);
     }
-    bool annotationMode = false, annotationSaving = false, annotationShowActionsPending = false,
+    bool annotationMode = false, annotationMarking = false, annotationSaving = false, annotationShowActionsPending = false,
          annotationAdjusting = false, annotationDirty = false;
     QString annotationStart, annotationEnd, annotationEditing, annotationFrame, annotationViewportFrame;
     kobalt::AnnotationToken annotationStartWord, annotationEndWord;
@@ -145,14 +155,15 @@ private:
     quint64 annotationSaveRevision = 0;
     quint64 annotationEpoch = 0, savedHighlightEpoch = 0;
     QVector<QRect> draftHighlightRects, savedHighlightRects;
-    bool draftHighlightVertical = false;
+    kobalt::AnnotationGeometry draftHighlightGeometry;
+    bool annotationDragging = false, annotationDragPending = false, annotationDragReleased = false;
+    int annotationDragBoundary = -1;
+    QPoint annotationDragPoint, annotationDragOrigin;
     ReaderMarkupRequest annotationRequest;
     qint64 annotationImageKey = 0;
     bool annotationPresentationCapture = false;
     std::function<void(bool)> annotationPresentationReady;
-    kobalt::ui::Panel *annotationHeader = nullptr;
     kobalt::ui::ModalOverlay *annotationPopover = nullptr;
-    kobalt::ui::ModeBanner *annotationHint = nullptr;
     void startClockTimer();
     void buildToolbar();
     void buildBottomControls();
@@ -341,7 +352,8 @@ private:
     quint64 lookupEpoch = 0;
     bool lookupPending = false;
     void dismissLookup(bool keepGesture = false);
-    void lookupWord(QPoint point, bool checkLink = true);
+    void lookupWord(QPoint point);
+    void lookupSelection();
     void resizeText();
     void applyTheme(bool dark);
     void registerPickerFonts(const QString &family = {});
@@ -424,6 +436,11 @@ private:
                               *navigationBarButton = nullptr;
     QPointer<kobalt::ui::ModalOverlay> pageNavigationPopup, tapZonesPopup, navigationBarPopup, menuViewPopup;
     kobalt::ui::CaptionButton *menuViewButton = nullptr;
+    int settingsColumnSpacing = 100;
+    int settingsWordSpacing = 100;
+    int settingsTracking = 0;
+    QString settingsWidowsOrphans = "publisher";
+    void showAdvancedText();
     static QString refreshExplanation(kobalt::ScreenRefresh mode);
     static QString refreshLabel(kobalt::ScreenRefresh mode);
     void showScreenRefresh();

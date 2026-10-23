@@ -131,10 +131,6 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
             refresh();
         }
     };
-    highlights->failed = [this] {
-        if (annotationHint)
-            annotationHint->setText(strings::get("annotations.save_failed"));
-    };
     auto *nativeSaveTimer = new QTimer(this);
     nativeSaveTimer->setObjectName("rrNativeProgressTimer");
     connect(nativeSaveTimer, &QTimer::timeout, this, [this] {
@@ -326,11 +322,8 @@ void Reader::buildReadingPage() {
         this->model->goTo(hit.start);
     };
     page->held = [this](QPoint point) {
-        if (annotationMode) {
-            annotationTap(point);
-        } else {
-            lookupWord(point);
-        }
+        if (beginAnnotationDrag(point, -1))
+            finishAnnotationDrag(false);
     };
     header = new ChapterHeader(page);
     const auto chrome = kobalt::headerfooter::select(preferences);
@@ -480,8 +473,12 @@ void Reader::buildToolbar() {
     toolbarComposition.bookmarks->setEnabled(bookmarks->available());
     toolbarComposition.annotate =
         iconButton(topControls, top, "rrAnnotate", strings::get("annotations.title"), ControlIcon::Annotate, [this] {
-            enterAnnotations();
+            if (annotationMode)
+                leaveAnnotations();
+            else
+                enterAnnotations();
         });
+    toolbarComposition.annotate->setCheckable(true);
     toolbarComposition.annotate->setEnabled(highlights->writable());
     toolbarComposition.formattingWarning =
         iconButton(topControls, top, "rrFormattingWarning", strings::get("reader.formatting_warning"),
@@ -966,6 +963,12 @@ void Reader::buildSettings() {
 #endif
     auto *settings = new kobalt::reader::SettingsPanel(this, settingsInputs);
     general = settings;
+    connect(settings->closeButton, &QPushButton::clicked, this, [this] {
+        if (appearanceEdit.applying())
+            return;
+        guardExit();
+        applySettings();
+    });
     settings->showDictionaries(services.downloadableDictionaries &&
                                !(services.devicePreview && services.devicePreview()));
     settings->showNativeUi(services.desktopUi && !(services.devicePreview && services.devicePreview()));
@@ -1040,6 +1043,35 @@ void Reader::buildSettings() {
     linkIndicatorOption = settings->linkIndicatorOption;
     hideNonlinearOption = settings->hideNonlinearOption;
     avoidWastefulStylingOption = settings->avoidWastefulStylingOption;
+    connect(settings->columnSpacingButton, &QPushButton::clicked, this, [this, settings] {
+        settings->showColumnSpacingChoices(settingsColumnSpacing, [this, settings](int percent) {
+            settingsColumnSpacing = percent;
+            settings->columnSpacingButton->setCaption(QString::number(percent / 100.0, 'f', 1) + QChar(0x00d7));
+        });
+    });
+    connect(settings->wordSpacingButton, &QPushButton::clicked, this, [this, settings] {
+        const int selected = settingsWordSpacing == 80 ? 0 : settingsWordSpacing == 120 ? 2 : 1;
+        const auto face = bookFace();
+        settings->showAdvancedTextChoices(SettingsPanel::AdvancedText::WordSpacing, selected, [this](int index) {
+            settingsWordSpacing = 80 + index * 20;
+            showAdvancedText();
+        }, ui::fontSample(face));
+    });
+    connect(settings->trackingButton, &QPushButton::clicked, this, [this, settings] {
+        const int selected = settingsTracking == 15 ? 2 : settingsTracking == 5 ? 1 : 0;
+        const auto face = bookFace();
+        settings->showAdvancedTextChoices(SettingsPanel::AdvancedText::Tracking, selected, [this](int index) {
+            settingsTracking = index == 2 ? 15 : index == 1 ? 5 : 0;
+            showAdvancedText();
+        }, ui::fontSample(face), model->alignment());
+    });
+    connect(settings->widowsOrphansButton, &QPushButton::clicked, this, [this, settings] {
+        const int selected = settingsWidowsOrphans == "allow" ? 2 : settingsWidowsOrphans == "avoid" ? 1 : 0;
+        settings->showAdvancedTextChoices(SettingsPanel::AdvancedText::Pagination, selected, [this](int index) {
+            settingsWidowsOrphans = index == 2 ? "allow" : index == 1 ? "avoid" : "publisher";
+            showAdvancedText();
+        });
+    });
     bionicOption = settings->bionicOption;
     refreshButton = settings->refreshButton;
     resetDefaults = settings->resetDefaults;
@@ -1229,6 +1261,9 @@ void Reader::connectLightGestures() {
 }
 
 void Reader::connectPageInput() {
+    page->annotationDragStarted = [this](QPoint point, int boundary) { return beginAnnotationDrag(point, boundary); };
+    page->annotationDragMoved = [this](QPoint point) { moveAnnotationDrag(point); };
+    page->annotationDragFinished = [this](bool cancelled) { finishAnnotationDrag(cancelled); };
     page->annotationRequested = [this] {
         if (annotationMode || !isEnabled() || !isVisible() || lifecycleHidden || closing || exitPending ||
             exportRunning || services.suspended() || book->deviceTransition() || model->busy() ||
@@ -1254,17 +1289,24 @@ void Reader::connectPageInput() {
         if (!annotationMode && !pageNavigation::swipes(pageNavigation::mode(preferences, services.pageButtons()))) {
             return;
         }
-        if (revealingLinks || dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() ||
+        if (dictionaryPanel->isVisible()) {
+            dismissLookup();
+            clearAnnotationDraft();
+        }
+        if (revealingLinks || searchPanel->isVisible() || linksActive() ||
             lookupPending || appearanceEdit.preview() || general->isVisible() || choices->isVisible() ||
             topControls->isVisible())
             return;
         turnPage(model->state().value("page_progression_rtl").toBool() ? -direction : direction);
     };
     page->tapped = [this](QPoint point) {
-        if (annotationMode) {
-            annotationTap(point - QPoint(0, page->topHeight()));
+        const QPoint bodyPoint = point - QPoint(0, page->topHeight());
+        if (!topControls->isVisible() && !annotationStart.isEmpty() && page->annotationContains(bodyPoint)) {
+            annotationTap(bodyPoint);
             return;
         }
+        if (!annotationStart.isEmpty() && !topControls->isVisible())
+            dismissLookup(true);
         const qreal x = qreal(point.x()) / qMax(1, page->width());
         if (dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive() || lookupPending) {
             dismissLookup();

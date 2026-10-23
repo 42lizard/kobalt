@@ -537,7 +537,10 @@ void Reader::openBookmarks() {
     bottomControls->hide();
     const int top = navigation ? navigation->statusHeight() : 0;
     bookmarkList->setGeometry(0, top, width(), (navigation ? navigation->contentBottom(size()) : height()) - top);
-    bookmarkList->showBookmarks(bookmarkRows());
+    if (!highlights->highlights().isEmpty())
+        bookmarkList->showAnnotations(annotationRows());
+    else
+        bookmarkList->showBookmarks(bookmarkRows());
     refresh();
 }
 

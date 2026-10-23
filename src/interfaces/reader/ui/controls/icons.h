@@ -60,7 +60,9 @@ enum class ControlIcon {
     ClearSelection,
     ExtendSelection,
     EditHighlight,
-    RemoveHighlight
+    RemoveHighlight,
+    OneColumn,
+    TwoColumns
 };
 // Paint vectors at the target resolution without an intermediate icon bitmap.
 void paintOpeningIcon(QPainter &painter, ControlIcon icon, const QRectF &bounds, QColor color);

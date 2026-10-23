@@ -42,7 +42,12 @@ public:
                          std::function<void(const QStringList &)> prepareFonts = {});
     void dismissFontChoices();
     void showHeaderFooterWeights(int current, const QFont &sampleFont, std::function<void(int)> chosen);
+    void showColumnSpacingChoices(int current, std::function<void(int)> chosen);
+    enum class AdvancedText { WordSpacing, Tracking, Pagination };
+    void showAdvancedTextChoices(AdvancedText feature, int current, std::function<void(int)> chosen,
+                                 const QFont &sampleFont = {}, const QString &alignment = {});
     QPointer<ui::ModalOverlay> fontDialog;
+    ui::CellButton *closeButton = nullptr;
     void showDictionaries(bool visible);
     void showNativeUi(bool visible);
     int fitContent(QSize availableSize);
@@ -57,6 +62,9 @@ public:
     ui::CaptionButton *defaultFontButton = nullptr, *uiFontButton = nullptr, *uiMonoFontButton = nullptr,
                       *headerFooterFontButton = nullptr, *headerFooterWeightButton = nullptr;
     ui::CaptionButton *serifFontButton = nullptr, *sansFontButton = nullptr, *monoFontButton = nullptr;
+    ui::DescribedOption *landscapeColumnsOption = nullptr;
+    ui::CaptionButton *columnSpacingButton = nullptr;
+    ui::CaptionButton *wordSpacingButton = nullptr, *trackingButton = nullptr, *widowsOrphansButton = nullptr;
     ui::CaptionButton *sleepScreenButton = nullptr, *menuViewButton = nullptr;
     ui::CaptionButton *pageNavigationButton = nullptr, *tapZonesButton = nullptr, *navigationBarButton = nullptr;
     ui::DescribedOption *bionicOption = nullptr;

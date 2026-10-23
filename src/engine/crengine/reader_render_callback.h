@@ -1,14 +1,14 @@
 #pragma once
 #include "reader_model.h"
 #include "engine_activity.h"
-#include <lvdocview.h>
+#include "column_view.h"
 
 namespace kobalt {
 // The engine retains a raw callback pointer. Detach it on every exit, including
 // failures that destroy the engine before this guard leaves scope.
 class OpeningCallback : public LVDocViewCallback {
 public:
-    OpeningCallback(std::unique_ptr<LVDocView> &engine, OpeningProgress progress)
+    OpeningCallback(std::unique_ptr<ColumnView> &engine, OpeningProgress progress)
         : engine(engine), progress(std::move(progress)) {
         engine->setCallback(this);
     }
@@ -33,7 +33,7 @@ public:
     }
 
 private:
-    std::unique_ptr<LVDocView> &engine;
+    std::unique_ptr<ColumnView> &engine;
     OpeningProgress progress;
     void report(OpeningStage stage, int percent) {
         engineActivity().checkpoint();

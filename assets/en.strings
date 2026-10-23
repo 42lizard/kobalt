@@ -402,6 +402,8 @@
 "reader.front_matter" = "Front matter";
 "reader.go_to_synced_position" = "Go to synced position";
 "reader.header" = "Header";
+"reader.columns" = "Columns";
+"reader.column_spacing" = "Column spacing";
 "reader.hyphenation" = "Hyphenation";
 "reader.justify" = "Justify";
 "reader.keep_reading_here" = "Keep reading here";
@@ -517,6 +519,18 @@
 "settings.section_frontlight" = "Frontlight";
 "settings.section_new_books" = "New Book";
 "settings.section_book_content" = "Book content";
+"settings.advanced_text" = "Advanced typography";
+"settings.justification_tracking" = "Justification tracking";
+/* Arguments: %1 (Justify icon) */
+"settings.justification_tracking_description" = "Only affects justified text. Select %1 in Text > Alignment. Distribute spare space between letters to reduce wide word gaps.";
+"settings.justification_tracking_off" = "Off";
+"settings.justification_tracking_subtle" = "Subtle";
+"settings.justification_tracking_more" = "More";
+"settings.widows_orphans" = "Widows and orphans";
+"settings.widows_orphans_description" = "Keep single paragraph lines off page edges. Avoiding them can leave more blank space on the previous page. Applies to all books.";
+"settings.widows_orphans_publisher" = "Publisher";
+"settings.widows_orphans_avoid" = "Avoid both";
+"settings.widows_orphans_allow" = "Allow both";
 "settings.section_reading_menu" = "Reading menu";
 "settings.section_reader" = "Reader";
 "settings.section_sleep" = "Sleep and wake";
@@ -706,7 +720,7 @@
 /* Arguments: %1 = number of links */
 "reader.highlight_links" = "Highlight links · %1";
 "reader.long_press_link" = "Long press a link to see its options.";
-"reader.tap_revealed_link" = "Tap a highlighted link for options";
+"reader.tap_revealed_link" = "Tap a highlighted link to follow it";
 "reader.tap_elsewhere_to_exit" = "Tap elsewhere to exit";
 
 "reader.bold_reading" = "Bold reading";
@@ -740,30 +754,35 @@
 "settings.minimal_annotation_mode_description" = "Hide the annotation bar. Tap text or blank space, then choose Stop highlighting to exit.";
 
 /* annotations */
+"annotations.style_section" = "Style";
+"annotations.actions_section" = "Actions";
 "annotations.title" = "Annotate";
 "annotations.tab" = "Annotations";
 "annotations.close" = "Close annotations";
 "annotations.mode_active" = "HIGHLIGHT MODE NOW ACTIVE";
-"annotations.tap_start" = "tap text to begin highlighting.";
-"annotations.tap_end" = "Tap text to end the selection.";
-"annotations.tap_boundary" = "Tap text to move the end.";
-"annotations.ready" = "Tap selection for actions.";
+"annotations.tap_start" = "Tap a word, or hold and drag to select.";
+"annotations.tap_end" = "Tap another word or drag either handle.";
+"annotations.tap_boundary" = "Tap text or drag a handle to adjust.";
+"annotations.overlap" = "Highlights cannot overlap. Adjust the selection and try again.";
+"annotations.ready" = "Drag handles to adjust. Tap selection to choose a mark.";
 "annotations.highlight_word" = "Highlight word";
+"annotations.mark_text" = "Mark text";
+"annotations.apply_changes" = "Apply changes";
 "annotations.end_here" = "Highlight to here";
 "annotations.retry_save" = "Retry save";
-"annotations.cancel_selection" = "Cancel selection";
+"annotations.cancel_selection" = "Clear selection";
 "annotations.discard_and_stop" = "Discard selection and stop highlighting";
 "annotations.stop" = "Stop highlighting";
 "annotations.empty" = "No annotations yet";
 "annotations.empty_hint" = "Use Annotate in the reading menu to save a passage.";
 /* Arguments: %1 */
 "annotations.summary" = "%1 annotations";
-"annotations.edit" = "Adjust highlight";
-"annotations.remove" = "Delete highlight";
+"annotations.edit" = "Adjust";
+"annotations.remove" = "Delete";
 "annotations.save_failed" = "Could not save the highlight. Your selection is kept.";
 "annotations.remove_prompt" = "Delete this highlight?";
 "annotations.remove_detail" = "The saved passage will be removed from this book.";
-"annotations.dismiss" = "Do nothing";
+"annotations.dismiss" = "Dismiss";
 "annotations.previous_matches" = "Previous highlights";
 "annotations.next_matches" = "Next highlights";
 "annotations.save_then_edit" = "Save selection and edit highlight";
@@ -774,6 +793,7 @@
 "annotations.color_blue" = "Blue";
 "annotations.color_pink" = "Pink";
 "annotations.color_gray" = "Gray";
+"annotations.color_section" = "Color";
 
 "annotations.color_failed" = "Could not save color. Try again.";
 
@@ -801,3 +821,52 @@
 
 "settings.hide_tab_labels" = "Hide labels in tabs";
 "settings.hide_tab_labels_description" = "Tabs at the bottom of the screen only display an icon when this is selected.";
+
+"settings.justification_tracking_summary" = "Reduce wide word gaps with letter spacing. Only affects justified text (Text > Alignment > Justify).";
+
+"settings.widows_orphans_summary" = "Keep single paragraph lines from appearing alone at the top or bottom of a page.";
+
+
+
+
+"settings.justification_tracking_off_description" = "Keep normal letter spacing.";
+
+"settings.justification_tracking_subtle_description" = "Allow a little extra letter spacing.";
+
+"settings.justification_tracking_more_description" = "Allow more extra letter spacing.";
+
+"settings.widows_orphans_publisher_description" = "Use the book's rules.";
+
+"settings.widows_orphans_avoid_description" = "Keep at least two lines together.";
+
+"settings.widows_orphans_allow_description" = "Allow single lines at page boundaries.";
+"settings.word_spacing" = "Word spacing";
+"settings.word_spacing_summary" = "Adjust the normal width of spaces between words.";
+"settings.word_spacing_description" = "Change space width relative to the font’s normal spacing. This can change line breaks and page count. Justified lines may still stretch spaces. Applies to all books.";
+"settings.word_spacing_narrow" = "Narrow";
+"settings.word_spacing_normal" = "Normal";
+"settings.word_spacing_wide" = "Wide";
+"settings.word_spacing_narrow_description" = "Use 80% of the normal space width.";
+"settings.word_spacing_normal_description" = "Keep the font’s normal space width (100%).";
+"settings.word_spacing_wide_description" = "Use 120% of the normal space width.";
+"settings.close" = "Close settings";
+"settings.title" = "Settings";
+"common.more_next_page" = "More on the next page";
+"annotations.style_shaded" = "Shaded";
+"annotations.style_underline" = "Solid";
+"annotations.style_dotted" = "Dotted";
+"annotations.help_title" = "Highlight mode is enabled";
+"annotations.help_text" = "Long press a word to start selection. Tap the selection to mark text.";
+
+
+"settings.justification_tracking_current_justified" = "Text is currently justified, so this preference can affect its letter spacing. It affects all books.";
+"settings.justification_tracking_current_left" = "Text is currently left-aligned, so this preference won't make a difference right now, but it does affect all books.";
+"settings.justification_tracking_current_other" = "Text isn't currently justified, so this preference won't make a difference right now, but it does affect all books.";
+"settings.justification_tracking_current_publisher" = "Text follows the book's alignment. This preference only affects justified text, but applies to all books.";
+
+"reader.one_column" = "One column";
+"reader.two_columns" = "Two columns";
+
+"settings.column_spacing_description" = "Gap between columns as a multiple of the current text size. Applies to all books.";
+"settings.landscape_columns" = "Use two columns in landscape";
+"settings.landscape_columns_description" = "Portrait uses one column. Applies to all books.";

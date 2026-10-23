@@ -36,6 +36,8 @@
 #include <QScreen>
 #include <QWindow>
 #include <QShowEvent>
+#include <QCursor>
+#include <QMouseEvent>
 
 static void initializeDesktopArtwork() {
     Q_INIT_RESOURCE(desktop_artwork);
@@ -181,7 +183,7 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
           [](Qt::ScreenOrientation) {}) {
     setWindowTitle(QStringLiteral(""));
     setMinimumSize(420, 500);
-    resize(640, 800);
+    resize(800, 1136);
     setAcceptDrops(true);
     // Keep book settings and UI metrics in the same 300 PPI coordinates in
     // every mode. Only the preview transform depends on the Mac display.
@@ -293,6 +295,8 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
             start->showForgetError();
     });
     canvas = new android::WidgetCanvas(stack);
+    canvas->setMouseTracking(true);
+    canvas->viewport()->setMouseTracking(true);
     stack->addWidget(start);
     stack->addWidget(canvas);
     connect(start, &android::StartScreen::openRequested, this, &Window::chooseBook);
@@ -484,6 +488,7 @@ void Window::sizeCanvas() {
 void Window::selectScreen(int index) {
     if (closing || screenPreset == index)
         return;
+    setTouchCursor(false);
     screenPreset = index;
     rotateAction->setEnabled(screenPicker->isEnabled() && screenPreset != 0);
     if (auto *reader = controller.window())
@@ -556,7 +561,61 @@ void Window::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
     resizeTimer.start();
 }
+Window::~Window() {
+    qApp->removeEventFilter(this);
+    setTouchCursor(false);
+}
+
+void Window::setTouchCursor(bool visible, bool pressed) {
+    if (!visible) {
+        if (!touchCursorVisible)
+            return;
+        QApplication::restoreOverrideCursor();
+        canvas->unsetCursor();
+        canvas->viewport()->unsetCursor();
+        touchCursorVisible = false;
+        return;
+    }
+    if (touchCursorVisible && touchCursorPressed == pressed)
+        return;
+    touchCursorPressed = pressed;
+    const qreal ratio = devicePixelRatioF();
+    QPixmap pixels(qRound(28 * ratio), qRound(28 * ratio));
+    pixels.setDevicePixelRatio(ratio);
+    pixels.fill(Qt::transparent);
+    {
+        QPainter painter(&pixels);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(0, 0, 0, pressed ? 210 : 128));
+        painter.drawEllipse(QRectF(2, 2, 24, 24));
+    }
+    const QCursor cursor(pixels, 14, 14);
+    canvas->setCursor(cursor);
+    canvas->viewport()->setCursor(cursor);
+    if (touchCursorVisible)
+        QApplication::changeOverrideCursor(cursor);
+    else
+        QApplication::setOverrideCursor(cursor);
+    touchCursorVisible = true;
+}
+
 bool Window::eventFilter(QObject *object, QEvent *event) {
+    if (object == canvas->viewport()) {
+        const auto type = event->type();
+        if (type == QEvent::Leave || type == QEvent::Hide)
+            setTouchCursor(false);
+        else if (type == QEvent::Enter || type == QEvent::MouseMove || type == QEvent::MouseButtonPress ||
+                 type == QEvent::MouseButtonRelease) {
+            const auto *mouse = dynamic_cast<QMouseEvent *>(event);
+            const QPoint point = mouse ? mouse->position().toPoint() : canvas->viewport()->mapFromGlobal(QCursor::pos());
+            const bool onPaper = screenPreset && controller.window() && stack->currentWidget() == canvas &&
+                canvas->sceneRect().contains(canvas->mapToScene(point));
+            setTouchCursor(onPaper, mouse && (mouse->buttons() & Qt::LeftButton));
+        }
+    }
+    if (object == this && event->type() == QEvent::WindowDeactivate)
+        setTouchCursor(false);
     auto *reader = controller.window();
     if (reader && (event->type() == QEvent::Resize || event->type() == QEvent::Show)) {
         auto *widget = qobject_cast<QWidget *>(object);
@@ -579,6 +638,7 @@ bool Window::eventFilter(QObject *object, QEvent *event) {
     return QMainWindow::eventFilter(object, event);
 }
 void Window::closeEvent(QCloseEvent *event) {
+    setTouchCursor(false);
     if (controller.idle()) {
         event->accept();
         return;

@@ -1,6 +1,7 @@
 #pragma once
 #include "buttons.h"
 #include <QLabel>
+#include <QPointer>
 
 namespace kobalt::ui {
 // A full-width bar with a cell at each end and the count between them.
@@ -8,7 +9,10 @@ namespace kobalt::ui {
 class PagerBar : public QWidget {
 public:
     PagerBar(QWidget *parent, const QString &prefix);
+    ~PagerBar() override;
     void setPage(int page, int count, const QString &label = {}, bool wrap = false);
+    // Coordinates in the pager's parent. Never reserve space or cover list rows.
+    void setBlankArea(const QRect &bounds);
     // Resolve a user turn using the last presented page and list bounds.
     int turnTarget(int direction) const;
     QLabel *counter;
@@ -21,6 +25,9 @@ protected:
 private:
     int page = 0, count = 1;
     bool wrap = false;
+    QPointer<QLabel> continuationHint;
+    QRect blankArea;
+    void updateHint();
 };
 class PageControls : public QWidget {
 public:

@@ -229,9 +229,20 @@ void ModalOverlay::setDimmed(bool enabled) {
 void ModalOverlay::paintEvent(QPaintEvent *) {
     if (dimmed && blocksInput) {
         QPainter painter(this);
-        QColor shade = darkTheme(this) ? Qt::white : Qt::black;
-        shade.setAlpha(m::notice::dimAlpha);
-        painter.fillRect(rect(), shade);
+        const bool dark = darkTheme(this);
+        QColor fade = dark ? Qt::black : Qt::white;
+        fade.setAlpha(m::notice::backdropFadeAlpha);
+        painter.fillRect(rect(), fade);
+        const int gray = dark ? 255 - m::notice::backdropLineGray : m::notice::backdropLineGray;
+        QPen lines(QColor(gray, gray, gray, m::notice::backdropLineAlpha));
+        // Keep diagonal strokes one output pixel wide at Native resolution.
+        lines.setWidth(1);
+        lines.setCosmetic(true);
+        painter.setPen(lines);
+        painter.setRenderHint(QPainter::Antialiasing, false);
+        const int pitch = qMax(1, int(m::notice::backdropPitch));
+        for (int x = -height(); x < width(); x += pitch)
+            painter.drawLine(x, 0, x + height(), height());
     }
 }
 void ModalOverlay::updateInputRegion() {

@@ -95,7 +95,7 @@ bool HighlightSession::persist(QVector<Highlight> highlights) {
 }
 void HighlightSession::save(const QString &start, const QString &end, const QString &id,
                             std::function<void(bool)> finished, const QString &chosenEnd, bool sentenceEndPolicy,
-                            const QString &chosenStart, bool sentenceStartPolicy, const QString &color) {
+                            const QString &chosenStart, bool sentenceStartPolicy, const QString &color, const QString &style) {
     if (!writable()) {
         if (failed) {
             failed();
@@ -105,8 +105,8 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
         }
         return;
     }
-    if (!color.isEmpty() && !isHighlightColor(color)) {
-        error_ = QStringLiteral("invalid-color");
+    if ((!color.isEmpty() && !isHighlightColor(color)) || (!style.isEmpty() && !isHighlightStyle(style))) {
+        error_ = QStringLiteral("invalid-appearance");
         if (failed) {
             failed();
         }
@@ -119,7 +119,7 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
     const auto generation = generation_;
     model_.textRange(start, end,
                      [guard, id, generation, finished, chosenEnd, sentenceEndPolicy, chosenStart, sentenceStartPolicy,
-                      color](TextRange range) {
+                      color, style](TextRange range) {
                          if (!guard) {
                              return;
                          }
@@ -150,59 +150,89 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
                                      {},
                                      QDateTime::currentDateTimeUtc()};
                          h.color = color.isEmpty() ? (index < 0 ? QStringLiteral("gray") : list[index].color) : color;
+                         h.style = style.isEmpty() ? (index < 0 ? QStringLiteral("shaded") : list[index].style) : style;
                          h.chosenEnd = sentenceEndPolicy ? chosenEnd : QString();
                          h.sentenceEndPolicy = sentenceEndPolicy;
                          h.chosenStart = sentenceStartPolicy ? chosenStart : QString();
                          h.sentenceStartPolicy = sentenceStartPolicy;
-                         // Chapter lookup follows the start endpoint, even after a cross-page selection.
-                         const auto positions = QStringList{range.start};
-                         guard->model_.bookmarkPages(
-                             positions, [guard, list, h, index, generation, finished](QVector<int> pages) mutable {
-                                 if (!guard) {
+                         QVector<QPair<QString, QString>> others;
+                         for (const auto &item : list) {
+                             if (item.id != id)
+                                 others.append({item.start, item.end});
+                         }
+                         guard->model_.intersectingRanges(range.start, range.end, others,
+                             [guard, list, h, index, generation, finished](QVector<int> hits) mutable {
+                                 if (!guard)
                                      return;
-                                 }
-                                 if (pages.size() != 1 || guard->generation_ != generation) {
-                                     if (finished) {
+                                 if (guard->generation_ != generation || !hits.isEmpty()) {
+                                     if (!hits.isEmpty()) {
+                                         guard->error_ = QStringLiteral("overlap");
+                                         if (guard->failed)
+                                             guard->failed();
+                                     }
+                                     if (finished)
                                          finished(false);
-                                     }
                                      return;
                                  }
-                                 for (const auto &chapter : guard->model_.chapters()) {
-                                     if (chapter.page >= 0 && chapter.page <= pages[0]) {
-                                         h.chapter = chapter.title.left(512);
-                                     }
-                                 }
-                                 if (index < 0) {
-                                     list.append(h);
-                                 } else {
-                                     h.created = list[index].created;
-                                     list[index] = h;
-                                 }
-                                 const bool saved = guard->persist(std::move(list));
-                                 if (finished) {
-                                     finished(saved);
-                                 }
+                                 // Chapter lookup follows the start endpoint, even after a cross-page selection.
+                                 const auto positions = QStringList{h.start};
+                                 guard->model_.bookmarkPages(
+                                     positions, [guard, list, h, index, generation, finished](QVector<int> pages) mutable {
+                                         if (!guard) {
+                                             return;
+                                         }
+                                         if (pages.size() != 1 || guard->generation_ != generation) {
+                                             if (finished) {
+                                                 finished(false);
+                                             }
+                                             return;
+                                         }
+                                         for (const auto &chapter : guard->model_.chapters()) {
+                                             if (chapter.page >= 0 && chapter.page <= pages[0]) {
+                                                 h.chapter = chapter.title.left(512);
+                                             }
+                                         }
+                                         if (index < 0) {
+                                             list.append(h);
+                                         } else {
+                                             h.created = list[index].created;
+                                             list[index] = h;
+                                         }
+                                         const bool saved = guard->persist(std::move(list));
+                                         if (finished) {
+                                             finished(saved);
+                                         }
+                                     });
                              });
                      });
 }
 bool HighlightSession::recolor(const QString &id, const QString &color) {
-    if (!isHighlightColor(color)) {
-        error_ = QStringLiteral("invalid-color");
-        if (failed) {
+    return updateAppearance(id, color, {});
+}
+bool HighlightSession::restyle(const QString &id, const QString &style) {
+    return updateAppearance(id, {}, style);
+}
+bool HighlightSession::updateAppearance(const QString &id, const QString &color, const QString &style) {
+    if ((color.isEmpty() && style.isEmpty()) || (!color.isEmpty() && !isHighlightColor(color)) ||
+        (!style.isEmpty() && !isHighlightStyle(style))) {
+        error_ = QStringLiteral("invalid-appearance");
+        if (failed)
             failed();
-        }
         return false;
     }
     auto list = highlights();
     for (auto &h : list) {
-        if (h.id == id) {
-            if (h.color == color && writable()) {
-                error_.clear();
-                return true;
-            }
-            h.color = color;
-            return persist(std::move(list));
+        if (h.id != id)
+            continue;
+        const QString chosenColor = color.isEmpty() ? h.color : color;
+        const QString chosenStyle = style.isEmpty() ? h.style : style;
+        if (h.color == chosenColor && h.style == chosenStyle && writable()) {
+            error_.clear();
+            return true;
         }
+        h.color = chosenColor;
+        h.style = chosenStyle;
+        return persist(std::move(list));
     }
     return false;
 }

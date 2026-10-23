@@ -39,7 +39,7 @@ bool valid(const Highlight &h) {
            h.end.size() <= 4096 && (!h.sentenceEndPolicy || (!h.chosenEnd.isEmpty() && h.chosenEnd.size() <= 4096)) &&
            (!h.sentenceStartPolicy || (!h.chosenStart.isEmpty() && h.chosenStart.size() <= 4096)) && h.start != h.end &&
            !h.text.isEmpty() && h.text.size() <= HighlightStore::maxTextUnits && h.chapter.size() <= 512 &&
-           h.created.isValid() && colorToken(h.color);
+           h.created.isValid() && colorToken(h.color) && colorToken(h.style);
 }
 }
 bool isHighlightColor(const QString &color) {
@@ -48,6 +48,12 @@ bool isHighlightColor(const QString &color) {
 }
 QString highlightDisplayColor(const QString &color) {
     return isHighlightColor(color) ? color : QStringLiteral("gray");
+}
+bool isHighlightStyle(const QString &style) {
+    return style == QLatin1String("shaded") || style == QLatin1String("underline") || style == QLatin1String("dotted");
+}
+QString highlightDisplayStyle(const QString &style) {
+    return isHighlightStyle(style) ? style : QStringLiteral("shaded");
 }
 HighlightStore::HighlightStore(QString root, QString identity, QByteArray fingerprint, QString title)
     : root_(std::move(root)), identity_(std::move(identity)), title_(std::move(title)),
@@ -85,6 +91,11 @@ bool HighlightStore::readFolder(const QString &folder, QString *error) {
                 return problem(error, "invalid-highlight");
             }
             h.color = o.value("color").toString();
+        }
+        if (o.contains("style")) {
+            if (!o.value("style").isString())
+                return problem(error, "invalid-highlight");
+            h.style = o.value("style").toString();
         }
         if (o.contains("sentence_end")) {
             const auto provenance = o.value("sentence_end");
@@ -169,6 +180,7 @@ bool HighlightStore::save(QString *error) {
                                        {"chapter", h.chapter},
                                        {"created", h.created.toUTC().toString(Qt::ISODate)}});
         item["color"] = h.color;
+        item["style"] = h.style;
         if (h.sentenceEndPolicy) {
             item["sentence_end"] = qt::object({{"enabled", true}, {"chosen_end", h.chosenEnd}});
         }

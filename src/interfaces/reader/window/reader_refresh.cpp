@@ -383,6 +383,12 @@ void Reader::syncReadingControls() {
         ->setChecked(!general->isVisible() && appearanceEdit.panelOpen() &&
                      panels->currentIndex() != kobalt::reader::TypographyPage);
     findChild<QPushButton *>("rrSettings")->setChecked(general->isVisible());
+    const bool settingsOpen = general->isVisible();
+    for (auto *action : {toolbarComposition.exitAction, toolbarComposition.settings, toolbarComposition.bookmarks,
+                         toolbarComposition.annotate, toolbarComposition.search})
+        if (action)
+            action->setVisible(!settingsOpen);
+    toolbarComposition.formattingWarning->setVisible(!settingsOpen && model->formattingWarning());
     findChild<QPushButton *>("rrGraph")->setEnabled(!model->busy() && !appearanceEdit.applying());
     findChild<QPushButton *>("rrGraph")->setChecked(chapterGraph->isVisible() ||
                                                     appearanceEdit.destination() == AppearanceDestination::Stats);

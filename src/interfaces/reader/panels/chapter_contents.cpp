@@ -118,6 +118,8 @@ void ChapterContents::redraw() {
     const bool pagesKnown = lastPage >= 0;
     listHeader->setCaptions(summary->text(), pagesKnown ? strings::get("chapter_contents.page") : QString());
     pager->setPage(page, pageCount(), {}, true);
+    const int used = c::actionHeight + m::stripHeight + qMin(rows, qMax(0, int(items.size()) - page * rows)) * int(ui::metrics::list::oneLine);
+    pager->setBlankArea({c::inset, used, width() - 2 * c::inset, pager->y() - used});
     while (buttons.size() < qMin(rows, int(items.size()))) {
         const int row = buttons.size();
         auto *button = new ui::ListRow(this);

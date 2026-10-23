@@ -38,6 +38,39 @@ int main(int argc, char **argv) {
         }
     }
     const auto first = selected.value("Hello"), last = selected.value("world");
+    bool foundSpace = false;
+    for (const auto &gap : model.rangeRects(first.end, last.start)) {
+        for (int x = gap.left(); x <= gap.right(); ++x) {
+            const QPoint point(x, gap.center().y());
+            if (model.annotationTokenAt(point).start == first.start && model.wordAt(point).text.isEmpty()) {
+                foundSpace = true;
+                require(model.annotationTokenAt(point).text == first.text,
+                        "Whitespace did not select the preceding complete word");
+            }
+        }
+    }
+    require(foundSpace, "No selectable inter-word space found");
+    require(model.annotationTokenAt({0, 0}).text.isEmpty() && model.annotationTokenAt({-1, 100}).text.isEmpty(),
+            "Annotation whitespace fallback selected a margin or outside point");
+    require(model.annotationDragTokenAt(last.rectangles.first().center(), first.end, false).text.isEmpty(),
+            "End drag expanded before crossing the next word");
+    bool crossedWord = false;
+    for (const auto &word : selected) {
+        const auto edge = model.annotationGeometry(word.start, word.end).end;
+        if (!edge.visible)
+            continue;
+        for (int distance = 0; distance < 12; ++distance) {
+            const QPoint beyond = (edge.first + edge.last) / 2 + edge.outward * distance;
+            if (model.annotationTokenAt(beyond).start == word.start && word.start != first.start &&
+                model.annotationDragTokenAt(beyond, first.end, false).start == word.start)
+                crossedWord = true;
+        }
+    }
+    require(crossedWord, "End drag did not expand after crossing any complete word");
+    require(model.annotationDragTokenAt(first.rectangles.first().center(), last.start, true).text.isEmpty(),
+            "Start drag expanded before crossing the preceding word");
+    require(model.annotationDragTokenAt(first.rectangles.first().center(), first.start, true).start == first.start,
+            "An unchanged boundary was rejected");
     const auto range = model.textRange(first.start, last.end);
     require(range.text.contains("Hello") && range.text.endsWith("world"), "Full boundary words missing");
     const auto reversed = model.textRange(last.end, first.start);

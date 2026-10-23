@@ -123,6 +123,7 @@ PageScrubber::PageScrubber(QWidget *parent) : QWidget(parent), position(new Sett
     following->setAccessibleName(strings::get("common.next_page"));
     for (auto *thumbnail : {preceding, following}) {
         readerStyle(thumbnail, "QPushButton{border:none;padding:0;min-height:0;}");
+        thumbnail->installEventFilter(this);
         thumbnail->hide();
     }
     connect(preceding, &QPushButton::clicked, this, [this] {
@@ -573,7 +574,7 @@ void PageScrubber::cancel() {
     setAttribute(Qt::WA_OpaquePaintEvent, false);
     barRule->setSoftEdges(true);
     clearPreview();
-    pressedPreview = false;
+    pointerActive = false;
     setProperty("preview_page", -1);
     setProperty("preview_ready", false);
     if (current < rangeFirst || current > rangeLast) {
@@ -834,56 +835,95 @@ void PageScrubber::hideEvent(QHideEvent *) {
         cancel();
     }
 }
-void PageScrubber::mousePressEvent(QMouseEvent *event) {
-    if (isPointerMouse(event) && event->button() == Qt::LeftButton) {
-        pressedPreview = previewBounds().contains(mousePosition(event).toPoint());
-    }
+void PageScrubber::beginPointer(QPoint point) {
+    pressPosition = point;
+    pointerActive = selecting() && !panelBounds().contains(point);
+    pointerMoved = false;
+    pressedCard = previewBounds().contains(point) ? 0
+                  : preceding->isVisible() && preceding->geometry().contains(point) ? 1
+                  : following->isVisible() && following->geometry().contains(point) ? 2 : -1;
+}
+void PageScrubber::movePointer(QPoint point) {
+    if ((point - pressPosition).manhattanLength() > px(12))
+        pointerMoved = true;
 }
 void PageScrubber::release(QPoint point) {
-    if (!selecting()) {
+    if (!pointerActive || !selecting())
+        return;
+    movePointer(point);
+    pointerActive = false;
+    const auto delta = point - pressPosition;
+    if (pointerMoved) {
+        if (qAbs(delta.x()) >= px(40) && qAbs(delta.x()) > qAbs(delta.y()) * 1.5) {
+            choose(qBound(0, candidate + (delta.x() < 0 ? 1 : -1), totalPages - 1));
+            requestPreview();
+        }
         return;
     }
-    if (pressedPreview && previewBounds().contains(point)) {
-        if (previewReady() && accepted) {
+    if (pressedCard == 0 && previewBounds().contains(point)) {
+        if (previewReady() && accepted)
             accepted(candidate);
-        }
+    } else if (pressedCard == 1 && preceding->geometry().contains(point)) {
+        preceding->click();
+    } else if (pressedCard == 2 && following->geometry().contains(point)) {
+        following->click();
     } else if (previewDismissible && !panelBounds().contains(point)) {
         cancel();
     }
-    pressedPreview = false;
 }
-void PageScrubber::mouseReleaseEvent(QMouseEvent *event) {
-    if (isPointerMouse(event) && event->button() == Qt::LeftButton) {
-        release(mousePosition(event).toPoint());
+bool PageScrubber::pointerEvent(QEvent *event, QPoint offset) {
+    if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseMove ||
+        event->type() == QEvent::MouseButtonRelease) {
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        if (!isPointerMouse(mouse) || (event->type() != QEvent::MouseMove && mouse->button() != Qt::LeftButton))
+            return false;
+        const auto point = mousePosition(mouse).toPoint() + offset;
+        if (event->type() == QEvent::MouseButtonPress)
+            beginPointer(point);
+        else if (event->type() == QEvent::MouseMove && pointerActive)
+            movePointer(point);
+        else if (event->type() == QEvent::MouseButtonRelease)
+            release(point);
+        event->accept();
+        return true;
     }
-}
-bool PageScrubber::event(QEvent *event) {
     if (event->type() == QEvent::TouchBegin || event->type() == QEvent::TouchUpdate ||
         event->type() == QEvent::TouchEnd) {
         const auto points = touchPositions(static_cast<QTouchEvent *>(event));
         // Let child controls own touches inside the navigation panel.
         if (event->type() == QEvent::TouchBegin && points.size() == 1 &&
-            panelBounds().contains(points.first().toPoint())) {
+            panelBounds().contains(points.first().toPoint() + offset)) {
             event->ignore();
             return false;
         }
         if (points.size() == 1) {
-            if (event->type() == QEvent::TouchBegin) {
-                pressedPreview = previewBounds().contains(points.first().toPoint());
-            }
-            if (event->type() == QEvent::TouchEnd) {
-                release(points.first().toPoint());
-            }
+            const auto point = points.first().toPoint() + offset;
+            if (event->type() == QEvent::TouchBegin)
+                beginPointer(point);
+            else if (event->type() == QEvent::TouchEnd)
+                release(point);
+            else if (pointerActive)
+                movePointer(point);
         } else {
-            pressedPreview = false;
+            pointerActive = false;
         }
         event->accept();
         return true;
     }
     if (event->type() == QEvent::TouchCancel) {
-        pressedPreview = false;
+        pointerActive = false;
+        event->accept();
         return true;
     }
-    return QWidget::event(event);
+    return false;
+}
+bool PageScrubber::eventFilter(QObject *watched, QEvent *event) {
+    if ((watched == preceding || watched == following) &&
+        pointerEvent(event, static_cast<QWidget *>(watched)->pos()))
+        return true;
+    return QWidget::eventFilter(watched, event);
+}
+bool PageScrubber::event(QEvent *event) {
+    return pointerEvent(event) || QWidget::event(event);
 }
 }

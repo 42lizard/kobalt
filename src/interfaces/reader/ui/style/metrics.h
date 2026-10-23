@@ -239,7 +239,8 @@ inline const QRectF handoffDetail{28, 463, 346, 24};
 inline const QRectF handoffHint{28, 499, 346, 18};
 }
 namespace notice {
-inline constexpr int dimAlpha = 64;
+inline constexpr int backdropFadeAlpha = 90, backdropLineAlpha = 150, backdropLineGray = 85;
+inline constexpr Px backdropPitch{18};
 inline constexpr Px cardWidth{760}, height{144}, sideClearance{32};
 inline constexpr PxMargins cardMargins{32, 28, 32, 28};
 inline constexpr Px cardGap{20};
@@ -251,6 +252,9 @@ inline QRect centered(const QSize &size) {
 }
 namespace acknowledgments {
 inline constexpr Px textMargin{12}, noticeText{24}, captionGap{40};
+}
+namespace selection {
+inline constexpr Px outline{2}, handleRadius{14}, handleHitRadius{32};
 }
 namespace lookup {
 inline constexpr int heightPercent = 46, holdMilliseconds = 500;

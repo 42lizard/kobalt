@@ -363,6 +363,10 @@ void CaptionButton::setTypefacePreview(const QString &face) {
     update();
 }
 QSize CaptionButton::sizeHint() const {
+    if (!description.isEmpty()) {
+        const auto size = Button::sizeHint();
+        return {size.width(), heightForWidth(size.width())};
+    }
     if (mode != Presentation::CompactAction) {
         return Button::sizeHint();
     }
@@ -370,6 +374,23 @@ QSize CaptionButton::sizeHint() const {
     return {interfaceTextWidth(text(), interfaceFont(m::chrome::labelText)) + int(m::chrome::cellIcon) + gap + px(32) +
                 int(m::control::padding),
             m::scrubber::actionHeight};
+}
+void CaptionButton::setDescription(const QString &text) {
+    description = text;
+    setAccessibleDescription(text);
+    updateGeometry();
+    update();
+}
+int CaptionButton::heightForWidth(int width) const {
+    if (description.isEmpty())
+        return Button::heightForWidth(width);
+    namespace c = m::chrome;
+    const int available = qMax(1, width - c::inset - c::actionRight);
+    const auto label = font(), noteFont = captionFont();
+    const int titleHeight = note.isEmpty() ? QFontMetrics(label).height()
+        : QFontMetrics(label).height() / 2 + px(40) + QFontMetrics(noteFont).height() / 2;
+    return qMax(int(c::listActionHeight), titleHeight + px(40) +
+        wrappedInterfaceTextHeight(description, interfaceFont(c::descriptionText), available));
 }
 CaptionButton *makeCaptionButton(QWidget *parent, QBoxLayout *layout, const char *name, const QString &text,
                                  std::function<void()> action) {
@@ -391,6 +412,17 @@ void CaptionButton::paintEvent(QPaintEvent *) {
         painter.fillRect(rect(), pressed ? ink : paper);
         paintEdges(painter, rect(), rule, dividerColor(this));
         painter.setPen(pressed ? paper : ink);
+        if (isIconAboveLabel()) {
+            painter.setFont(font());
+            const int iconSize = m::chrome::cellIcon, gap = px(8);
+            const int labelHeight = QFontMetrics(font()).height();
+            const int top = (height() - iconSize - gap - labelHeight) / 2;
+            icon().paint(&painter, QRect((width() - iconSize) / 2, top, iconSize, iconSize), Qt::AlignCenter,
+                         isEnabled() ? QIcon::Normal : QIcon::Disabled, pressed ? QIcon::On : QIcon::Off);
+            const QRect labelArea(px(16), top + iconSize + gap, qMax(0, width() - 2 * px(16)), labelHeight);
+            drawInterfaceText(painter, labelArea, elideInterfaceText(text(), font(), labelArea.width()), Qt::AlignCenter);
+            return;
+        }
         painter.setFont(interfaceFont(m::chrome::labelText));
         const int iconSize = m::chrome::cellIcon, gap = text().isEmpty() ? 0 : px(16);
         const int inset = mode == Presentation::CompactAction ? px(16) : int(m::chrome::inset);
@@ -413,6 +445,8 @@ void CaptionButton::paintEvent(QPaintEvent *) {
         QPainter painter(this);
         painter.fillRect(rect(), isEnabled() && isDown() ? sectionColor(this) : palette().color(QPalette::Window));
         paintEdges(painter, rect(), rule, dividerColor(this));
+        if (!isEnabled())
+            painter.setOpacity(.45);
         painter.setPen(palette().color(QPalette::WindowText));
         QFont label = font();
         painter.setFont(label);
@@ -429,7 +463,11 @@ void CaptionButton::paintEvent(QPaintEvent *) {
         const QFont noteFont = captionFont();
         const int labelHeight = QFontMetrics(label).height(), noteHeight = QFontMetrics(noteFont).height();
         const int pitch = px(40);
-        const int blockHeight = note.isEmpty() ? labelHeight : labelHeight / 2 + pitch + noteHeight / 2;
+        const int titleHeight = note.isEmpty() ? labelHeight : labelHeight / 2 + pitch + noteHeight / 2;
+        const auto descriptionFont = interfaceFont(c::descriptionText);
+        const int descriptionHeight = description.isEmpty() ? 0
+            : wrappedInterfaceTextHeight(description, descriptionFont, textWidth);
+        const int blockHeight = titleHeight + (description.isEmpty() ? 0 : px(12) + descriptionHeight);
         const int top = (height() - blockHeight) / 2 - opticalCenterShift(label, note.isEmpty() ? label : noteFont);
         drawInterfaceText(painter, QRect(left, top, textWidth, labelHeight),
                           elideInterfaceText(text(), painter.font(), textWidth), Qt::AlignVCenter | Qt::AlignLeft);
@@ -437,6 +475,12 @@ void CaptionButton::paintEvent(QPaintEvent *) {
             const int size = px(28);
             controlIcon(ControlIcon::Next, palette().color(QPalette::WindowText))
                 .paint(&painter, QRect(width() - c::chevronRight - size / 2, (height() - size) / 2, size, size));
+        }
+        if (!description.isEmpty()) {
+            painter.setFont(descriptionFont);
+            painter.setPen(noteColor(this));
+            drawWrappedInterfaceText(painter,
+                QRect(left, top + titleHeight + px(12), textWidth, descriptionHeight), description);
         }
         if (previewWidth) {
             painter.setFont(previewFont);

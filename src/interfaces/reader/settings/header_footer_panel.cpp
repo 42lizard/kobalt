@@ -567,6 +567,8 @@ void FieldChooser::arrange() {
     const int count = (page + 1 < pages ? starts[page + 1] : int(list->options().size())) - first;
     list->showRows(first, count);
     list->setGeometry(0, listTop, width(), list->heightForWidth(width()));
+    const int used = list->geometry().bottom() + 1;
+    pager->setBlankArea({m::chrome::inset, used, width() - 2 * m::chrome::inset, pager->y() - used});
 }
 
 void FieldChooser::paintEvent(QPaintEvent *event) {

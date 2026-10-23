@@ -159,6 +159,10 @@
       "sha256": "4d166977720d3beb386288a8607fbb36134fef06fdd99496ab09cf2d2da211b5"
     },
     {
+      "file": "text-columns.svg",
+      "sha256": "172ac521a002019c6898b16f9a4a0e4930a3eb1f9275044312d4de6acc84f0f6"
+    },
+    {
       "file": "translate.svg",
       "sha256": "1e49dc31f3a172c9c7c67361511ee5314598b3f5b32788219325f589487f76c5"
     },

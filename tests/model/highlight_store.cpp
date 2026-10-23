@@ -48,11 +48,13 @@ int main() {
     for (int i = 0; i < entries.size(); ++i) {
         auto entry = entries[i].toObject();
         entry.remove("color");
+        entry.remove("style");
         entries[i] = entry;
     }
     legacy["highlights"] = entries;
     replace(path, QJsonDocument(legacy).toJson());
     require(reopened.load() && reopened.highlights().first().color == "gray", "Legacy passage is not gray");
+    require(reopened.highlights().first().style == "shaded", "Legacy passage is not shaded");
     for (const auto &color : {"gray", "yellow", "green", "blue", "pink", "orange"}) {
         auto colored = h;
         colored.color = QString::fromLatin1(color);
@@ -62,6 +64,20 @@ int main() {
         require(highlightDisplayColor(colored.color) == (colored.color == "orange" ? "gray" : colored.color),
                 "Unknown future color did not display gray");
     }
+    for (const auto &style : {"shaded", "underline", "dotted", "future"}) {
+        auto styled = h;
+        styled.style = style;
+        store.setHighlights({styled});
+        require(store.save() && reopened.load() && reopened.highlights().first().style == style,
+                "Stored style did not round-trip");
+        require(highlightDisplayStyle(style) == (QString(style) == "future" ? "shaded" : QString(style)),
+                "Future style did not fall back to shaded");
+    }
+    auto invalidStyle = h;
+    invalidStyle.style = "INVALID!";
+    store.setHighlights({invalidStyle});
+    const auto beforeInvalidStyle = bytes(path);
+    require(!store.save() && bytes(path) == beforeInvalidStyle, "Invalid style replaced saved data");
     auto invalidColor = h;
     invalidColor.color = "INVALID!";
     store.setHighlights({invalidColor});

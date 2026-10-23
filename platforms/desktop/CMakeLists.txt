@@ -11,7 +11,7 @@ set(CMAKE_AUTOMOC ON)
 include(CTest)
 set(qt_components Core Gui Widgets Network Sensors)
 if(BUILD_TESTING)
-    list(APPEND qt_components Test)
+    list(APPEND qt_components Test Sql)
 endif()
 find_package(Qt6 6.11.3 EXACT REQUIRED COMPONENTS ${qt_components})
 file(REAL_PATH "${Qt6_DIR}/.." qt_config_root)
@@ -144,14 +144,14 @@ if(BUILD_TESTING)
         KOBALT_TEST_VARIABLE_FONT="${test_variable_font}")
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-tmp")
     set(headless_environment "QT_QPA_PLATFORM=minimal:enable_fonts:freetype" "QT_STYLE_OVERRIDE=Fusion" "TMPDIR=${CMAKE_CURRENT_BINARY_DIR}/test-tmp")
-    foreach(check startup covers reading errors diagnostics storageDiagnostics features stylesheet bookmarks bookmarkMerge annotations links
-            settings dictionaryRedraw opticalSize desktopControls navigation annotationTwoFingerTapConsumesWholeSequence annotationRightClickRejectsChords)
+    foreach(check startup covers reading errors diagnostics storageDiagnostics features stylesheet bookmarks bookmarkMerge annotations annotationSelection annotationOverlap wordSelection touchCursor links
+            settings advancedText columns fullWidthPanels dictionaryRedraw opticalSize desktopControls navigation annotationTwoFingerTapConsumesWholeSequence annotationRightClickRejectsChords)
         add_test(NAME desktop.${check} COMMAND "${CMAKE_COMMAND}"
             "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-desktop-tests>" "-DTEST_ARGUMENTS=${check}"
             "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake")
         set(lane fast)
-        if(check MATCHES "^(features|diagnostics|stylesheet|bookmarks|bookmarkMerge|annotations|links|settings|dictionaryRedraw|opticalSize|desktopControls|navigation)$")
+        if(check MATCHES "^(features|diagnostics|stylesheet|bookmarks|bookmarkMerge|annotations|annotationSelection|annotationOverlap|wordSelection|touchCursor|links|settings|advancedText|columns|fullWidthPanels|dictionaryRedraw|opticalSize|desktopControls|navigation)$")
             set(lane integration)
         endif()
         set_tests_properties(desktop.${check} PROPERTIES ENVIRONMENT "${headless_environment}"
@@ -215,7 +215,7 @@ if(BUILD_TESTING)
             annotationPaintPreservesText
             annotationDamageBatchesLogicalUpdate
             annotationFrameDamageJoinsRawDamage
-            annotationContourKeepsParagraphGaps)
+            annotationContourKeepsParagraphGaps annotationHandlesDragAndCancel)
         add_test(NAME ui.${check} COMMAND "${CMAKE_COMMAND}"
             "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-reader-ui-tests>" "-DTEST_ARGUMENTS=${check}"
             "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
@@ -230,7 +230,12 @@ if(BUILD_TESTING)
             set_target_properties(kobalt-${name}-tests PROPERTIES AUTOMOC OFF)
             target_include_directories(kobalt-${name}-tests PRIVATE "${KOBALT_ROOT}/tests/support")
             target_compile_options(kobalt-${name}-tests PRIVATE -Wall -Wextra -Werror)
-            if(check STREQUAL "touch_rotation")
+            if(check STREQUAL "nickel_book_menu")
+                target_sources(kobalt-${name}-tests PRIVATE "${KOBALT_ROOT}/platforms/kobo/common/book_menu.cpp")
+                target_link_libraries(kobalt-${name}-tests PRIVATE kobalt-regression-runtime Qt6::Widgets Qt6::Sql)
+                target_include_directories(kobalt-${name}-tests PRIVATE "${KOBALT_ROOT}")
+                set_target_properties(kobalt-${name}-tests PROPERTIES ENABLE_EXPORTS ON)
+            elseif(check STREQUAL "touch_rotation")
                 target_link_libraries(kobalt-${name}-tests PRIVATE Qt6::Gui)
                 target_include_directories(kobalt-${name}-tests PRIVATE "${KOBALT_ROOT}")
             elseif(group STREQUAL "component" OR check STREQUAL "reader_orientation")
@@ -270,6 +275,9 @@ if(BUILD_TESTING)
             if(check STREQUAL "font_sources")
                 set(arguments "${test_variable_font};${test_book}")
             endif()
+            if(check STREQUAL "nickel_book_menu")
+                set(arguments "${test_book}")
+            endif()
             if(check STREQUAL "font_registration")
                 set(arguments "${KOBALT_ASSETS}/fonts/ebook-core/NV_Bitter-Regular.ttf")
             endif()
@@ -287,8 +295,8 @@ if(BUILD_TESTING)
         logical_word_counter brightness_gesture qt_compat page_refresh_regions screen_refresh plain_archive reading_progress)
     kobalt_regressions(model font_axes touch_rotation)
     kobalt_regressions(platform reader_orientation font_sources system_fonts nickel_dictionary_selection
-        nickel_reading_pace_cache nickel_session_calls usb_removal page_transition_native)
-    kobalt_regressions(engine alignment indentation page_layout vertical_writing mathml line_breaking
+        nickel_reading_pace_cache nickel_session_calls nickel_book_menu usb_removal page_transition_native)
+    kobalt_regressions(engine columns advanced_text alignment indentation page_layout vertical_writing mathml line_breaking
         fallback_styles svg_limits whitespace links search word_selection reader publisher_markup local_reader document_word_count document_cache)
     kobalt_regressions(component ui acknowledgments font_data font_registration)
     kobalt_regressions(session reading_book bookmark_session highlight_session reader_session)

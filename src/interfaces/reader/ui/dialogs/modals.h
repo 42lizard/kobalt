@@ -30,7 +30,7 @@ private:
     QImage artworkImage;
 };
 
-// The input barrier can dim the background for settings choices. Transparent
+// The input barrier can pattern the background for settings choices. Transparent
 // overlays keep local refreshes for progress and anchored reading tools.
 class ModalOverlay : public QWidget {
 public:
@@ -41,7 +41,7 @@ public:
     // Nonblocking anchored menus receive input only over their card and arrow.
     // Page gestures and controls outside those pixels remain available.
     void setInputBarrier(bool enabled);
-    // Dimming covers the parent only while this overlay blocks input.
+    // The patterned backdrop covers the parent only while this overlay blocks input.
     void setDimmed(bool enabled);
     bool inputBarrier() const {
         return blocksInput;

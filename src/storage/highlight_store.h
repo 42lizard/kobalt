@@ -13,10 +13,13 @@ struct Highlight {
     QString chosenStart = {};
     bool sentenceStartPolicy = false;
     QString color = QStringLiteral("gray");
+    QString style = QStringLiteral("shaded");
 };
 // Unknown future stored keys display gray without losing their original value.
 bool isHighlightColor(const QString &color);
 QString highlightDisplayColor(const QString &color);
+bool isHighlightStyle(const QString &style);
+QString highlightDisplayStyle(const QString &style);
 // Separate passages keep their IDs even when their ranges overlap or reflow.
 class HighlightStore {
 public:

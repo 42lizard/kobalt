@@ -48,6 +48,9 @@ public:
         iconAboveLabel = above;
         update();
     }
+    bool isIconAboveLabel() const {
+        return iconAboveLabel;
+    }
 
 protected:
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -185,8 +188,13 @@ public:
         if (note == caption)
             return;
         note = caption;
+        if (!description.isEmpty())
+            updateGeometry();
         update();
     }
+    void setDescription(const QString &text);
+    bool hasHeightForWidth() const override { return !description.isEmpty(); }
+    int heightForWidth(int width) const override;
     QString caption() const {
         return note;
     }
@@ -221,7 +229,7 @@ protected:
 private:
     Presentation mode;
     ControlIcon glyph = ControlIcon::Link;
-    QString note, previewFace;
+    QString note, previewFace, description;
     QFont previewFont;
     int previewDensity = 0;
     Edges rule;

@@ -43,7 +43,12 @@ Geometry geometry(ControlIcon icon, bool sideButtons) {
     };
     // Phosphor has no vertical swipe gesture, and the device drawings show
     // the side buttons, so these stay Kobalt's own artwork.
-    if (icon == ControlIcon::SelectionStart || icon == ControlIcon::SelectionEnd) {
+    if (icon == ControlIcon::OneColumn || icon == ControlIcon::TwoColumns) {
+        result.canvas = 256;
+        result.filled = true;
+        phosphorGeometry(icon == ControlIcon::OneColumn ? QStringLiteral("text-align-justify")
+                                                       : QStringLiteral("text-columns"), path);
+    } else if (icon == ControlIcon::SelectionStart || icon == ControlIcon::SelectionEnd) {
         const bool start = icon == ControlIcon::SelectionStart;
         const int caret = start ? 12 : 52;
         line(caret, 12, caret, 52);

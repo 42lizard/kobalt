@@ -301,6 +301,8 @@ void SearchPanel::redraw() {
                        .arg(resultPage * pageSize + 1)
                        .arg(qMin((resultPage + 1) * pageSize, int(hits.size()))),
                    true);
+    const int used = listTop + qMin(pageSize, qMax(0, int(hits.size()) - resultPage * pageSize)) * rowHeight;
+    pager->setBlankArea({c::inset, used, width() - 2 * c::inset, pager->y() - used});
     original->setVisible(returning);
     original->setGeometry(0, c::headerHeight, width(), m::list::twoLines);
     const bool waiting = hits.isEmpty() && !scanning;

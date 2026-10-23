@@ -1,3 +1,4 @@
+#include "column_view.h"
 #include "support/qt_compat.h"
 #include "reader_model.h"
 #include "engine_activity.h"
@@ -56,7 +57,7 @@ QString ReaderModel::pageExcerpt(int page) const {
     return qstring(engine_->getPageText(false, page)).simplified().left(200);
 }
 namespace {
-AnnotationToken sourceWord(LVDocView *engine, QSize size, ldomXPointerEx hit, bool annotation = false) {
+AnnotationToken sourceWord(ColumnView *engine, QSize size, ldomXPointerEx hit, bool annotation = false) {
     AnnotationToken result;
     if (hit.isNull() || !hit.isText() || !hit.isVisible()) {
         return result;
@@ -270,7 +271,7 @@ struct SentenceContext {
     int wordStart = -1, wordEnd = -1;
     bool blockStart = false, blockEnd = false;
 };
-SentenceContext sentenceContext(LVDocView *engine, const WordSelection &word, const std::function<bool()> &current,
+SentenceContext sentenceContext(ColumnView *engine, const WordSelection &word, const std::function<bool()> &current,
                                 int followingLimit = 512) {
     SentenceContext result;
     auto *doc = engine->getDocument();
@@ -348,7 +349,7 @@ SentenceContext sentenceContext(LVDocView *engine, const WordSelection &word, co
     }
     return result;
 }
-QString sentenceEnding(LVDocView *engine, QSize size, const TextRange &range, const std::function<bool()> &current) {
+QString sentenceEnding(ColumnView *engine, QSize size, const TextRange &range, const std::function<bool()> &current) {
     auto *doc = engine->getDocument();
     ldomXPointerEx start(doc->createXPointer(cre(range.start))), end(doc->createXPointer(cre(range.end)));
     auto hit = end;
@@ -452,7 +453,7 @@ QString sentenceEnding(LVDocView *engine, QSize size, const TextRange &range, co
 struct SentenceOpening {
     QString start, completeEnd;
 };
-SentenceOpening sentenceOpening(LVDocView *engine, QSize size, const TextRange &range,
+SentenceOpening sentenceOpening(ColumnView *engine, QSize size, const TextRange &range,
                                 const std::function<bool()> &current) {
     auto *doc = engine->getDocument();
     const ldomXPointerEx start(doc->createXPointer(cre(range.start)));
@@ -567,12 +568,113 @@ AnnotationToken ReaderModel::annotationTokenAt(QPoint point) {
     if (!engine_ || !QRect(QPoint(), size_).contains(point)) {
         return {};
     }
-    auto result = sourceWord(engine_.get(), size_,
-                             ldomXPointerEx(engine_->getNodeByPoint(lvPoint(point.x(), point.y()), true)), true);
+    const ldomXPointerEx hit(engine_->getNodeByPoint(lvPoint(point.x(), point.y()), true));
+    auto result = sourceWord(engine_.get(), size_, hit, true);
     for (const auto &rect : result.rectangles) {
         if (rect.contains(point)) {
             return result;
         }
+    }
+    // A space belongs to the preceding word when marking text. Verify the
+    // actual whitespace cell first, so margins and paragraph gaps stay empty.
+    auto space = hit;
+    for (int candidate = 0; candidate < 2 && !space.isNull() && space.isText(); ++candidate) {
+        const auto text = space.getNode()->getText();
+        const int offset = space.getOffset();
+        if (offset >= 0 && offset < text.length() && QChar::isSpace(text[offset])) {
+            auto end = space;
+            end.setOffset(offset + 1);
+            bool contains = false;
+            for (const auto &rect : rangeRects(qstring(space.toString()), qstring(end.toString())))
+                contains |= rect.contains(point);
+            if (contains) {
+                auto before = space;
+                for (int n = 0; n < 256 && before.prevVisibleChar(true); ++n) {
+                    const auto value = before.getNode()->getText();
+                    if (before.getOffset() < 0 || before.getOffset() >= value.length())
+                        return {};
+                    const auto character = value[before.getOffset()];
+                    if (!QChar::isSpace(character) && !QChar::isPunct(character))
+                        return sourceWord(engine_.get(), size_, before, true);
+                }
+                return {};
+            }
+        }
+        if (!space.prevVisibleChar(true))
+            break;
+    }
+    return {};
+}
+AnnotationToken ReaderModel::annotationDragTokenAt(QPoint point, const QString &boundary, bool start) {
+    auto token = annotationTokenAt(point);
+    if (boundary.isEmpty() || !engine_ || !QRect(QPoint(), size_).contains(point))
+        return token;
+    const auto crossedEdge = [&](const AnnotationToken &word) {
+        if (word.text.isEmpty())
+            return false;
+        const auto geometry = annotationGeometry(word.start, word.end);
+        const auto &edge = start ? geometry.start : geometry.end;
+        const QPoint middle = (edge.first + edge.last) / 2;
+        const QPoint delta = point - middle;
+        const int beyond = QPoint::dotProduct(delta, edge.outward);
+        const bool onLine = edge.outward.x() != 0
+            ? point.y() >= qMin(edge.first.y(), edge.last.y()) && point.y() <= qMax(edge.first.y(), edge.last.y())
+            : point.x() >= qMin(edge.first.x(), edge.last.x()) && point.x() <= qMax(edge.first.x(), edge.last.x());
+        return edge.visible && beyond >= 0 && onLine;
+    };
+    if (token.text.isEmpty()) {
+        // At a line end the pointer must pass the last glyph, into the margin.
+        // CREngine's selection hit mode finds the adjacent text there. Keep
+        // ordinary taps strict and reject hits outside the word's actual line.
+        ldomXPointerEx hit(engine_->getNodeByPoint(lvPoint(point.x(), point.y()), false, true));
+        token = sourceWord(engine_.get(), size_, hit, true);
+        if (!crossedEdge(token)) {
+            token = {};
+            for (int n = 0; n < 256 && hit.isText(); ++n) {
+                if (!(start ? hit.nextVisibleChar(true) : hit.prevVisibleChar(true)))
+                    break;
+                const auto text = hit.getNode()->getText();
+                const int offset = hit.getOffset();
+                if (offset >= 0 && offset < text.length() && !QChar::isSpace(text[offset])) {
+                    const auto adjacent = sourceWord(engine_.get(), size_, hit, true);
+                    if (crossedEdge(adjacent))
+                        token = adjacent;
+                    break;
+                }
+            }
+        }
+        if (token.text.isEmpty())
+            return {};
+    }
+    auto *doc = engine_->getDocument();
+    ldomXPointerEx current(doc->createXPointer(cre(boundary)));
+    ldomXPointerEx candidate(doc->createXPointer(cre(start ? token.start : token.end)));
+    if (current.isNull() || candidate.isNull())
+        return {};
+    const int order = candidate.compare(current);
+    if (start ? order >= 0 : order <= 0)
+        return token;
+    // Expanding requires crossing the word's far edge, including on RTL and
+    // vertical lines. Entering its whitespace or near half is not enough.
+    if (crossedEdge(token))
+        return token;
+    // Pointer events can skip a narrow space. Keep the last complete word
+    // even when the pointer has already entered the following word.
+    ldomXPointerEx adjacent(doc->createXPointer(cre(start ? token.end : token.start)));
+    if (!start && !adjacent.prevVisibleChar(true))
+        return {};
+    for (int n = 0; n < 256 && adjacent.isText(); ++n) {
+        const auto text = adjacent.getNode()->getText();
+        const int offset = adjacent.getOffset();
+        if (offset >= 0 && offset < text.length() && !QChar::isSpace(text[offset]) && !QChar::isPunct(text[offset])) {
+            const auto complete = sourceWord(engine_.get(), size_, adjacent, true);
+            ldomXPointerEx completed(doc->createXPointer(cre(start ? complete.start : complete.end)));
+            if (!completed.isNull() && (start ? completed.compare(current) < 0 : completed.compare(current) > 0))
+                return complete;
+            return {};
+        }
+        if (!(start ? adjacent.nextVisibleChar(true) : adjacent.prevVisibleChar(true)))
+            break;
     }
     return {};
 }
@@ -785,7 +887,7 @@ AnnotationGeometry ReaderModel::annotationGeometry(const QString &start, const Q
     result.rectangles = rangeRects(qstring(a.toString()), qstring(b.toString()));
     const int current = page();
     auto *pageList = engine_->getPageList();
-    result.vertical = pageList->hasMixedWritingModes() ? css_wm_is_vertical((*pageList)[current]->writing_mode)
+    result.vertical = pageList->hasMixedWritingModes() ? css_wm_is_vertical((*pageList)[current * columns_]->writing_mode)
                                                        : engine_->isVerticalText();
     ldomXPointerEx pageStart(engine_->getPageBookmark(current));
     ldomXPointerEx pageEnd = current + 1 < pages() ? ldomXPointerEx(engine_->getPageBookmark(current + 1))

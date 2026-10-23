@@ -334,8 +334,7 @@ void Reader::progressTick() {
 
 QVector<QWidget *> Reader::popups() const {
     // Header and footer and the field list cover the panels, under every other pop-up.
-    return {annotationHeader,
-            annotationPopover,
+    return {annotationPopover,
             headerFooterView,
             fieldChooser,
             busyNotice,
@@ -863,7 +862,7 @@ bool Reader::openLink(QPoint point) {
             orientation->setBlocked(true);
         page->mark(link.rectangles);
         QPointer<Reader> guard(this);
-        model->linkDetails(link.source, [guard, epoch, bounds, point](const kobalt::LinkDetails &details) {
+        model->linkDetails(link.source, [guard, epoch, bounds](const kobalt::LinkDetails &details) {
             if (!guard || guard->linkEpoch != epoch || guard->lifecycleHidden || guard->services.suspended())
                 return;
             auto *reader = guard.data();
@@ -873,78 +872,30 @@ bool Reader::openLink(QPoint point) {
                 reader->updateLinkReturn();
                 return;
             }
-            reader->linkDialog = new kobalt::ui::ModalOverlay(reader);
-            reader->linkDialog->setObjectName("rrLinkActions");
-            reader->linkDialog->dismissed = [reader] {
-                reader->dismissLookup();
-                reader->updateLinkReturn();
-            };
-            auto *card = reader->linkDialog->card();
-            card->rows()->setContentsMargins(m::control::border, m::control::border, m::control::border,
-                                             m::control::border);
-            card->rows()->setSpacing(0);
-            const auto action = [card](const char *name, const QString &label, kobalt::ui::ControlIcon icon,
-                                       std::function<void()> callback) {
-                auto *button = kobalt::ui::makeCaptionButton(card, card->rows(), name, label, std::move(callback));
-                button->setRule(card->rows()->count() > 1 ? kobalt::ui::Edges(Qt::TopEdge) : kobalt::ui::Edges{});
-                button->setIconVisible(true);
-                button->setChevron(false);
-                kobalt::ui::buttonIcon(button, icon);
-                kobalt::ui::readerStyle(button,
-                                        QString("QPushButton{min-height:%1px;max-height:%1px;padding:0;border:none;}")
-                                            .arg(int(m::links::actionHeight)));
-                return button;
-            };
-            action("rrLinkGo", strings::get("reader.follow_link"), kobalt::ui::ControlIcon::Link,
-                   [reader, details, bounds] {
-                       if (reader->model->busy())
-                           return;
-                       reader->dismissLinkConfirmation();
-                       if (details.kind == kobalt::LinkKind::Passage)
-                           reader->goToPassage(details.target);
-                       else if (details.kind == kobalt::LinkKind::Website) {
-                           auto *dialog = new kobalt::WebsiteDialog(reader);
-                           reader->linkDialog = dialog;
-                           dialog->browserAvailable = [reader] {
-                               return reader->services.browserAvailable();
-                           };
-                           dialog->openBrowser = [reader](const QUrl &url) {
-                               return !reader->closing && !reader->lifecycleHidden && !reader->services.suspended() &&
-                                      reader->services.openBrowser(url, reader);
-                           };
-                           dialog->dismissed = [reader] {
-                               reader->dismissLookup();
-                               reader->updateLinkReturn();
-                           };
-                           dialog->open(details.target);
-                           textRefresh(dialog);
-                       } else {
-                           reader->linkPanel->open(
-                               details, bounds.translated(0, reader->page->topHeight()),
-                               reader->rect().adjusted(0, reader->page->topHeight(), 0, -reader->page->bottomHeight()));
-                           textRefresh(reader->linkPanel);
-                       }
-                       reader->updateOrientationBlock();
-                       reader->updateLinkReturn();
-                   });
-            action("rrLinkDictionary", strings::get("reader.link_dictionary"), kobalt::ui::ControlIcon::Dictionary,
-                   [reader, point] {
-                       reader->dismissLookup();
-                       reader->dismissControls();
-                       reader->lookupWord(point, false);
-                   });
-            action("rrLinkDismiss", strings::get("reader.dismiss_link"), kobalt::ui::ControlIcon::Close, [reader] {
-                reader->dismissLookup();
-                reader->updateLinkReturn();
-            });
-            const int popupWidth = qMin<int>(m::links::popupWidth, reader->width() - 2 * m::notice::sideClearance);
-            card->fitToWidth(popupWidth);
-            reader->linkDialog->anchorTo(bounds.translated(0, reader->page->topHeight()));
-            reader->linkDialog->show();
-            reader->linkDialog->raise();
-            reader->linkDialog->setFocus();
-            for (auto *widget : reader->linkDialog->findChildren<QWidget *>())
-                textRefresh(widget);
+            if (details.kind == kobalt::LinkKind::Passage) {
+                reader->goToPassage(details.target);
+            } else if (details.kind == kobalt::LinkKind::Website) {
+                auto *dialog = new kobalt::WebsiteDialog(reader);
+                reader->linkDialog = dialog;
+                dialog->browserAvailable = [reader] {
+                    return reader->services.browserAvailable();
+                };
+                dialog->openBrowser = [reader](const QUrl &url) {
+                    return !reader->closing && !reader->lifecycleHidden && !reader->services.suspended() &&
+                           reader->services.openBrowser(url, reader);
+                };
+                dialog->dismissed = [reader] {
+                    reader->dismissLookup();
+                    reader->updateLinkReturn();
+                };
+                dialog->open(details.target);
+                textRefresh(dialog);
+            } else {
+                reader->linkPanel->open(
+                    details, bounds.translated(0, reader->page->topHeight()),
+                    reader->rect().adjusted(0, reader->page->topHeight(), 0, -reader->page->bottomHeight()));
+                textRefresh(reader->linkPanel);
+            }
             reader->updateOrientationBlock();
             reader->updateLinkReturn();
         });
@@ -986,44 +937,42 @@ void Reader::dismissLookup(bool keepGesture) {
     updateOrientationBlock();
 }
 
-void Reader::lookupWord(QPoint point, bool checkLink) {
-    if (closing || lifecycleHidden || services.suspended() || model->busy() || appearanceEdit.panelOpen() ||
-        topControls->isVisible() || choices->isVisible() || acknowledgments->isVisible() || syncDialog ||
-        finishDialog || dictionaryPanel->isVisible() || searchPanel->isVisible() || linksActive())
-        return;
-    if (checkLink && openLink(point))
+void Reader::lookupWord(QPoint point) {
+    if (beginAnnotationDrag(point, -1))
+        finishAnnotationDrag(false);
+}
+
+void Reader::lookupSelection() {
+    if (annotationStart.isEmpty() || annotationEnd.isEmpty())
         return;
     const auto epoch = ++lookupEpoch;
     lookupPending = true;
+    updateOrientationBlock();
     updateLinkReturn();
-    if (orientation)
-        orientation->setBlocked(true);
     QPointer<Reader> guard(this);
-    model->wordAt(point, [guard, epoch](const kobalt::WordSelection &word) {
+    model->textRange(annotationStart, annotationEnd, [guard, epoch](TextRange range) {
         if (!guard || guard->lookupEpoch != epoch || guard->lifecycleHidden || guard->services.suspended())
             return;
-        auto *reader = guard.data();
-        reader->lookupPending = false;
-        if (word.text.isEmpty()) {
-            reader->updateOrientationBlock();
-            reader->updateLinkReturn();
+        guard->lookupPending = false;
+        if (range.text.isEmpty()) {
+            guard->updateOrientationBlock();
+            guard->updateLinkReturn();
             return;
         }
-        reader->page->mark(word.rectangles);
         QRect bounds;
-        for (const auto &rect : word.rectangles)
+        for (const auto &rect : guard->draftHighlightRects)
             bounds = bounds.united(rect);
-        const auto result = reader->dictionary->lookup(reader->book->identity(), word.text);
-        if (reader->lookupEpoch != epoch || reader->lifecycleHidden)
+        guard->lookupText = range.text;
+        guard->lookupBounds = bounds.translated(0, guard->page->topHeight());
+        const auto result = guard->dictionary->lookup(guard->book->identity(), range.text);
+        if (!guard || guard->lookupEpoch != epoch || guard->lifecycleHidden)
             return;
-        reader->lookupText = word.text;
-        reader->lookupBounds = bounds.translated(0, reader->page->topHeight());
-        reader->dictionaryPanel->setChoices(reader->dictionary->choices());
-        reader->dictionaryPanel->setBookFont(reader->bookFace());
-        reader->dictionaryPanel->open(word.text, result, reader->lookupBounds);
-        textRefresh(reader->dictionaryPanel);
-        for (auto *widget : reader->dictionaryPanel->findChildren<QWidget *>())
-            textRefresh(widget);
+        guard->dictionaryPanel->setChoices(guard->dictionary->choices());
+        guard->dictionaryPanel->setBookFont(guard->bookFace());
+        guard->dictionaryPanel->open(range.text, result, guard->lookupBounds);
+        guard->syncAnnotationControls();
+        guard->updateOrientationBlock();
+        guard->updateLinkReturn();
     });
 }
 
@@ -1356,9 +1305,6 @@ void Reader::syncNavigation() {
 }
 
 void Reader::showControls() {
-    if (annotationMode) {
-        return;
-    }
     const bool topVisible = topControls->isVisible();
     const bool opening = !topVisible && !bottomControls->isVisible();
     model->cancelPendingTurn();
@@ -1387,7 +1333,7 @@ void Reader::showControls() {
     }
     updateLinkReturn();
     syncNavigation();
-    if (!appearanceEdit.panelDestination()) {
+    if (!annotationMode && !appearanceEdit.panelDestination()) {
         switch (pageNavigation::menuView(preferences)) {
         case pageNavigation::MenuView::Seek:
             seekOpen = true;
@@ -1405,6 +1351,7 @@ void Reader::showControls() {
             break;
         }
     }
+    syncAnnotationControls();
     if (opening) {
         // The display submits disjoint bars separately. Paint their completed
         // frame together so they appear in one screen update.
@@ -1793,6 +1740,7 @@ void Reader::save(bool snapshot) {
     state["preview_busy"] = appearanceEdit.preview() && appearanceEdit.preview()->busy();
     state["preview_settings"] = appearanceEdit.ready() ? appearanceEdit.preview()->state() : QJsonObject();
     state["typography_panel"] = menu->isVisible();
+    state["annotation_dragging"] = annotationDragging;
     state["bookmarked"] = page->bookmarked;
     state["bookmark_count"] = bookmarks->available() ? int(bookmarks->bookmarks().size()) : -1;
     state["bookmark_pages"] = [this] {

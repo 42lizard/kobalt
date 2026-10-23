@@ -1,3 +1,4 @@
+#include "column_view.h"
 #include <cmath>
 #include "ui/image_damage.h"
 #include "support/qt_compat.h"
@@ -22,6 +23,7 @@
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QRegion>
+#include <QPainter>
 #include <QSet>
 #include <QtMath>
 #include <lvdocview.h>
@@ -406,6 +408,15 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     darkMode_ = saved.value("dark_mode").toBool(false);
     hideNonlinearFragments_ = saved.value("hide_nonlinear_fragments").toBool(false);
     avoidWastefulStyling_ = saved.value("avoid_wasteful_styling").toBool(true);
+    wordSpacing_ = saved.value("word_spacing").toInt(100);
+    if (!appearance::validWordSpacing(wordSpacing_))
+        wordSpacing_ = 100;
+    justificationTracking_ = saved.value("justification_tracking").toInt(0);
+    if (!appearance::validTracking(justificationTracking_))
+        justificationTracking_ = 0;
+    widowsOrphans_ = saved.value("widows_orphans").toString("publisher");
+    if (!appearance::validWidowsOrphans(widowsOrphans_))
+        widowsOrphans_ = "publisher";
     pixels_ = qBound(minimumFontPixels(), saved.value("font_pixels").toInt(defaultFontPixels()), maximumFontPixels());
     spacing_ = qBound(100, saved.value("line_spacing").toInt(defaultLineSpacing), maximumLineSpacing);
     margin_ = qBound(0, saved.value("margin_pixels").toInt(defaultMarginPixels()), maximumMarginPixels());
@@ -448,7 +459,18 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     const double savedOptical = saved.value("font_optical_size").toDouble();
     opticalSize_ = normalizedOpticalSize(optical, savedOptical);
     activateFontParameters();
-    engine_ = std::make_unique<LVDocView>(32, true);
+    twoColumnsLandscape_ = saved.value("two_columns_landscape").toBool(false);
+    columns_ = twoColumnsLandscape_ ? (size.width() > size.height() ? 2 : 1)
+                                    : qBound(1, saved.value("columns").toInt(1), 2);
+    columnSpacing_ = qBound(0, saved.value("column_spacing").toInt(readingPixels(60)), maximumMarginPixels());
+    columnSpacingPercent_ = saved.value("column_spacing_percent").toInt(0);
+    if (columnSpacingPercent_ < 100 || columnSpacingPercent_ > 300)
+        columnSpacingPercent_ = 0;
+    if (columnSpacingPercent_)
+        columnSpacing_ = qRound(pixels_ * columnSpacingPercent_ / 100.0);
+    engine_ = std::make_unique<ColumnView>();
+    engine_->setColumns(columns_);
+    engine_->setColumnSpacing(columnSpacing_);
     // CREngine defaults to a 72-pixel cap. Use the same physical limits as the controls.
     engine_->setMinFontSize(minimumFontPixels());
     engine_->setMaxFontSize(maximumFontPixels());
@@ -456,6 +478,8 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     // spaces to shrink to half width, including in left-aligned paragraphs.
     auto properties = LVCreatePropsContainer();
     properties->setInt(PROP_FORMAT_MIN_SPACE_CONDENSING_PERCENT, 100);
+    properties->setInt(PROP_FORMAT_SPACE_WIDTH_SCALE_PERCENT, wordSpacing_);
+    properties->setInt(PROP_FORMAT_MAX_ADDED_LETTER_SPACING_PERCENT, justificationTracking_);
     properties->setInt(PROP_FLOATING_PUNCTUATION, 0);
     properties->setInt(PROP_RENDER_BLOCK_RENDERING_FLAGS,
                        avoidWastefulStyling_
@@ -668,24 +692,39 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     const bool dark = settings.value("dark_mode").toBool(darkMode_);
     const bool hideNonlinear = settings.value("hide_nonlinear_fragments").toBool(hideNonlinearFragments_);
     const bool avoidWastefulStyling = settings.value("avoid_wasteful_styling").toBool(avoidWastefulStyling_);
-    if (!engine_ || pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 ||
+    const int wordSpacing = settings.value("word_spacing").toInt(wordSpacing_);
+    const int tracking = settings.value("justification_tracking").toInt(justificationTracking_);
+    if (size.width() < 320 || size.height() < 240)
+        size = size_;
+    const bool landscapeColumns = settings.value("two_columns_landscape").toBool(twoColumnsLandscape_);
+    const int columns = landscapeColumns ? (size.width() > size.height() ? 2 : 1)
+                                        : settings.value("columns").toInt(twoColumnsLandscape_ ? 1 : columns_);
+    const int gapPercent = settings.value("column_spacing_percent").toInt(columnSpacingPercent_);
+    const int columnSpacing = gapPercent ? qRound(pixels * gapPercent / 100.0)
+                                        : settings.value("column_spacing").toInt(columnSpacing_);
+    const auto widowsOrphans = settings.value("widows_orphans").toString(widowsOrphans_);
+    if (!engine_ || (gapPercent != 0 && (gapPercent < 100 || gapPercent > 300)) ||
+        columnSpacing < 0 || (!gapPercent && columnSpacing > maximumMarginPixels()) || columns < 1 || columns > 2 ||
+        pixels < minimumFontPixels() || pixels > maximumFontPixels() || spacing < 100 ||
         spacing > maximumLineSpacing || margin < 0 || margin > maximumMarginPixels() || topMargin < 0 ||
         topMargin > maximumMarginPixels() || bottomMargin < 0 || bottomMargin > maximumMarginPixels() || weight < 0 ||
-        weight > 12 || !validAlignment(alignment) ||
+        weight > 12 || !validAlignment(alignment) || !appearance::validTracking(tracking) || !appearance::validWordSpacing(wordSpacing) ||
+        !appearance::validWidowsOrphans(widowsOrphans) ||
         (hyphenation != "auto" && hyphenation != "on" && hyphenation != "off") ||
         (bionic != "off" && bionic != "bold") || (!face.isEmpty() && !fontFaces().contains(face)) ||
         !fontFaces().contains(defaultFace))
         return false;
-    if (size.width() < 320 || size.height() < 240)
-        size = size_;
     const bool bionicChanged = bionic != bionic_;
     // Outline thickness changes pixels only. Keep the formatted page and its anchors.
     const bool thicknessChanged = weight != weight_;
     const bool styled = fallbackFaces != fallbackFaces_ || avoidWastefulStyling != avoidWastefulStyling_ ||
+                        wordSpacing != wordSpacing_ || tracking != justificationTracking_ || widowsOrphans != widowsOrphans_ ||
                         bionicChanged || axisChanged || opticalChanged || pixels != pixels_ || spacing != spacing_ ||
                         face != face_ || defaultFace != defaultFace_ || margin != margin_ || topMargin != topMargin_ ||
                         bottomMargin != bottomMargin_ || alignment != alignment_ || hyphenation != hyphenation_;
-    const bool resized = size != size_;
+    const bool resized = size != size_ || columns != columns_ || columnSpacing != columnSpacing_;
+    twoColumnsLandscape_ = landscapeColumns;
+    columnSpacingPercent_ = gapPercent;
     if (!styled && !resized && weight == weight_ && dark == darkMode_ && hideNonlinear == hideNonlinearFragments_)
         return true;
     const QString anchor = position();
@@ -708,10 +747,15 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     activateFontParameters();
     hideNonlinearFragments_ = hideNonlinear;
     avoidWastefulStyling_ = avoidWastefulStyling;
+    wordSpacing_ = wordSpacing;
+    justificationTracking_ = tracking;
+    widowsOrphans_ = widowsOrphans;
     if (styled) {
         setExtraFontWeight(0);
         auto properties = LVCreatePropsContainer();
         properties->setInt(PROP_FONT_BASE_WEIGHT, LVRendGetBaseFontWeight());
+        properties->setInt(PROP_FORMAT_SPACE_WIDTH_SCALE_PERCENT, wordSpacing_);
+        properties->setInt(PROP_FORMAT_MAX_ADDED_LETTER_SPACING_PERCENT, justificationTracking_);
         properties->setInt(PROP_RENDER_BLOCK_RENDERING_FLAGS,
                            avoidWastefulStyling_
                                ? DEF_RENDER_BLOCK_RENDERING_FLAGS
@@ -733,6 +777,10 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
         engine_->requestRender();
     }
     if (resized) {
+        columns_ = columns;
+        columnSpacing_ = columnSpacing;
+        engine_->setColumns(columns_);
+        engine_->setColumnSpacing(columnSpacing_);
         size_ = size;
         engine_->Resize(size.width(), size.height());
     }
@@ -808,6 +856,11 @@ void ReaderModel::applyStyleSheet() {
     }
     if (hyphenation_ != "auto")
         overrides += QString("* { hyphens:%1 !important; }\n").arg(hyphenation_ == "on" ? "auto" : "none");
+    // Explicit choices replace publisher declarations on every element, including
+    // paragraphs that do not inherit the body's values. Publisher adds no rule.
+    if (widowsOrphans_ != "publisher")
+        overrides += QString("* { orphans:%1 !important; widows:%1 !important; }\n")
+                         .arg(widowsOrphans_ == "avoid" ? 2 : 1);
     if (!face_.isEmpty()) {
         auto escaped = face_;
         escaped.replace('\\', "\\\\");
@@ -925,7 +978,24 @@ QImage ReaderModel::image(int pageNumber) {
     if (result.isNull())
         return {};
     PageDrawBuffer buffer(result, darkMode_, true);
-    engine_->Draw(buffer, -1, pageNumber, false);
+    if (columns_ == 1) {
+        engine_->drawColumn(buffer, pageNumber, 0);
+    } else {
+        result.fill(Qt::white);
+        QImage column(engine_->columnWidth(), size_.height(), QImage::Format_RGB32);
+        if (column.isNull())
+            return {};
+        QPainter painter(&result);
+        for (int i = 0; i < columns_; ++i) {
+            PageDrawBuffer part(column, darkMode_, true);
+            engine_->drawColumn(part, pageNumber, i);
+            buffer.hasImages |= part.hasImages;
+            const int x = engine_->columnOffset(i);
+            painter.drawImage(x, 0, column);
+            for (const auto &region : part.imageRegions)
+                buffer.imageRegions.append(region.translated(x, 0));
+        }
+    }
     // CREngine composites into 0x00RRGGBB. Qt's opaque RGB32 contract requires
     // 0xffRRGGBB, including when a painter uses this image as a source.
     bool hasColor = false;
@@ -1211,6 +1281,13 @@ QJsonObject ReaderModel::state() const {
                                {"dark_mode", darkMode_},
                                {"hide_nonlinear_fragments", hideNonlinearFragments_},
                                {"avoid_wasteful_styling", avoidWastefulStyling_},
+                               {"columns", columns_},
+                               {"two_columns_landscape", twoColumnsLandscape_},
+                               {"column_spacing_percent", columnSpacingPercent_},
+                               {"column_spacing", columnSpacing_},
+                               {"word_spacing", wordSpacing_},
+                               {"justification_tracking", justificationTracking_},
+                               {"widows_orphans", widowsOrphans_},
                                {"dom_version", domVersion_},
                                {"page_progression_rtl", engine_ && engine_->getDocument()->getProps()->getStringDef(
                                                                        "doc.page-progression-direction") == U"rtl"},

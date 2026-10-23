@@ -230,6 +230,7 @@ ChoiceScreen::ChoiceScreen(QWidget *parent) : kobalt::ui::Panel(parent), navigat
 void ChoiceScreen::showChoices(const QString &heading, QVector<Choice> choices, const QString &current,
                                Mode presentation) {
     mode = presentation;
+    fontPager->setBlankArea({});
     if (mode == Mode::Chapters) {
         setEdges({});
         contents->setGeometry(rect());
@@ -458,6 +459,7 @@ void ChoiceScreen::redrawFonts() {
         });
     }
     const int body = qMax(4, height() - header - sectionHeight - pager);
+    int used = header + sectionHeight;
     for (int row = 0; row < buttons.size(); ++row) {
         const int index = itemIndex(row);
         auto *button = buttons[row];
@@ -532,6 +534,10 @@ void ChoiceScreen::redrawFonts() {
         detail->setVisible(!item.detail.isEmpty());
         label->setVisible(!item.placeholder);
     }
+    for (auto *button : buttons)
+        if (!button->isHidden())
+            used = qMax(used, button->geometry().bottom() + 1);
+    fontPager->setBlankArea({m::chrome::inset, used, width() - 2 * m::chrome::inset, fontPager->y() - used});
     fontHeader->raise();
     fontSectionBar->raise();
     fontPager->raise();

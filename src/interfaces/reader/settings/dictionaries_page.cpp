@@ -354,6 +354,8 @@ void DictionariesPage::redraw() {
         line->show();
         y += item.height;
     }
+    const int listBottom = list->y() + y;
+    pager->setBlankArea({c::inset, listBottom, width() - 2 * c::inset, pager->y() - listBottom});
     qint64 usedBytes = 0;
     for (const auto &id : installedIds)
         usedBytes += installedSizes.value(id);

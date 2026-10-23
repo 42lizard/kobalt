@@ -120,6 +120,7 @@ int main(int argc, char **argv) {
             require(futureStore.load(), "Cannot initialize future-color fixture");
             Highlight future{"future", first.start, first.end, first.text, {}, QDateTime::currentDateTimeUtc()};
             future.color = "orange";
+            future.style = "future";
             futureStore.setHighlights({future});
             require(futureStore.save(), "Cannot store future color");
             HighlightSession futureSession(model, layout, annotations.path(), identity, model.sourceHash(), "Future");
@@ -133,7 +134,8 @@ int main(int argc, char **argv) {
             });
             require(futureSession.highlights().first().color == "orange" &&
                         highlightDisplayColor(futureSession.highlights().first().color) == "gray" &&
-                        futureStore.load() && futureStore.highlights().first().color == "orange",
+                        futureStore.load() && futureStore.highlights().first().color == "orange" &&
+                        futureSession.highlights().first().style == "future",
                     "Omitted edit color destroyed unknown stored key");
             require(futureSession.recolor(future.id, "gray") && futureSession.highlights().first().color == "gray" &&
                         futureStore.load() && futureStore.highlights().first().color == "gray",
@@ -167,6 +169,11 @@ int main(int argc, char **argv) {
                 "Recolor changed passage metadata or failed");
         require(!session.recolor(beforeColor.id, "orange") && session.highlights().first().color == "blue",
                 "Unsupported explicit color was accepted");
+        require(session.restyle(beforeColor.id, "underline") && session.highlights().first().style == "underline" &&
+                    samePassage(beforeColor, session.highlights().first()) && session.highlights().first().color == "blue",
+                "Restyle changed passage metadata or color");
+        require(!session.restyle(beforeColor.id, "future") && session.highlights().first().style == "underline",
+                "Unsupported explicit style was accepted");
         const auto passage = session.highlights().first();
         completed = false;
         session.save(first.start, last.end, {}, [&](bool ok) {
@@ -176,8 +183,27 @@ int main(int argc, char **argv) {
         waitUntil([&] {
             return completed;
         });
-        require(saved && session.highlights().size() == 2 && session.highlights()[0].id != session.highlights()[1].id,
-                "Overlapping highlights were merged");
+        require(!saved && session.highlights().size() == 1 && session.error() == "overlap",
+                "Overlapping create changed saved highlights");
+        completed = false;
+        session.save(first.start, first.end, passage.id, [&](bool ok) { saved = ok; completed = true; });
+        waitUntil([&] { return completed; });
+        require(saved, "Cannot shorten first highlight");
+        completed = false;
+        session.save(last.start, last.end, {}, [&](bool ok) { saved = ok; completed = true; });
+        waitUntil([&] { return completed; });
+        require(saved && session.highlights().size() == 2, "Disjoint highlights were rejected");
+        completed = false;
+        session.save(first.end, last.start, {}, [&](bool ok) { saved = ok; completed = true; });
+        waitUntil([&] { return completed; });
+        require(saved && session.highlights().size() == 3, "Touching endpoints were treated as an overlap");
+        require(session.remove(session.highlights().last().id), "Cannot remove adjacent-range fixture");
+        const auto beforeOverlap = session.highlights();
+        completed = false;
+        session.save(first.start, last.end, passage.id, [&](bool ok) { saved = ok; completed = true; });
+        waitUntil([&] { return completed; });
+        require(!saved && samePassage(beforeOverlap[0], session.highlights()[0]) &&
+                    samePassage(beforeOverlap[1], session.highlights()[1]), "Overlapping edit changed a saved passage");
         require(model.style(64, 120), "Cannot reflow highlight fixture");
         waitUntil([&] {
             return !model.busy();
@@ -198,12 +224,12 @@ int main(int argc, char **argv) {
         {
             HighlightSession reopened(model, layout, annotations.path(), "file:///highlight-session.epub",
                                       model.sourceHash(), "Book");
-            require(reopened.highlights().first().color == "blue" && reopened.highlights().first().sentenceEndPolicy &&
-                        reopened.highlights().first().chosenEnd == last.end &&
-                        reopened.highlights().first().sentenceStartPolicy &&
-                        reopened.highlights().first().chosenStart == first.start,
+            require(reopened.highlights().first().color == "blue" && reopened.highlights().first().style == "underline" && !reopened.highlights().first().sentenceEndPolicy &&
+                        reopened.highlights().first().chosenEnd == QString() &&
+                        !reopened.highlights().first().sentenceStartPolicy &&
+                        reopened.highlights().first().chosenStart == QString(),
                     "Reopened session lost raw endpoint policy");
-            require(reopened.highlights().size() == 2 && reopened.highlights()[0].text == passage.text,
+            require(reopened.highlights().size() == 2 && reopened.highlights()[0].text == first.text,
                     "Reopened session lost full passage");
         }
         completed = false;
@@ -215,7 +241,7 @@ int main(int argc, char **argv) {
             return completed;
         });
         require(saved && session.highlights().size() == 2 && session.highlights()[0].id == passage.id &&
-                    session.highlights()[0].text == first.text && session.highlights()[0].color == "blue",
+                    session.highlights()[0].text == first.text && session.highlights()[0].color == "blue" && session.highlights()[0].style == "underline",
                 "Editing changed passage identity or kept old text");
         require(session.remove(passage.id) && session.highlights().size() == 1, "Delete failed");
         completed = false;
@@ -245,6 +271,9 @@ int main(int argc, char **argv) {
         require(!session.recolor(previous.id, "pink") && samePassage(previous, session.highlights().first()) &&
                     session.highlights().first().color == previous.color,
                 "Failed recolor changed live saved data");
+        require(!session.updateAppearance(previous.id, "blue", "dotted") && session.highlights().first().style == previous.style &&
+                    samePassage(previous, session.highlights().first()),
+                "Failed restyle changed live saved data");
         completed = false;
         session.save(
             first.start, first.end, previous.id,
@@ -284,7 +313,7 @@ int main(int argc, char **argv) {
                 "Retry failed or changed identity, creation date or punctuation provenance");
         completed = false;
         session.save(
-            first.start, last.end, {},
+            last.start, last.end, {},
             [&](bool ok) {
                 saved = ok;
                 completed = true;
@@ -296,6 +325,9 @@ int main(int argc, char **argv) {
         require(saved && session.highlights().last().color == "yellow", "Explicit create color was lost");
         require(session.recolor(previous.id, "pink") && session.highlights().first().color == "pink",
                 "Failed recolor was not retryable");
+        require(session.restyle(previous.id, "underline") && session.updateAppearance(previous.id, "green", "shaded") &&
+                    session.highlights().first().style == "shaded" && session.highlights().first().color == "green",
+                "Choosing a color did not atomically replace the underline with shading");
         lease->revoke();
         owned.reset();
         ReaderSession::drain([&] {

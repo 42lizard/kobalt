@@ -2,6 +2,7 @@
 #include "interfaces/reader/ui/controls/icons.h"
 #include "interfaces/reader/ui/style/theme.h"
 #include "reader_p.h"
+#include "interfaces/reader/ui/style/styles.h"
 #include "support/strings.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/private_text.h"
@@ -265,6 +266,15 @@ void Reader::openSettings() {
     inheritTextLayoutOption->setChecked(preferences.value(appearance::inheritTextLayoutKey).toBool(true));
     hideNonlinearOption->setChecked(model->state().value("hide_nonlinear_fragments").toBool(false));
     avoidWastefulStylingOption->setChecked(model->state().value("avoid_wasteful_styling").toBool(true));
+    auto *displaySettings = static_cast<SettingsPanel *>(general);
+    displaySettings->landscapeColumnsOption->setChecked(preferences.value("two_columns_landscape").toBool(false));
+    settingsColumnSpacing = preferences.value("column_spacing_percent").toInt(100);
+    displaySettings->columnSpacingButton->setEnabled(displaySettings->landscapeColumnsOption->isChecked());
+    displaySettings->columnSpacingButton->setCaption(QString::number(settingsColumnSpacing / 100.0, 'f', 1) + QChar(0x00d7));
+    settingsWordSpacing = model->state().value("word_spacing").toInt(100);
+    settingsTracking = model->state().value("justification_tracking").toInt(0);
+    settingsWidowsOrphans = model->state().value("widows_orphans").toString("publisher");
+    showAdvancedText();
     animationOption->setChecked(preferences.value("page_animations").toBool(false));
     bionicOption->setChecked(model->state().value("bold_reading").toString("off") == "bold");
     linkIndicatorOption->setChecked(preferences.value("show_link_indicator").toBool(false));
@@ -287,8 +297,17 @@ void Reader::openSettings() {
     refresh();
 }
 
+void Reader::showAdvancedText() {
+    auto *panel = static_cast<SettingsPanel *>(general);
+    const QString wordSpacing = settingsWordSpacing == 80 ? "narrow" : settingsWordSpacing == 120 ? "wide" : "normal";
+    panel->wordSpacingButton->setCaption(strings::get(("settings.word_spacing_" + wordSpacing).toUtf8().constData()).toUpper());
+    const QString tracking = settingsTracking == 15 ? "more" : settingsTracking == 5 ? "subtle" : "off";
+    panel->trackingButton->setCaption(strings::get(("settings.justification_tracking_" + tracking).toUtf8().constData()).toUpper());
+    panel->widowsOrphansButton->setCaption(strings::get(("settings.widows_orphans_" + settingsWidowsOrphans).toUtf8().constData()).toUpper());
+}
+
 void Reader::fitSettings() {
-    const int top = navigation ? navigation->toolbarHeight() : int(m::panel::toolbarHeight);
+    const int top = navigation ? navigation->statusHeight() : int(m::panel::toolbarHeight - m::chrome::actionHeight);
     const int panelHeight = static_cast<SettingsPanel *>(general)->fitContent(QSize(width(), height() - top));
     general->setGeometry(0, top, width(), panelHeight);
 }
@@ -340,6 +359,12 @@ void Reader::applySettings() {
     next[appearance::inheritTextLayoutKey] = inheritTextLayoutOption->isChecked();
     next["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
     next["avoid_wasteful_styling"] = avoidWastefulStylingOption->isChecked();
+    next.remove("columns");
+    next["two_columns_landscape"] = static_cast<SettingsPanel *>(general)->landscapeColumnsOption->isChecked();
+    next["column_spacing_percent"] = settingsColumnSpacing;
+    next["word_spacing"] = settingsWordSpacing;
+    next["justification_tracking"] = settingsTracking;
+    next["widows_orphans"] = settingsWidowsOrphans;
     next["page_animations"] = animationOption->isChecked();
     next["show_link_indicator"] = linkIndicatorOption->isChecked();
     next["edge_light_gestures"] = edgeLightOption->isChecked();
@@ -384,6 +409,12 @@ void Reader::applySettings() {
     settings["dark_mode"] = darkOption->isChecked();
     settings["hide_nonlinear_fragments"] = hideNonlinearOption->isChecked();
     settings["avoid_wasteful_styling"] = avoidWastefulStylingOption->isChecked();
+    settings["columns"] = 1;
+    settings["two_columns_landscape"] = preferences.value("two_columns_landscape");
+    settings["column_spacing_percent"] = settingsColumnSpacing;
+    settings["word_spacing"] = settingsWordSpacing;
+    settings["justification_tracking"] = settingsTracking;
+    settings["widows_orphans"] = settingsWidowsOrphans;
     settings["bold_reading"] = bionicOption->isChecked() ? QStringLiteral("bold") : QStringLiteral("off");
     if (restoringDefaults) {
         const auto defaults = kobalt::appearance::typographyDefaults();

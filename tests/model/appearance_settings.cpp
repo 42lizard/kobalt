@@ -10,7 +10,7 @@ using namespace kobalt;
 int main() {
     // Appearance settings decide the layout. The list must stay complete, because a
     // missing key would let a retained layout survive a changed setting.
-    require(appearance::keys.size() == 20, "The appearance keys changed without this check");
+    require(appearance::keys.size() == 27, "The appearance keys changed without this check");
 
     const auto from = qt::object({{"font_pixels", 40},
                                   {"line_spacing", QJsonValue(QJsonValue::Null)},
@@ -35,6 +35,24 @@ int main() {
             "Copy touched a setting it does not own");
 
     require(appearance::same(to, from), "Copied settings do not compare equal");
+    const auto advanced = qt::object({{"word_spacing", 80}, {"justification_tracking", 5}, {"widows_orphans", "avoid"}});
+    auto advancedBook = qt::object({{"font_pixels", 40}, {"word_spacing", 120}, {"justification_tracking", 15}, {"widows_orphans", "allow"}});
+    appearance::applyBookDefaults(advancedBook, appearance::bookDefaults(advanced));
+    require(advancedBook.value("word_spacing").toInt() == 80 && advancedBook.value("justification_tracking").toInt() == 5 &&
+                advancedBook.value("widows_orphans").toString() == "avoid",
+            "An existing book replaced global advanced text settings");
+    appearance::applyBookDefaults(advancedBook, appearance::bookDefaults({}));
+    require(advancedBook.value("word_spacing").toInt() == 100 && advancedBook.value("justification_tracking").toInt() == 0 &&
+                advancedBook.value("widows_orphans").toString() == "publisher",
+            "Missing global settings retained stale advanced text choices");
+    for (const auto *key : {"word_spacing", "justification_tracking", "widows_orphans"}) {
+        auto changedAdvanced = from;
+        changedAdvanced[key] = advanced.value(key);
+        require(!appearance::same(changedAdvanced, from), "Advanced text reused a retained layout");
+        auto copy = from;
+        appearance::copy(copy, changedAdvanced);
+        require(copy.value(key) == advanced.value(key), "Preview copy lost advanced text");
+    }
     for (const auto *key : {"top_margin_pixels", "bottom_margin_pixels"}) {
         auto vertical = from;
         vertical[key] = 36;
@@ -183,6 +201,8 @@ int main() {
     }
     readingPpi.store(300);
     auto inherited = appearance::typographyDefaults();
+    inherited["columns"] = 2;
+    inherited["column_spacing"] = 45;
     inherited["font_face"] = QStringLiteral("NV Literata");
     inherited["font_pixels"] = 60;
     inherited["line_spacing"] = 175;
@@ -215,10 +235,23 @@ int main() {
     require(own.value("font_pixels").toInt() == 40 && !own.contains("margin_pixels") &&
                 own.value("position").toString() == "chapter#own",
             "Inheritance overwrote a book with partial saved typography");
+    auto globalColumns = appearance::bookDefaults(qt::object({{"two_columns_landscape", true}, {"column_spacing_percent", 200}, {appearance::inheritTextLayoutKey, false}}));
+    auto savedColumns = qt::object({{"font_pixels", 40}, {"columns", 2}, {"column_spacing_percent", 100}});
+    appearance::applyBookDefaults(savedColumns, globalColumns);
+    require(savedColumns.value("columns").toInt() == 1 && savedColumns.value("two_columns_landscape").toBool() &&
+                savedColumns.value("column_spacing_percent").toInt() == 200,
+            "Saved book columns overrode the global landscape policy");
+    appearance::applyBookDefaults(savedColumns, appearance::bookDefaults({}));
+    require(!savedColumns.value("two_columns_landscape").toBool() && savedColumns.value("columns").toInt() == 1 &&
+                savedColumns.value("column_spacing_percent").toInt() == 100,
+            "Disabling global columns retained a book override");
+    require(!nextBook.value(appearance::lastTextLayoutKey).toObject().contains("columns") &&
+                !nextBook.value(appearance::lastTextLayoutKey).toObject().contains("column_spacing"),
+            "New-book inheritance retained global display choices");
     nextBook[appearance::inheritTextLayoutKey] = false;
     auto fixed = appearance::bookDefaults(nextBook);
     require(fixed.value("font_pixels").toInt() == defaultFontPixels() &&
-                fixed.value("font_face").toString() == defaultFontFace,
+                fixed.value("font_face").toString() == defaultFontFace && !fixed.value("two_columns_landscape").toBool(),
             "Disabling text inheritance did not restore new-book defaults");
     nextBook["default_font_face"] = QStringLiteral("NV Ancizar Serif");
     require(appearance::bookDefaults(nextBook).value("font_face").toString() == "NV Ancizar Serif",
@@ -252,7 +285,7 @@ int main() {
                 defaults.value("font_weight").toInt() == 450 && defaults.value("hyphenation").toString() == "off",
             "Typography defaults changed");
     require(!defaults.contains("dark_mode") && !defaults.contains("smooth_images") &&
-                !defaults.contains("bold_reading") && defaults.size() == 12,
+                !defaults.contains("bold_reading") && !defaults.contains("columns") && !defaults.contains("column_spacing") && defaults.size() == 12,
             "Restoring typography must not change display choices");
     readingPpi.store(212);
     require(appearance::typographyDefaults().value("font_pixels").toInt() == defaultFontPixels(),

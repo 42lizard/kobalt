@@ -1,3 +1,4 @@
+#include "column_view.h"
 #include "reader_model.h"
 #include "platform/api/position_codec.h"
 #include "support/strings.h"

@@ -20,6 +20,7 @@ class Window final : public QMainWindow {
     Q_OBJECT
 public:
     Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder, std::function<QString()> clock = {});
+    ~Window() override;
     void openBook(const QString &path);
     // Saves the visible preview without Mac chrome. Device surroundings remain transparent.
     // Returns the new PNG path, or an empty string and an error. Existing files are never replaced.
@@ -55,7 +56,9 @@ private:
     QComboBox *screenPicker, *resolutionPicker;
     QActionGroup *screenActions, *resolutionActions;
     QAction *rotateAction;
-    int screenPreset = 1, renderingDpi = 300;
+    int screenPreset = 1, renderingDpi = 0;
+    bool touchCursorVisible = false, touchCursorPressed = false;
+    void setTouchCursor(bool visible, bool pressed = false);
     QTimer resizeTimer;
     QMetaObject::Connection screenChanged, logicalDpiChanged, physicalDpiChanged;
     bool closing = false, repairPending = false, failed = false;

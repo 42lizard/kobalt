@@ -366,6 +366,8 @@ void Acknowledgments::redraw(bool paging) {
     for (; heading < headings.size(); ++heading)
         headings.at(heading)->hide();
     pager->setPage(page, count, {}, !reading);
+    if (!reading)
+        pager->setBlankArea({c::inset, y, width() - 2 * c::inset, pager->y() - y});
     if (reading)
         text->update();
     if (!paging)

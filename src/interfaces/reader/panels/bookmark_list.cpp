@@ -71,8 +71,8 @@ BookmarkList::BookmarkList(QWidget *parent) : Panel(parent) {
     for (auto *tab : {bookmarksTab, annotationsTab}) {
         tab->setCheckable(true);
         static_cast<ui::Button *>(tab)->setPaintMode(ui::ButtonPaintMode::ToolbarCell);
-        tab->setFont(ui::interfaceFont(c::labelText));
-        ui::readerStyle(tab, "QPushButton{border:none;padding:0;min-height:0;}");
+        tab->setFont(ui::brandFont(c::titleText));
+        ui::readerStyle(tab, "QPushButton{border:none;padding:0;min-height:0;" + ui::styles::brand(c::titleText) + "}");
     }
     connect(bookmarksTab, &QPushButton::clicked, this, [this] {
         if (tabRequested)
@@ -163,8 +163,8 @@ void BookmarkList::arrange() {
     const int barHeight = c::actionHeight - c::heavyRule;
     const int tabWidth = qMax(1, (width() - c::cellWidth) / 2);
     close->setGeometry(0, 0, c::cellWidth, barHeight);
-    bookmarksTab->setGeometry(c::cellWidth, 0, tabWidth, barHeight);
-    annotationsTab->setGeometry(c::cellWidth + tabWidth, 0, qMax(1, width() - c::cellWidth - tabWidth), barHeight);
+    annotationsTab->setGeometry(c::cellWidth, 0, tabWidth, barHeight);
+    bookmarksTab->setGeometry(c::cellWidth + tabWidth, 0, qMax(1, width() - c::cellWidth - tabWidth), barHeight);
     listHeader->setGeometry(0, c::actionHeight, width(), ui::metrics::list::headerHeight);
     pager->setGeometry(0, height() - c::actionHeight, width(), c::actionHeight);
     empty->setGeometry(c::inset, top + itemHeight / 2, qMax(1, width() - 2 * c::inset), itemHeight / 2);
@@ -184,6 +184,8 @@ void BookmarkList::redraw() {
                             items.isEmpty() ? QString() : strings::get("chapter_contents.page"));
     pager->setVisible(items.size() > rows);
     pager->setPage(page, pageCount(), {}, true);
+    const int used = listTop() + qMin(rows, qMax(0, int(items.size()) - page * rows)) * rowHeight();
+    pager->setBlankArea({c::inset, used, width() - 2 * c::inset, pager->y() - used});
     while (buttons.size() < qMin(rows, int(items.size()))) {
         const int row = buttons.size();
         auto *button = new ui::ListRow(this);

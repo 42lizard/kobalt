@@ -622,7 +622,7 @@ private slots:
             const bool before = option->isChecked();
             QVERIFY(click(canvas, option));
             QCOMPARE(option->isChecked(), !before);
-            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsClose")));
             QTRY_VERIFY_WITH_TIMEOUT(!host.window()->findChild<QWidget *>("rrGeneralSettings")->isVisible() &&
                                          !host.session()->busy() &&
                                          host.session()->state().value(key).toBool() == !before,
@@ -637,7 +637,7 @@ private slots:
             auto *option = host.window()->findChild<QCheckBox *>("rrBionicReading");
             QVERIFY(option && option->isChecked());
             QVERIFY(click(canvas, option));
-            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsClose")));
             QTRY_VERIFY_WITH_TIMEOUT(
                 !host.session()->busy() && host.session()->state().value("bold_reading").toString() == "off", 30000);
             preserved();
@@ -714,7 +714,7 @@ private slots:
         QVERIFY(click(canvas, bionic));
         QTRY_VERIFY_WITH_TIMEOUT(
             !host.session()->busy() && host.session()->state().value("bold_reading").toString() == "bold", 30000);
-        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettings")));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsClose")));
         preserved();
         QCOMPARE(host.session()->state().value("bold_reading").toString(), QString("bold"));
         settingsToggle("rrDarkMode", "dark_mode");
@@ -803,7 +803,7 @@ private slots:
         QCOMPARE(inspectReader(host)["preview_settings"].toObject(), draft);
         QCOMPARE(host.session()->state()["font_pixels"], original["font_pixels"]);
         QVERIFY(!text->isVisible());
-        QVERIFY(click(canvas, settings));
+        QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsClose")));
         QTRY_VERIFY_WITH_TIMEOUT(!panel->isVisible() && !host.session()->busy(), 10000);
         QCOMPARE(host.session()->state()["font_pixels"], draft["font_pixels"]);
         QVERIFY(click(canvas, text));
@@ -1196,13 +1196,13 @@ private slots:
             // The edits are still queued: closing Settings waits for the
             // preview instead of applying the unedited book settings.
             QVERIFY(!inspectReader(host)["preview_ready"].toBool());
-            QVERIFY(click(canvas, overflow));
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsClose")));
             QCoreApplication::processEvents();
             QVERIFY(general->isVisible());
             QVERIFY(!host.session()->busy());
             engineActivity().pause(false);
         } else
-            QVERIFY(click(canvas, overflow));
+            QVERIFY(click(canvas, host.window()->findChild<QPushButton *>("rrSettingsClose")));
         QTRY_VERIFY_WITH_TIMEOUT(!general->isVisible() && !host.session()->busy() &&
                                      !inspectReader(host)["appearance_panel_open"].toBool(),
                                  15000);
@@ -2626,7 +2626,7 @@ private slots:
     }
     void annotationFramesKeepFirstPaintComplete_data() {
         QTest::addColumn<QString>("markup");
-        for (const auto *name : {"none", "saved", "draft", "elsewhere", "elsewhere-256"}) {
+        for (const auto *name : {"none", "saved", "draft", "elsewhere", "elsewhere-256", "grayscale"}) {
             QTest::newRow(name) << QString(name);
         }
     }
@@ -2634,7 +2634,13 @@ private slots:
         QFETCH(QString, markup);
         QTemporaryDir directory;
         storage::Paths paths{directory.path()};
+        QVERIFY(storage::writeJson(paths.preferences(), {{"highlight_help_seen", true}}));
         ReaderFixture host(paths, testFonts, testPlaceholder);
+        if (markup == "grayscale") {
+            host.configureServices = [](ReaderHostServices &services) {
+                services.colorDisplay = [] { return false; };
+            };
+        }
         CloseHost cleanup{host};
         QSignalSpy opened(&host, &ReaderFixture::opened);
         host.open(textBook, nativeSize);
@@ -2730,6 +2736,39 @@ private slots:
             return true;
         };
         QVERIFY(barrier());
+        if (markup == "grayscale") {
+            QVector<QRect> rects;
+            done = false;
+            host.session()->rangeRects(hits.first().start, hits.first().end, [&](QVector<QRect> value) {
+                rects = value;
+                done = true;
+            });
+            QTRY_VERIFY(done && !rects.isEmpty());
+            page->annotationRequested();
+            const QPoint point = rects.first().center() + QPoint(0, page->topHeight());
+            for (const auto &style : {"underline", "dotted"}) {
+                page->held(point - QPoint(0, page->topHeight()));
+                const QString name = "rrAnnotationStyle_" + QString(style);
+                QTRY_VERIFY(host.window()->findChild<QAbstractButton *>(name) &&
+                            host.window()->findChild<QAbstractButton *>(name)->isVisible());
+                QVERIFY(!host.window()->findChild<QWidget *>("rrAnnotationPalette"));
+                QVERIFY(!host.window()->findChild<QWidget *>("rrAnnotationSave"));
+                host.window()->findChild<QAbstractButton *>(name)->click();
+                QVERIFY(host.window()->findChild<QWidget *>("rrAnnotationPopover")->isVisible());
+                host.window()->findChild<QPushButton *>("rrAnnotationApply")->click();
+                QTRY_VERIFY(!host.window()->findChild<QWidget *>("rrAnnotationPopover")->isVisible());
+                QVERIFY(store.load());
+                QCOMPARE(store.highlights().first().style, QString(style));
+                QCOMPARE(store.highlights().first().color, QString("blue"));
+                QVERIFY(barrier());
+            }
+            page->tapped(page->rect().center());
+            auto *exit = host.window()->findChild<QPushButton *>("rrAnnotate");
+            QTRY_VERIFY(exit && exit->isVisible());
+            QVERIFY(click(canvas, exit));
+            page->tapped(page->rect().center());
+            QVERIFY(barrier());
+        }
         if (markup == "draft") {
             QVector<QRect> rects;
             done = false;
@@ -2739,7 +2778,7 @@ private slots:
             });
             QTRY_VERIFY(done && !rects.isEmpty());
             page->annotationRequested();
-            page->tapped(rects.first().center() + QPoint(0, page->topHeight()));
+            page->held(rects.first().center());
             auto edit = [&] {
                 return host.window()->findChild<QPushButton *>("rrAnnotationEdit");
             };
@@ -2829,10 +2868,11 @@ private slots:
             engineActivity().pause(true);
             host.window()->pageButton(1);
             QVERIFY(host.session()->busy());
-            auto *close = host.window()->findChild<QPushButton *>("rrAnnotationClose");
-            QVERIFY(close && close->isVisible());
-            QVERIFY(click(canvas, close));
-            QVERIFY(!close->isVisible());
+            page->tapped(QPoint(page->width() / 2, page->topHeight() / 2));
+            auto *exit = host.window()->findChild<QPushButton *>("rrAnnotate");
+            QVERIFY(exit && exit->isVisible());
+            QVERIFY(click(canvas, exit));
+            page->tapped(page->rect().center());
             engineActivity().pause(false);
             QTRY_VERIFY(!host.session()->busy() && host.session()->page() == 1);
             QVERIFY(barrier());

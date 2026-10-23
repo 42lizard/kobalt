@@ -55,8 +55,7 @@ protected:
     void paintEvent(QPaintEvent *) override;
     void resizeEvent(QResizeEvent *) override;
     void hideEvent(QHideEvent *) override;
-    void mousePressEvent(QMouseEvent *) override;
-    void mouseReleaseEvent(QMouseEvent *) override;
+    bool eventFilter(QObject *, QEvent *) override;
     bool event(QEvent *) override;
 
 private:
@@ -86,7 +85,10 @@ private:
     bool previewDismissible = true;
     QSize pageSize{3, 4};
     QRect linksFrame, returnFrame;
-    bool pressedPreview = false, chapterJumps = false, barVisible = true, relocating = false, overviewExpanded = false;
+    QPoint pressPosition;
+    bool pointerActive = false, pointerMoved = false;
+    int pressedCard = -1;
+    bool chapterJumps = false, barVisible = true, relocating = false, overviewExpanded = false;
     void choose(int page);
     void step(int direction);
     void updateButtons();
@@ -103,7 +105,10 @@ private:
     void clearPreview();
     void updateMask();
     void updateCaption();
+    void beginPointer(QPoint point);
+    void movePointer(QPoint point);
     void release(QPoint point);
+    bool pointerEvent(QEvent *event, QPoint offset = {});
     QRect imageBounds() const;
     int actionsHeight() const;
     void arrange();

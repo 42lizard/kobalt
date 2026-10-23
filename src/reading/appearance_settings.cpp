@@ -45,6 +45,11 @@ QJsonObject bookDefaults(const QJsonObject &preferences) {
     auto defaults = typographyDefaults();
     defaults.remove("font_face");
     applyFontDefault(defaults, preferences);
+    defaults["two_columns_landscape"] = preferences.value("two_columns_landscape").toBool(false);
+    defaults["column_spacing_percent"] = qBound(100, preferences.value("column_spacing_percent").toInt(100), 300);
+    defaults["word_spacing"] = preferences.value("word_spacing").toInt(100);
+    defaults["justification_tracking"] = preferences.value("justification_tracking").toInt(0);
+    defaults["widows_orphans"] = preferences.value("widows_orphans").toString("publisher");
     if (!preferences.value(inheritTextLayoutKey).toBool(true)) {
         return defaults;
     }
@@ -79,6 +84,13 @@ void applyBookDefaults(QJsonObject &saved, const QJsonObject &defaults) {
         }
     }
     applyFontDefault(saved, defaults);
+    // Settings choices replace stale book values.
+    saved["columns"] = 1;
+    saved["two_columns_landscape"] = defaults.value("two_columns_landscape").toBool(false);
+    saved["column_spacing_percent"] = defaults.value("column_spacing_percent").toInt(100);
+    saved["word_spacing"] = defaults.value("word_spacing").toInt(100);
+    saved["justification_tracking"] = defaults.value("justification_tracking").toInt(0);
+    saved["widows_orphans"] = defaults.value("widows_orphans").toString("publisher");
 }
 void rememberTextLayout(QJsonObject &preferences, const QJsonObject &state) {
     QJsonObject last;

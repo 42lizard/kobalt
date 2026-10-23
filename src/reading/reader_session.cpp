@@ -150,7 +150,7 @@ ReaderMarkupFrame captureFrameMarkup(ReaderModel &model, const ReaderMarkupReque
             rectangles.resize(remaining);
         }
         remaining -= rectangles.size();
-        result.saved.append(qMakePair(std::move(rectangles), range.color));
+        result.saved.append({std::move(rectangles), range.color, range.style});
     }
     return result;
 }
@@ -458,12 +458,22 @@ void ReaderSession::open(OpenRequest request, std::function<void(OpeningResult)>
                 const auto dark = saved.value("dark_mode");
                 const auto hideNonlinear = saved.value("hide_nonlinear_fragments");
                 const auto avoidWastefulStyling = saved.value("avoid_wasteful_styling");
+                const auto landscapeColumns = saved.value("two_columns_landscape");
+                const auto columnSpacing = saved.value("column_spacing_percent");
+                const auto wordSpacing = saved.value("word_spacing");
+                const auto tracking = saved.value("justification_tracking");
+                const auto widowsOrphans = saved.value("widows_orphans");
                 if (!savedMatches)
                     saved = {};
                 saved["bold_reading"] = bionic;
                 saved["dark_mode"] = dark;
                 saved["hide_nonlinear_fragments"] = hideNonlinear;
                 saved["avoid_wasteful_styling"] = avoidWastefulStyling;
+                saved["two_columns_landscape"] = landscapeColumns;
+                saved["column_spacing_percent"] = columnSpacing;
+                saved["word_spacing"] = wordSpacing;
+                saved["justification_tracking"] = tracking;
+                saved["widows_orphans"] = widowsOrphans;
                 appearance::migrateLineSpacing(saved);
                 if (!appearanceDefaults.isEmpty()) {
                     appearance::applyBookDefaults(saved, appearanceDefaults);
@@ -1111,8 +1121,8 @@ void ReaderSession::previewPage(int page, QSize bounds, std::function<void(QImag
                         QRegion region;
                         for (const auto &rect : geometry[index])
                             region += rect;
-                        ui::paintHighlightTint(painter, region - covered, ui::highlightTint(markup.saved[index].color),
-                                               dark);
+                        ui::paintHighlightMark(painter, geometry[index], region - covered,
+                                               ui::highlightTint(markup.saved[index].color), markup.saved[index].style, dark);
                         covered += region;
                     }
                 }
@@ -1176,15 +1186,17 @@ void ReaderSession::intersectingRanges(const QString &start, const QString &end,
         },
         Qt::QueuedConnection);
 }
-void ReaderSession::annotationTokenAt(QPoint point, std::function<void(AnnotationToken)> finished) {
+void ReaderSession::annotationTokenAt(QPoint point, std::function<void(AnnotationToken)> finished,
+                                      const QString &boundary, bool start) {
     auto engine = model;
     QPointer<ReaderSession> guard(this);
     const auto job = revision;
     kobalt::qt::invoke(
         engineWorker(),
-        [engine, guard, job, point, finished] {
+        [engine, guard, job, point, finished, boundary, start] {
             EngineJob activity;
-            const auto result = engine->annotationTokenAt(point);
+            const auto result = boundary.isEmpty() ? engine->annotationTokenAt(point)
+                                                   : engine->annotationDragTokenAt(point, boundary, start);
             kobalt::qt::invoke(
                 qApp,
                 [guard, job, result, finished] {

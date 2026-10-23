@@ -93,6 +93,7 @@ void readerStyle(QWidget *widget, const QString &source) {
     style.replace("palette(light)", dark ? m::chrome::dividerDark : m::chrome::dividerLight);
     style.replace("palette(placeholder-text)", dark ? "#cccccc" : "#333333");
     style.replace("palette(dark)", dark ? m::control::darkOutline : m::control::lightOutline);
-    widget->setStyleSheet(style);
+    if (widget->styleSheet() != style)
+        widget->setStyleSheet(style);
 }
 }
