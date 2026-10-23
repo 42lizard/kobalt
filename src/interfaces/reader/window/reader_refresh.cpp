@@ -51,11 +51,14 @@ void Reader::refresh() {
     // the new page is painted.
     const bool turnFrame =
         !model->busy() && model->turnDirection() != 0 && model->image().cacheKey() != page->image.cacheKey();
-    if (isVisible() && !turnFrame)
-        book->observeReading();
+    if (!turnFrame)
+        observeReading();
     const bool afterTurn = !turnFrame && std::exchange(turnPainted, false);
     if (!publishPendingDarkMode())
         return;
+    // syncFrameState consumes the completed jump and its return history.
+    // Refresh the destination's text, strips and bookmark ribbon together.
+    const bool passageFrame = !model->busy() && (!pendingPassage.position.isEmpty() || returningFromLink);
     syncFrameState();
     finishAppearanceApply();
     const bool pickingFont = syncFontPicker();
@@ -94,7 +97,7 @@ void Reader::refresh() {
     if (!readingTurn)
         page->refreshContent(isVisible() && !appearanceEdit.panelOpen() && !topControls->isVisible() &&
                              !general->isVisible() && !choices->isVisible() && !syncDialog && !finishDialog &&
-                             !services.suspended() && !applyingText && model->turnDirection() != 0 &&
+                             !services.suspended() && !applyingText && (model->turnDirection() != 0 || passageFrame) &&
                              nextImage.cacheKey() != previousPageImage);
     if (!recordedOpening)
         recordOpening();
@@ -145,6 +148,13 @@ void Reader::syncFrameState() {
     // It must not drop a tap or swipe in progress either.
     if (!appearanceEdit.panelOpen() && (model->busy() || model->image().cacheKey() != page->image.cacheKey()))
         dismissLookup(true);
+    if (!model->busy() && !pendingPassage.position.isEmpty()) {
+        // Accept the visit only after the engine confirms a different passage.
+        const auto origin = std::exchange(pendingPassage, {});
+        if (model->error().isEmpty() && model->state().value("position").toString() != origin.position) {
+            linkHistory.append(origin);
+        }
+    }
     if (returningFromLink && !model->busy()) {
         returningFromLink = false;
         if (!linkHistory.isEmpty() && model->state().value("position").toString() == linkHistory.last().position)
@@ -298,9 +308,7 @@ void Reader::syncAppearanceControls(bool pickingFont) {
     variableWeightSlider->parentWidget()->setVisible(weightAxis.available());
     // Navigation places this panel above the bottom bar. Moving it below
     // the toolbar here would invalidate it before navigation moves it back.
-    menu->resize(
-        ui::metrics::panel::appearance(size(), panels->currentIndex() == 1, optical.available(), weightAxis.available())
-            .size());
+    fitAppearance();
     if (!weightSlider->interacting()) {
         weightSlider->setValue(normalWeight ? settings->thickness() : 0);
         findChild<QLabel *>("rrFontWeightValue")

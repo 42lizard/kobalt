@@ -31,6 +31,7 @@ add_test(NAME bundled-fonts COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/
 add_test(NAME mini-build COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_mini_build.py")
 add_test(NAME dependency-extraction COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_build.py")
 add_test(NAME host-dependency-cache COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_run_tests.py")
+add_test(NAME dependency-artifacts COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_dependency_cache.py")
 add_test(NAME install-receipt COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${KOBALT_TESTS}/tooling" -p test_install_receipt.py)
 add_test(NAME kobo-build-script COMMAND "${Python3_EXECUTABLE}" -B -m unittest discover -s "${KOBALT_TESTS}/tooling" -p test_kobo_build.py)
 add_test(NAME coverage-report COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_test_coverage.py")
@@ -38,6 +39,7 @@ add_test(NAME variable-font-fixture COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT
 add_test(NAME cpp-formatter-tool COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_format_cpp.py")
 add_test(NAME release-version COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_version.py")
 add_test(NAME release-artifacts COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_release_artifacts.py")
+add_test(NAME android-ci-artifacts COMMAND "${Python3_EXECUTABLE}" -B "${KOBALT_TESTS}/tooling/test_ci_android.py")
 
 execute_process(COMMAND "${Python3_EXECUTABLE}" -B -c
     "import sys; sys.path.insert(0, sys.argv[1]); from version import release_version; print(release_version())"
@@ -317,6 +319,9 @@ kobalt_engine_check(alignment)
 kobalt_engine_check(vertical-writing)
 kobalt_engine_check(mathml)
 kobalt_engine_check(line-breaking)
+kobalt_engine_check(whitespace)
+kobalt_engine_check(svg-limits)
+target_compile_definitions(whitespace-check PRIVATE KOBALT_FONT_DIRECTORY="${KOBALT_ROOT}/resources/fonts")
 kobalt_engine_check(multilingual ARGUMENTS "${KOBALT_TEST_FIXTURES}/multilingual-ar.epub"
     "${KOBALT_TEST_FIXTURES}/multilingual-he.epub")
 kobalt_engine_check(links ARGUMENTS "${KOBALT_TEST_FIXTURES}/links.epub")

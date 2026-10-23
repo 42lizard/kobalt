@@ -59,6 +59,14 @@ void Reader::checkpoint() {
     save(true);
 }
 
+void Reader::observeReading() {
+    if (closing || lifecycleHidden || !isVisible() || services.suspended()) {
+        book->stopReading();
+        return;
+    }
+    book->observeReading();
+}
+
 void Reader::prepareShutdown(std::function<void()> finished) {
     prepareTransition(std::move(finished), 0);
 }
@@ -435,7 +443,7 @@ void Reader::showEvent(QShowEvent *event) {
         orientation->start(kobalt::shownOrientation(QGuiApplication::primaryScreen()));
     QWidget::showEvent(event);
     resizeText();
-    book->observeReading();
+    observeReading();
     // The first refresh runs before the window is visible. Record the
     // opening once it is; a busy model retries from its next refresh.
     if (!recordedOpening)
@@ -490,7 +498,7 @@ void Reader::resizeEvent(QResizeEvent *) {
     header->setVisible(page->topHeight() > 0);
     topControls->setGeometry(0, 0, width(), navigation ? navigation->toolbarHeight() : m::panel::toolbarHeight);
     bottomControls->setGeometry(m::panel::footer(size()));
-    menu->resize(m::panel::appearance(size(), panels->currentIndex() == 1).size());
+    fitAppearance();
     chapterGraph->resize(width(), chapterGraph->height());
     choices->setGeometry(rect());
     fitSettings();
@@ -692,7 +700,7 @@ bool Reader::openLink(QPoint point) {
                            return;
                        reader->dismissLinkConfirmation();
                        if (details.kind == kobalt::LinkKind::Passage)
-                           reader->confirmLink(details.target);
+                           reader->goToPassage(details.target);
                        else if (details.kind == kobalt::LinkKind::Website) {
                            auto *dialog = new kobalt::WebsiteDialog(reader);
                            reader->linkDialog = dialog;
@@ -744,14 +752,17 @@ bool Reader::openLink(QPoint point) {
     return false;
 }
 
-void Reader::confirmLink(const QString &target) {
-    if (target.isEmpty() || model->busy() || closing || lifecycleHidden || services.suspended())
+void Reader::goToPassage(const QString &target) {
+    if (target.isEmpty() || model->busy() || closing || lifecycleHidden || services.suspended()) {
         return;
+    }
     const LinkVisit origin{model->state().value("position").toString(), model->page(), page->chapterTitle};
+    if (!model->goTo(target)) {
+        return;
+    }
+    pendingPassage = origin;
     dismissLookup();
     dismissControls();
-    linkHistory.append(origin);
-    model->goTo(target);
     refresh();
 }
 

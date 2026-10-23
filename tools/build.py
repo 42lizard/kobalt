@@ -25,6 +25,7 @@ import source_state
 
 
 ENGINE_PATCHES = tuple((ROOT / 'dependencies/crengine-patches.txt').read_text().splitlines())
+LUNASVG_PATCHES = ('lunasvg-resource-limits.patch',)
 
 
 def fetch(name, spec, cache, offline=False):
@@ -115,7 +116,7 @@ def verify_public_library(path):
 
 
 def build_autotools(source, build, prefix, jobs=2, host=None, environment=None,
-                    engine=None, container_command=None):
+                    engine=None, container_command=None, make_options=()):
     """Build a pinned Autotools library out of tree as a static dependency."""
     source, build, prefix = (Path(path).resolve() for path in (source, build, prefix))
     build.mkdir(parents=True, exist_ok=True)
@@ -126,7 +127,8 @@ def build_autotools(source, build, prefix, jobs=2, host=None, environment=None,
     if engine is None:
         process_env = os.environ.copy()
         process_env.update(env)
-        commands = ((configure, build), (['make', '-j', str(jobs)], build), (['make', 'install'], build))
+        commands = ((configure, build), (['make', '-j', str(jobs), *make_options], build),
+                    (['make', 'install', *make_options], build))
         for command, cwd in commands:
             subprocess.run(command, cwd=cwd, env=process_env, check=True)
         return
@@ -145,7 +147,7 @@ def build_autotools(source, build, prefix, jobs=2, host=None, environment=None,
     workdir = command.index('-w') + 1
     command[workdir] = build_arg
     env_command = ['env', *(f'{name}={value}' for name, value in env.items())]
-    for args in (configure, ['make', '-j', str(jobs)], ['make', 'install']):
+    for args in (configure, ['make', '-j', str(jobs), *make_options], ['make', 'install', *make_options]):
         run(engine, command + env_command + args)
 
 
@@ -153,6 +155,7 @@ def device_dependency_inputs(root, selected, specs, image):
     files = [root / 'tools/build.py', root / 'tools/build_engine.py', root / 'targets' / (selected.name + '.json'),
              root / 'dependencies/crengine-patches.txt']
     files += [root / 'dependencies/patches' / name for name in ENGINE_PATCHES]
+    files += [root / 'dependencies/patches' / name for name in LUNASVG_PATCHES]
     return {'target': selected.name, 'image': image, 'root': str(root.resolve()),
             'sources': {name: item['sha256'] for name, item in specs.items() if name != 'fonttools'},
             'recipes': {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
@@ -269,17 +272,21 @@ def main():
                         shutil.rmtree(directory)
             # CREngine uses KOReader's text and image callbacks, not stock LunaSVG.
             # Patch a build copy; keep the verified upstream source unchanged.
-            svg_revision = hashlib.sha256((specs['lunasvg']['sha256'] + specs['koreader-base']['sha256']).encode()).hexdigest()[:16]
+            extensions = cache / specs['koreader-base']['directory'] / 'thirdparty/lunasvg'
+            svg_patches = [extensions / name for name in ('cmake_tweaks.patch', 'extended.patch', 'pkgconfig.patch')]
+            svg_patches += [ROOT / 'dependencies/patches' / name for name in LUNASVG_PATCHES]
+            svg_revision = hashlib.sha256((specs['lunasvg']['sha256'] + specs['koreader-base']['sha256']).encode()
+                                         + b''.join(patch.read_bytes() for patch in svg_patches)).hexdigest()[:16]
             svg_source = ROOT / build_root / ('lunasvg-source-' + svg_revision)
             svg_extensions = '/work/.cache/kobalt/' + specs['koreader-base']['directory'] + '/thirdparty/lunasvg'
             if not svg_source.exists():
                 with tempfile.TemporaryDirectory(prefix='lunasvg-', dir=svg_source.parent) as temporary:
                     patched = Path(temporary) / 'source'
                     shutil.copytree(cache / specs['lunasvg']['directory'], patched)
-                    for patch in ('cmake_tweaks.patch', 'extended.patch', 'pkgconfig.patch'):
+                    for patch in svg_patches:
                         run(engine, command + ['patch', '--batch', '--forward', '-p1',
                                                '-d', '/work/' + str(patched.relative_to(ROOT)),
-                                               '-i', svg_extensions + '/' + patch])
+                                               '-i', '/work/' + str(patch.relative_to(ROOT))])
                     patched.rename(svg_source)
             svg_build = str(build_root / 'lunasvg')
             run(engine, command + ['cmake', '-S', str(svg_source.relative_to(ROOT)), '-B', svg_build, *common,
@@ -318,9 +325,11 @@ def main():
                              {'CC': '/tc/qt5/bin/gcc', 'AR': '/usr/bin/arm-linux-gnueabihf-ar',
                               'RANLIB': '/usr/bin/arm-linux-gnueabihf-ranlib'})
             for name in ('fribidi', 'libunibreak'):
+                # FriBidi's CLI manual requires running the target binary.
+                make_options = ('SUBDIRS=lib',) if name == 'fribidi' else ()
                 build_autotools(cache / specs[name]['directory'], ROOT / build_root / (name + '-autotools'),
                                 ROOT / build_root / 'deps', args.jobs, autotools_host, autotools_env,
-                                engine=engine, container_command=command)
+                                engine=engine, container_command=command, make_options=make_options)
             # Keep the verified dependency intact. Apply reader-specific resource
             # and image-memory changes only to a build copy.
             if not patched_source.exists():

@@ -1,3 +1,27 @@
+## Unreleased
+
+- Add optional `userstyle.css` for book styling. Edits apply when reopening a book and do not affect installation checks.
+
+## v1.0-beta.4
+
+- Refresh the page and bookmark ribbon together when jumping to a bookmark or returning to the previous passage.
+
+- Update bundled FreeType, FriBidi and Android libpng to include upstream security fixes.
+
+- Limit SVG nesting and resource-reference depth to bound recursive renderer work.
+
+- Pause Android reading time while the device sleeps or the app is inactive, so Stats does not count that time as reading.
+
+- Keep missing zero-width spaces invisible and preserve thin and hair spacing when a font lacks those characters.
+
+- Bookmark jumps now offer Return to page in the reading menu, using the same return history as internal links.
+
+- Size Text, Layout and About panels from their visible content. Android's Layout panel no longer leaves space for the omitted rotation controls. Text and Layout scroll when their controls do not fit on screen.
+
+- Added an experimental Android debug APK for ARM64 devices running Android 9 or later. It opens DRM-free EPUBs and keeps books, settings and reading progress locally. Obtain testing APKs directly from this repository; they use a shared public signing key.
+
+- Restore publisher spacing in Kobo books containing the original injected style hacks. Keep kepubify wrapper rules and custom styles.
+
 ## v1.0-beta.3
 
 ### What's changed

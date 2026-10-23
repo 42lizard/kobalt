@@ -74,6 +74,7 @@ All files are in `.adds/kobalt/`.
 | `assets/` | Bundled fonts, hyphenation dictionaries and `manifest.json` |
 | `config.json` | `enabled`, the Open books in Kobalt choice |
 | `reader-settings.json` | Settings that apply to every book: display options, Bold Reading, default reading font and interface preferences |
+| `userstyle.css` | Optional user CSS for every book; create and edit this file yourself |
 | `<hash>.json` | One file per book: saved position, typography, header, footer, clock, orientation, dictionary choice and the Nickel progress baseline |
 | `annotations/<key>/` | One folder per book with `bookmarks.json` and `book.json`, see Bookmarks |
 | `reopen-layout.json` | Up to 20 layout-check results, keyed by archive digest, at most 8 KiB |
@@ -90,11 +91,13 @@ On Kobo models with a physical Home button, pressing it closes Kobalt and return
 
 ## Opening books
 
-The default build opens unencrypted local EPUBs selected through Nickel, regardless of their folder. This includes onboard and SD storage, hidden folders, Kobo's built-in Dropbox and Google Drive downloads, and folders used by third-party sync services. Local files can have any filename or use a symlink; Nickel's EPUB MIME type and Kobalt's archive inspection determine whether they are supported. DRM-free Kobo purchases also open, including extensionless books stored by Nickel. Embedded TrueType and OpenType fonts using standard IDPF font obfuscation are supported. This font embedding method is not DRM. Other resource encryption and unsupported font obfuscation still use Nickel. Book previews, PDFs and protected books use Nickel's reader.
+The default build opens unencrypted local EPUBs selected through Nickel, regardless of their folder. This includes onboard and SD storage, hidden folders, Kobo's built-in Dropbox and Google Drive downloads, and folders used by third-party sync services. Local files can have any filename or use a symlink; Nickel's EPUB MIME type and Kobalt's archive inspection determine whether they are supported. DRM-free Kobo purchases also open, including extensionless books stored by Nickel. Embedded TrueType and OpenType fonts using IDPF or Adobe font obfuscation are supported. Adobe font obfuscation requires a UUID in the book's metadata. These font embedding methods are not DRM. Other resource encryption and unsupported font obfuscation still use Nickel. Book previews, PDFs and protected books use Nickel's reader.
 
 On firmware 4, sideloaded filenames and saved chapter prefixes preserve literal `#`, `?` and percent sequences such as `%20`.
 
 Loading a local book does not require Wi-Fi or an internet connection. Kobo, Android and desktop read unencrypted EPUB resources directly from the ZIP archive on the engine worker, without a loopback HTTP server. The existing source cache, resource and image limits, cancellation and access-revocation checks still apply. Each resource stream closes before its read finishes, and closing or exporting a book drains the worker before releasing the publication.
+
+Kobalt removes the recognized original `kobostylehacks` CSS block from chapter input before rendering. This restores publisher heading and paragraph spacing, relative font sizes and link colours. The book file stays unchanged. The wrapper-only rule used by kepubify and blocks with unknown or custom additions remain intact.
 
 Nickel stays responsible for authorization. Kobalt receives an opening only after Nickel accepts it, then reads the EPUB's ZIP entries directly. It checks the publication structure and lets CREngine load its reading sections before displaying the book. Protected content, source access failures and books the engine cannot load still offer fallback to Nickel. A store purchase keeps its existing book identity and uses the same progress, completion and sync integration as before. Direct loading does not turn it into a sideloaded book.
 
@@ -138,6 +141,8 @@ Kobalt also reports reading sessions and page turns to Nickel, so Nickel's readi
 
 ## Reading interface
 
+Text and Layout panels measure their visible controls and messages, including optional font controls. They keep their bottom edge above the navigation bar. When the controls exceed the space below the top toolbar, the controls scroll inside the panel. About measures its content and leaves room for the settings tabs beside it.
+
 Normal page turns include non-linear EPUB sections, including covers marked as non-linear. Settings > Advanced > Hide non-linear fragments skips other non-linear sections during page turns. It is off by default. Links, Chapters and page-number navigation can still open hidden sections; page turns within a section already open remain available.
 
 Reader buttons keep their keyboard focus behavior without drawing a native focus frame. A held bottom tab uses the same continuous fill as a selected tab.
@@ -158,7 +163,7 @@ While a page turn is running, Kobalt accepts one pending turn. Further turns rep
 
 Tap the left third of the page to go back, the right third to go forward and the middle or the title to open the menus. Swipe left or right to turn pages. For books whose EPUB spine declares right-to-left page progression, the left third advances and the right third goes back; horizontal swipes also reverse. Explicit Next and Previous actions, keyboard arrows and hardware page buttons keep their usual meanings. Hardware page buttons follow Nickel's button mapping and its invert setting. While Chapters, Bookmarks, search results or licenses fill the screen, page buttons page that list and never turn the book. Bluetooth remotes and keyboards turn pages with the arrow keys, like Nickel's reader: right and down go forward, left and up go back. Other remote keys, such as page up and down, volume and media keys, do nothing, as in Nickel's reader.
 
-Tap the top-right area of the page, covering the rightmost 33% of its width and 120 pixels in height at 300 ppi, to bookmark the page or to remove its bookmark. A link in that corner still opens. A bookmarked page shows a ribbon at the top: with a header or clock it hangs just left of the chapter progress and runs a little past the strip, and without them it is shorter and stays in the top margin. A page keeps at most one bookmark. When a layout change puts several bookmarks on one page, they become one at the page start with the oldest date. The bookmark icon next to the menu button opens Bookmarks, sorted by page: each row shows the chapter, the page, the page's first words and the date. A row goes to its page. Its remove button asks before it removes. Opening a bottom navigation tab closes Bookmarks and opens that tab. The Text tab shows Aa in the selected reading font, including pending font changes. Opening Bookmarks from Settings, Text or Layout applies the pending changes first. If saving settings fails, the current panel stays open and shows the error.
+Tap the top-right area of the page, covering the rightmost 33% of its width and 120 pixels in height at 300 ppi, to bookmark the page or to remove its bookmark. A link in that corner still opens. A bookmarked page shows a ribbon at the top: with a header or clock it hangs just left of the chapter progress and runs a little past the strip, and without them it is shorter and stays in the top margin. A page keeps at most one bookmark. When a layout change puts several bookmarks on one page, they become one at the page start with the oldest date. The bookmark icon next to the menu button opens Bookmarks, sorted by page: each row shows the chapter, the page, the page's first words and the date. A row goes to its page and saves the passage you left, as an internal link does. Open the reading menu to return to that passage. Bookmark and link jumps share the same return history, so repeated returns retrace multiple jumps. Completed jumps refresh the reading text, header, footer and bookmark ribbon together without a page-turn animation. Page turns and layout changes keep the saved passages. A failed jump or a jump to the current position adds no return entry. Each row's remove button asks before it removes. Opening a bottom navigation tab closes Bookmarks and opens that tab. The Text tab shows Aa in the selected reading font, including pending font changes. Opening Bookmarks from Settings, Text or Layout applies the pending changes first. If saving settings fails, the current panel stays open and shows the error.
 
 Bookmarks are Kobalt's own and separate from Nickel's. Each book has a folder in `.adds/kobalt/annotations/`: `kobo-<id>` for existing UUID book IDs, `kobo-id-<hash>` for other server IDs, and `file-<fingerprint>` for sideloaded books. The server-ID hash preserves case and keeps arbitrary ID characters out of folder names. A moved or renamed sideloaded file keeps its bookmarks through the content fingerprint. Existing UUID folders stay unchanged. `book.json` records the book's identity and title. When a sideloaded file changes, its bookmarks come from the most recently saved folder for that path and move to the new folder on the next save. If saved bookmarks cannot be read, Kobalt keeps the file intact and disables bookmark edits until you fix the file and reopen the book. Opening Bookmarks or tapping the bookmark corner shows an error. If a bookmark save fails, Kobalt shows an error and keeps the previous list and ribbon state. This also applies to automatic merges after a layout change and saves that exceed the 1 MiB storage limit.
 
@@ -181,6 +186,8 @@ The font picker shows a compact grid above the navigation tabs, with the book st
 Long press a font to make it the default book override, then confirm the change. On desktop, right-click or press Shift+F10 for the same dialog. The chosen font stays in its normal grid position, shows Default font below its name and becomes the initial font override for new books. Existing books keep their selected font. This setting does not change Publisher Fonts. Long press Libron to restore the built-in default override. The Aa help button beside Libron uses the current default override inside a circle and always shows instructions when tapped. It does not change the default or the selected reading font.
 
 When Publisher Fonts is selected and the book has no usable embedded fonts, Kobalt uses fixed fallbacks: Libron for `serif`, Legible Next for `sans-serif` and IBM Plex Mono for `monospace`. Legible Next is the bundled Atkinson Hyperlegible Next adaptation. Mini packages use IBM Plex Sans when Legible Next is absent. Named publisher fonts stay unchanged. Books with embedded fonts keep the existing publisher font behavior throughout the book, including previews of chapters without embedded fonts. A selected reading font overrides the publisher's font families. Code keeps the existing IBM Plex Mono behavior.
+
+Zero-width spaces and word joiners stay invisible, including when a font supplies a visible control glyph. Missing thin and hair spaces stay blank. HarfBuzz supplies their spacing when the last fallback font lacks the glyph. The source text keeps its original characters and line-breaking rules.
 
 On Kobo Qt5 and Qt6, plaintext raster images stream from the EPUB ZIP in blocks of at most 64 KiB. Image dimension requests read only the header and send no image body.
 
@@ -235,6 +242,18 @@ Chapters uses the EPUB's table of contents on every platform. Counting and chapt
 
 NickelBench can select a temporary appearance profile for its dedicated benchmark EPUB. That opening uses the embedded publisher font, Kobalt’s default text size and 60-pixel margins at 300 ppi, 144% line spacing, publisher alignment and light mode. Text and margin sizes follow screen density. Hyphenation, extra weight and Bold Reading are off. Kobalt keeps the original book appearance values, including absent values, when it saves reading progress. The profile stays in memory and does not change global settings or other books. Settings writes are disabled for that opening.
 
+## Custom book styles
+
+Create `.adds/kobalt/userstyle.css` to add CSS to every book. Kobalt does not create this file or ship a default. Updates preserve it. The file is not part of the asset manifest, and editing or deleting it does not affect installation checks.
+
+Kobalt reads the file each time a book opens. Close and reopen the book after an edit. A changed stylesheet discards the retained layout and prevents reuse of cached layouts made with other CSS. Appearance previews use the same CSS as the open book. Removing the file or leaving it empty restores normal styling.
+
+Rules use CREngine's supported CSS. They follow Kobalt's built-in styles and Text settings in the same base stylesheet. Ordinary rules remain below publisher styling. Use `!important` and a selector with sufficient specificity to override publisher styling or a Text setting. For example, `p { text-indent: 0 !important; }` removes paragraph indentation. Font selection still overrides every element except code unless your CSS overrides it. Custom CSS changes book content, not the reader interface.
+
+The file must be at most 256 KiB and contain no NUL bytes. Missing, unreadable or oversized files are ignored so the book can still open. CSS syntax errors are left to CREngine; they do not trigger an installation error. Font fallback defaults remain built into the app.
+
+On the macOS development app, put `userstyle.css` in `~/Library/Application Support/Kobalt/Kobalt/config/`, beside `reader-settings.json`. Android uses its app-private `config/` directory; there is no in-app CSS file picker or editor.
+
 ## Display refresh
 
 Kobalt paints one completed frame per page turn. Ordinary turns use Kobo's reading policy for the detected display backend. On firmware 4's i.MX backend, Kobalt queries Nickel's hardware capabilities and the native DisableRegal setting. It uses partial REAGL when Regal is supported and enabled, or partial GLKW16 in dark mode when Eclipse is supported. Other i.MX revisions use driver-selected automatic updates. Ordinary MediaTek page turns use partial GLR16/GLRC16 or dark GLKW16 in one submission. Unknown backends keep Kobo's automatic policy. Ordinary turns on i.MX and unknown backends use one whole-screen update with their existing mode and waveform. On MediaTek, a page turn that needs image cleanup uses one whole-screen quality refresh. Kobo selects GC16 for greyscale cleanup, GCK16 for dark greyscale cleanup and GCC16 for colour cleanup. Entering dark mode requests one whole-screen cleanup. In light mode, opening the plain reading bars over a text-only page uses one screen-spanning partial text update without cleanup, so the top and bottom appear together. Bottom panels keep localized updates. Opening the menu in dark mode requests one whole-screen cleanup. Closing the menu with a tap on the page or the title requests one full cleanup to clear ghosting. In dark mode, returning from the menu also requests cleanup when it closes another way. In light mode, closing a panel another way, or jumping from Chapters or Search, does not flash. Refresh the screen, on the Display tab, decides which page turns also flash. Smart, the default, flashes on a forward turn onto the first page of a chapter, but only after at least 10 turns since the last flash, so a run of short chapters does not flash on every turn. Every chapter flashes at every chapter start. Every 6, 10 or 20 pages flashes on that many turns since the last flash, in either direction. Manually flashes only when the menu closes. Any flash restarts the count. Each flash logs a `full-flash` event with its reason, and replaces that turn's page animation.
@@ -249,7 +268,7 @@ Ordinary page turns reuse chapter pages and the available font list in memory. C
 
 ## Sleep, USB and power
 
-Before sleep, Kobalt saves its position and pauses its work. The page stays on screen until Nickel's sleep screen is ready. Kobalt then shows the sleep screen with one full refresh, which also clears the page, so the screen flashes once, as in Nickel's own reader. After wake, Kobalt waits for Nickel's sleep or PIN view to close and for USB storage to finish remounting. It then checks authorization and restores page-turn input before it shows the book again. If wake or USB cancellation arrives while the previous operation is still releasing resources, Kobalt completes that release before checking authorization again.
+Before sleep, Kobalt saves its position and pauses its work. The page stays on screen until Nickel's sleep screen is ready. Kobalt then shows the sleep screen with one full refresh, which also clears the page, so the screen flashes once, as in Nickel's own reader. After wake, Kobalt waits for Nickel's sleep or PIN view to close and for USB storage to finish remounting. It then checks authorization and restores page-turn input before it shows the book again. The frontlight can finish fading in while the page is already visible. If wake or USB cancellation arrives while the previous operation is still releasing resources, Kobalt completes that release before checking authorization again.
 
 Nickel's USB confirmation appears above the open Kobalt page. Cancel keeps the book open.
 
@@ -261,11 +280,12 @@ Power-off and reboot wait for Kobalt to save reading time and progress before Ni
 
 Kobalt tolerates repeated manifest items when every attribute matches. Conflicting declarations with the same ID remain unsupported.
 
-- ZIP64 archives are not supported. Resource encryption is unsupported except for standard IDPF font obfuscation.
+- ZIP64 archives are not supported. Resource encryption is unsupported except for IDPF and Adobe font obfuscation.
+- SVG input elements can nest up to 64 levels. Rendering skips references that would extend an active SVG reference chain beyond 16 levels.
 - Resources are limited to 32 MiB each, and the source cache to 32 MiB in total. Images above the limits show a placeholder. An optional image that cannot load shows a warning and does not stop later images from loading. Renewing the source allows another attempt. Cancellation, revoked access and changed resource bytes still stop the session. Interlaced PNG images whose decoded storage exceeds 64 MiB are not rendered, including images embedded inside other resources. The parsed document, fonts and page images are outside the source-cache budget.
 - Typography changes lay out the whole book again. There is no partial reflow.
 - Hyphenation dictionaries cover only the languages listed above.
-- There are no highlights or notes, and no custom tap zones or custom CSS.
+- There are no highlights or notes, and no custom tap zones.
 - Reading-time estimates use only the current session, and page counts, not words. A font change during a session changes the page count but not the measured pace.
 
 ## Hardware validation
@@ -273,6 +293,8 @@ Kobalt tolerates repeated manifest items when every attribute matches. Conflicti
 Device testing includes installation and reading on Clara Colour, Clara BW with firmware 4.45 and Libra 2 with firmware 4.38. Manual rotation and touch targets were confirmed on Clara BW with firmware 4.45. Page animations with NickelDissolve installed were confirmed on Clara BW with firmware 4.45. Dark-mode refresh quality, sleep with a PIN, rotation on other models and firmware versions, page buttons on Libra Colour, the Home button on Touch models and server sync still need hardware validation.
 
 ## Android standalone reader
+
+Reading time pauses when Android puts the app to sleep or it becomes inactive. It resumes when the app is active and the reading page is visible. A book that finishes opening in the background does not start counting time until the app becomes active.
 
 Debug builds appear as Kobalt on the home screen. They use a separate app ID from releases and add `-debug` to the displayed version. Both apps can be installed together. Each keeps its own books, settings and reading progress.
 

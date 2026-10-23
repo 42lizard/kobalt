@@ -7,6 +7,7 @@
 #include <QDir>
 #include "engine/crengine/reader_model.h"
 #include "engine/crengine/document_cache.h"
+#include "engine/crengine/kobo_styles.h"
 #include "engine/crengine/page_pixels.h"
 #include "publication/publication.h"
 #include "support/strings.h"
@@ -89,6 +90,82 @@ static QByteArray storedEpub(const QList<QPair<QByteArray, QByteArray>> &members
     u32(bytes, start);
     u16(bytes, 0);
     return bytes;
+}
+static void checkKoboStyleHacks() {
+    const QByteArray css = "div#book-inner p, div#book-inner div { font-size: 1.0em; }"
+                           "a { color: black; } a:link, a:visited, a:hover, a:active { color: blue; }"
+                           "div#book-inner * { margin-top: 0 !important; margin-bottom: 0 !important;}";
+    const QByteArray head = "<html xmlns='http://www.w3.org/1999/xhtml'><head>"
+                            "<style>h2{margin:1em 0 2em}p{margin:1em 0}</style>";
+    const QByteArray body = "</head><body><div id='book-inner'><h2>Chapter title</h2>"
+                            "<p>First paragraph, caf\xc3\xa9.</p><p>Second paragraph.</p></div></body></html>";
+    const auto style = [](const QByteArray &attributes, const QByteArray &contents) {
+        return "<style " + attributes + ">" + contents + "</style>";
+    };
+    const auto empty = style("id='kobostylehacks'", {});
+    const auto injected = style("id='kobostylehacks'", css);
+    const auto cleaned = head + empty + body;
+    require(kobalt::withoutKoboStyleHacks(head + injected + body) == cleaned,
+            "Known Kobo injection did not leave publisher styles and text intact");
+    require(kobalt::withoutKoboStyleHacks(head + style("class='extra kobostylehacks'", css) + body) ==
+                head + style("class='extra kobostylehacks'", {}) + body,
+            "Class-marked Kobo injection was retained");
+    require(kobalt::withoutKoboStyleHacks(head + style("id='kobostylehacks'", "<![CDATA[" + css + "]]>") + body) ==
+                cleaned,
+            "CDATA Kobo injection was retained");
+    auto spaced = css;
+    spaced.replace(";", ";\n\t");
+    require(kobalt::withoutKoboStyleHacks(head + style("id='kobostylehacks'", spaced) + body) == cleaned,
+            "Whitespace prevented recognition of Kobo CSS");
+    const QList<QByteArray> preserved{
+        style("id='kobostylehacks'", "div#book-inner { margin-top: 0; margin-bottom: 0; }"),
+        style("id='kobostylehacks'", css + "p{hyphens:none}"),
+        style("id='publisher'", css),
+        "<!--" + injected + "-->",
+        "<script><![CDATA[" + injected + "]]></script>",
+    };
+    for (const auto &markup : preserved) {
+        const auto original = head + markup + body;
+        require(kobalt::withoutKoboStyleHacks(original) == original, "Custom or non-style markup was modified");
+    }
+    const auto malformed = head + injected + "</head><body><p>Unclosed";
+    require(kobalt::withoutKoboStyleHacks(malformed) == malformed, "Malformed markup was rewritten");
+    const QList<QPair<QByteArray, QByteArray>> files{
+        {"mimetype", "application/epub+zip"},
+        {"META-INF/container.xml",
+         "<container xmlns='urn:oasis:names:tc:opendocument:xmlns:container' version='1.0'><rootfiles><rootfile full-path='book.opf' media-type='application/oebps-package+xml'/></rootfiles></container>"},
+        {"book.opf",
+         "<package xmlns='http://www.idpf.org/2007/opf' version='2.0'><metadata><title>Spacing</title></metadata><manifest>"
+         "<item id='c' href='chapter.xhtml' media-type='application/xhtml+xml'/></manifest>"
+         "<spine><itemref idref='c'/></spine></package>"},
+        {"chapter.xhtml", head + injected + body},
+    };
+    auto publisher = files;
+    publisher.last().second = head + body;
+    const auto settings = kobalt::qt::object({{"font_pixels", 36}});
+    QString error;
+    kobalt::ReaderModel expected(kobalt::test::readerFonts()), actual(kobalt::test::readerFonts());
+    require(expected.open(storedEpub(publisher), QSize(800, 1000), settings, &error), qPrintable(error));
+    require(actual.open(storedEpub(files), QSize(800, 1000), settings, &error), qPrintable(error));
+    require(actual.image(0) == expected.image(0), "ZIP opening did not restore publisher spacing");
+    QMap<QString, QByteArray> data;
+    QMap<QString, qint64> sizes;
+    for (const auto &file : files) {
+        data[QString::fromUtf8(file.first)] = file.second;
+        sizes[QString::fromUtf8(file.first)] = file.second.size();
+    }
+    auto resources = std::make_shared<kobalt::ResourceCache>(
+        data.keys(),
+        [data](const QString &name, const kobalt::ResourceCache::Sink &sink, QString *) {
+            const auto bytes = data.value(name);
+            return sink(bytes.constData(), bytes.size());
+        },
+        std::make_shared<std::atomic_bool>(false));
+    kobalt::ReaderModel streamed(kobalt::test::readerFonts()), preview(kobalt::test::readerFonts());
+    require(streamed.openResources(resources, sizes, QSize(800, 1000), settings, &error), qPrintable(error));
+    require(streamed.image(0) == expected.image(0), "Resource opening retained Kobo style hacks");
+    require(preview.openPreview(streamed, QSize(800, 1000), &error), qPrintable(error));
+    require(preview.image(0) == expected.image(0), "Preview retained Kobo style hacks");
 }
 static void checkPagePixelConversion() {
     for (const auto size : {QSize(1, 1), QSize(31, 33), QSize(65, 63), QSize(1264, 1680), QSize(2049, 2049)}) {
@@ -290,52 +367,80 @@ static void checkCssDensity() {
     require(sizesAt212[4] == sizesAt300[4] && qAbs(sizesAt300[4].width() - 200) <= 1,
             "Percentage image width changed with CSS density");
 }
-static void checkIdpfFonts() {
+static void checkObfuscatedFonts() {
     QFile font(kobalt::test::readerAssets().file("fonts/InstrumentSerif-Regular.ttf"));
     require(font.open(QIODevice::ReadOnly), "open synthetic embedded font fixture");
     const auto original = font.readAll();
-    auto obfuscated = original;
-    const auto key = QCryptographicHash::hash("test-identifier", QCryptographicHash::Sha1);
-    for (int i = 0; i < qMin(1040, int(obfuscated.size())); ++i)
-        obfuscated[i] = char(uchar(obfuscated[i]) ^ uchar(key[i % key.size()]));
-    auto book = [&](const QByteArray &fontBytes, bool encoded, const QByteArray &identifier) {
+    const QByteArray idpfAlgorithm = "http://www.idpf.org/2008/embedding";
+    const QByteArray adobeAlgorithm = "http://ns.adobe.com/pdf/enc#RC";
+    auto book = [&](const QByteArray &fontBytes, const QByteArray &algorithm, const QByteArray &identifier,
+                    const QByteArray &extraIdentifiers = QByteArray()) {
         QList<QPair<QByteArray, QByteArray>> members = {
             {"mimetype", "application/epub+zip"},
             {"META-INF/container.xml",
              "<container xmlns='urn:oasis:names:tc:opendocument:xmlns:container'><rootfiles><rootfile full-path='book.opf' media-type='application/oebps-package+xml'/></rootfiles></container>"},
             {"book.opf",
              "<package xmlns='http://www.idpf.org/2007/opf' version='3.0' unique-identifier='book-id'><metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:identifier id='book-id'>" +
-                 identifier +
-                 "</dc:identifier></metadata><manifest><item id='font' href='font.ttf' media-type='font/ttf'/><item id='chapter' href='chapter.xhtml' media-type='application/xhtml+xml'/></manifest><spine><itemref idref='chapter'/></spine></package>"},
+                 identifier + "</dc:identifier>" + extraIdentifiers +
+                 "</metadata><manifest><item id='font' href='font.ttf' media-type='font/ttf'/><item id='chapter' href='chapter.xhtml' media-type='application/xhtml+xml'/></manifest><spine><itemref idref='chapter'/></spine></package>"},
             {"chapter.xhtml",
              "<html xmlns='http://www.w3.org/1999/xhtml'><head><style>@font-face {font-family: Embedded; src: url(font.ttf);} body {font-family: Embedded;}</style></head><body><p>Embedded font glyphs should match the unobfuscated original.</p></body></html>"},
             {"font.ttf", fontBytes}};
-        if (encoded)
+        if (!algorithm.isEmpty()) {
             members.append(QPair<QByteArray, QByteArray>{
                 "META-INF/encryption.xml",
-                "<encryption xmlns='urn:oasis:names:tc:opendocument:xmlns:container' xmlns:enc='http://www.w3.org/2001/04/xmlenc#'><enc:EncryptedData><enc:EncryptionMethod Algorithm='http://www.idpf.org/2008/embedding'/><enc:CipherData><enc:CipherReference URI='font.ttf'/></enc:CipherData></enc:EncryptedData></encryption>"});
+                "<encryption xmlns='urn:oasis:names:tc:opendocument:xmlns:container' xmlns:enc='http://www.w3.org/2001/04/xmlenc#'><enc:EncryptedData><enc:EncryptionMethod Algorithm='" +
+                    algorithm +
+                    "'/><enc:CipherData><enc:CipherReference URI='font.ttf'/></enc:CipherData></enc:EncryptedData></encryption>"});
+        }
         return storedEpub(members);
     };
     QString error;
     QByteArray expected, expectedPreview;
     {
         kobalt::ReaderModel plain(kobalt::test::readerFonts());
-        require(plain.open(book(original, false, "test-identifier"), QSize(800, 1000), {}, &error), qPrintable(error));
+        require(plain.open(book(original, {}, "test-identifier"), QSize(800, 1000), {}, &error), qPrintable(error));
         require(plain.embeddedFontCount() == 1 && plain.style(32, 120, "", 36), "load original publisher font");
         expected = hash(plain.image(0));
         kobalt::ReaderModel preview(kobalt::test::readerFonts());
         require(preview.openPreview(plain, QSize(800, 1000), &error), qPrintable(error));
         expectedPreview = hash(preview.image(0));
     }
-    for (const auto &identifier : {QByteArray("test-identifier"), QByteArray(" test-\tiden\n tifier\r ")}) {
-        kobalt::ReaderModel decoded(kobalt::test::readerFonts());
-        require(decoded.open(book(obfuscated, true, identifier), QSize(800, 1000), {}, &error), qPrintable(error));
-        require(decoded.embeddedFontCount() == 1 && decoded.style(32, 120, "", 36), "load IDPF publisher font");
-        require(hash(decoded.image(0)) == expected, "IDPF font glyphs differ from the original font");
-        kobalt::ReaderModel preview(kobalt::test::readerFonts());
-        require(preview.openPreview(decoded, QSize(800, 1000), &error), qPrintable(error));
-        require(preview.embeddedFontCount() == 1 && hash(preview.image(0)) == expectedPreview,
-                "IDPF font preview changed publisher glyphs");
+    struct FontCase {
+        QByteArray algorithm, identifier, extraIdentifiers, key;
+        int prefixBytes;
+    };
+    const auto idpfKey = QCryptographicHash::hash("test-identifier", QCryptographicHash::Sha1);
+    const auto adobeKey = QByteArray::fromHex("0123456789abcdef0123456789abcdef");
+    for (const auto &fixture :
+         {FontCase{idpfAlgorithm, "test-identifier", {}, idpfKey, 1040},
+          FontCase{idpfAlgorithm, " test-\tiden\n tifier\r ", {}, idpfKey, 1040},
+          FontCase{adobeAlgorithm, "urn:uuid:01234567-89ab-cdef-0123-456789abcdef", {}, adobeKey, 1024},
+          FontCase{adobeAlgorithm, "test-identifier",
+                   "<dc:identifier id='font-id'>urn:uuid:01234567-89ab-cdef-0123-456789abcdef</dc:identifier>",
+                   adobeKey, 1024}}) {
+        auto obfuscated = original;
+        for (int i = 0; i < qMin(fixture.prefixBytes, int(obfuscated.size())); ++i) {
+            obfuscated[i] = char(uchar(obfuscated[i]) ^ uchar(fixture.key[i % fixture.key.size()]));
+        }
+        const auto bytes = book(obfuscated, fixture.algorithm, fixture.identifier, fixture.extraIdentifiers);
+        QTemporaryDir cache;
+        require(cache.isValid(), "create obfuscated font cache");
+        const auto fingerprint = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex();
+        for (bool cached : {false, true}) {
+            kobalt::ReaderModel decoded(kobalt::test::readerFonts());
+            decoded.setDocumentCache(cache.path(), fingerprint, "obfuscated-font-test", bytes.size());
+            require(decoded.open(bytes, QSize(800, 1000), {}, &error), qPrintable(error));
+            require(decoded.openedFromCache() == cached, "obfuscated font cache was not reused");
+            require(decoded.embeddedFontCount() == 1 && decoded.style(32, 120, "", 36),
+                    "load obfuscated publisher font");
+            require(hash(decoded.image(0)) == expected, "obfuscated font glyphs differ from the original font");
+            kobalt::ReaderModel preview(kobalt::test::readerFonts());
+            require(preview.openPreview(decoded, QSize(800, 1000), &error), qPrintable(error));
+            require(preview.embeddedFontCount() == 1 && hash(preview.image(0)) == expectedPreview,
+                    "obfuscated font preview changed publisher glyphs");
+            require(decoded.saveDocumentCache(), "save obfuscated font cache");
+        }
     }
 }
 static void checkDeferredPublisherStyles() {
@@ -375,7 +480,7 @@ static void checkDeferredPublisherStyles() {
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     checkDeferredPublisherStyles();
-    checkIdpfFonts();
+    checkObfuscatedFonts();
     const auto positions = kobalt::nickel::positionCodec();
     const QVector<kobalt::ReadingFont> axisFixture{
         {"Variable fixture", {}, kobalt::FontOrigin::Sideloaded, false, {300, 650, 450}, {6.25, 72.75, 14}}};
@@ -513,6 +618,7 @@ int main(int argc, char **argv) {
     checkJpeg(false);
     checkJpeg(true);
     checkSvg();
+    checkKoboStyleHacks();
     checkPagePixelConversion();
     require(argc == 3, "Pass the text and color test EPUB paths");
     QFile file(QString::fromLocal8Bit(argv[1]));
@@ -1315,6 +1421,42 @@ int main(int argc, char **argv) {
                 "Preview changed the book's settings, position or pixels");
         require(preview.style(32, 120) && preview.setWeight(0) && hash(preview.image(preview.page())) == before,
                 "Preview cannot restore the original settings");
+    }
+    {
+        const int previousPpi = kobalt::readingPpi.load();
+        const auto captureDirectory = QString::fromLocal8Bit(qgetenv("KOBALT_USERSTYLE_CAPTURE"));
+        if (!captureDirectory.isEmpty()) {
+            require(QDir().mkpath(captureDirectory), "Cannot create user CSS capture directory");
+        }
+        for (const int ppi : {300, 212}) {
+            kobalt::readingPpi.store(ppi);
+            for (const bool dark : {false, true}) {
+                kobalt::ReaderModel baseline(model.fontInputs()), styled(model.fontInputs()),
+                    preview(model.fontInputs());
+                auto settings = model.state();
+                settings["dark_mode"] = dark;
+                const QByteArray userCss("* { color: #777777 !important; } p { text-indent: 0 !important; }");
+                require(baseline.open(bytes, model.viewport(), settings, &error), qPrintable(error));
+                styled.setUserStyleSheet(userCss);
+                require(styled.open(bytes, model.viewport(), settings, &error), qPrintable(error));
+                require(hash(styled.image(styled.page())) != hash(baseline.image(baseline.page())),
+                        "User CSS did not change book rendering");
+                require(preview.openPreview(styled, styled.viewport(), &error), qPrintable(error));
+                require(preview.userStyleSheet() == userCss &&
+                            hash(preview.image(preview.page())) == hash(styled.image(styled.page())),
+                        "Section preview did not inherit user CSS");
+                require(preview.style(48, 150) && preview.style(32, 120), "Cannot change styled preview typography");
+                require(hash(preview.image(preview.page())) == hash(styled.image(styled.page())),
+                        "Changing typography lost user CSS");
+                if (!captureDirectory.isEmpty()) {
+                    const auto prefix = captureDirectory + '/' + QString::number(ppi) + (dark ? "-dark" : "-light");
+                    require(baseline.image(baseline.page()).save(prefix + "-before.png") &&
+                                styled.image(styled.page()).save(prefix + "-after.png"),
+                            "Cannot save user CSS captures");
+                }
+            }
+        }
+        kobalt::readingPpi.store(previousPpi);
     }
     {
         require(model.goTo(model.chapters()[1].position) && model.go(model.page() + 1), "Cannot open second section");

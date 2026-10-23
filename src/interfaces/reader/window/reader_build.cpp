@@ -170,6 +170,10 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
     });
     resize(QGuiApplication::primaryScreen()->size());
     connectPageInput();
+    // Android can suspend the app without hiding the embedded reader widget.
+    connect(qApp, &QGuiApplication::applicationStateChanged, this, [this] {
+        observeReading();
+    });
 }
 
 void Reader::buildReadingPage() {
@@ -207,7 +211,7 @@ void Reader::buildReadingPage() {
         updateLinkReturn();
     };
     linkPanel->navigate = [this](const QString &target) {
-        confirmLink(target);
+        goToPassage(target);
     };
     linkReturn = new kobalt::ui::BackButton(strings::get("reader.return_to_passage"), this);
     linkReturn->setObjectName("rrLinkReturn");
@@ -215,8 +219,9 @@ void Reader::buildReadingPage() {
     linkReturn->setFixedSize(m::links::returnWidth, m::links::returnHeight);
     linkReturn->hide();
     connect(linkReturn, &QPushButton::clicked, this, [this] {
-        if (this->model->busy() || linkHistory.isEmpty() || lifecycleHidden || closing)
+        if (this->model->busy() || linkHistory.isEmpty() || lifecycleHidden || closing || services.suspended()) {
             return;
+        }
         dismissLookup();
         dismissControls();
         returningFromLink = true;
@@ -473,26 +478,10 @@ void Reader::buildBottomControls() {
 }
 
 kobalt::reader::AppearanceLayout Reader::buildMenu() {
-    menu = new kobalt::ui::Panel(this, Qt::BottomEdge);
-    menu->setObjectName("rrMenu");
-    menu->setFrameStyle(QFrame::Box);
-    auto *controls = new QVBoxLayout(menu);
-    controls->setContentsMargins(m::panel::margins);
-    controls->setSpacing(m::panel::gap);
-    panels = new QStackedWidget(menu);
-    controls->addWidget(panels, 1);
-    previewLabel = new QLabel(menu);
-    previewLabel->setObjectName("rrPreviewLabel");
-    previewLabel->setAlignment(Qt::AlignCenter);
-    controls->addWidget(previewLabel);
-    previewLabel->hide();
-    auto *typography = new QWidget(panels), *pageLayout = new QWidget(panels);
-    panels->addWidget(typography);
-    panels->addWidget(pageLayout);
-    auto *typeRows = new QVBoxLayout(typography), *pageRows = new QVBoxLayout(pageLayout);
-    typeRows->setContentsMargins(m::panel::rowsMargins);
-    pageRows->setContentsMargins(m::panel::rowsMargins);
-    return {typography, pageLayout, typeRows, pageRows};
+    menu = new AppearanceSheet(this);
+    panels = menu->pages;
+    previewLabel = menu->message;
+    return menu->controls();
 }
 
 void Reader::buildOverlays() {
@@ -536,10 +525,7 @@ void Reader::buildOverlays() {
     choices->hide();
     bookmarkList = new kobalt::BookmarkList(this);
     bookmarkList->selected = [this](const QString &position) {
-        if (model->goTo(position)) {
-            bookmarkList->hide();
-            dismissControls();
-        }
+        goToPassage(position);
     };
     bookmarkList->back = [this] {
         bookmarkList->hide();

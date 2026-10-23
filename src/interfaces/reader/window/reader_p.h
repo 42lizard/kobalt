@@ -83,6 +83,7 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
+    void observeReading();
     void prepareTransition(std::function<void()> finished, int timeoutMs);
     // Construction, in this order. Each step builds one group of widgets and
     // connects its signals.
@@ -111,6 +112,7 @@ private:
     void showPageImage(const QImage &nextImage);
     void paintTurn();
     void syncAppearanceControls(bool pickingFont);
+    void fitAppearance();
     void syncReadingControls();
     void publishResize();
     void openPendingDestination();
@@ -133,7 +135,8 @@ private:
     kobalt::ui::BluetoothIndicator *menuBluetooth;
     kobalt::ReadingPage *page;
     ChapterHeader *header;
-    QFrame *menu, *bottomControls;
+    AppearanceSheet *menu;
+    QFrame *bottomControls;
     kobalt::ui::Panel *topControls;
     kobalt::ToolbarComposition toolbarComposition;
     std::unique_ptr<kobalt::reader::Navigation> navigation;
@@ -205,6 +208,7 @@ private:
         QString chapter;
     };
     QVector<LinkVisit> linkHistory;
+    LinkVisit pendingPassage{};
     quint64 linkEpoch = 0;
     bool linkPending = false, returningFromLink = false;
     bool linksActive() const;
@@ -224,7 +228,7 @@ private:
     void dismissLinks();
     void updateLinkReturn();
     bool openLink(QPoint point);
-    void confirmLink(const QString &target);
+    void goToPassage(const QString &target);
     kobalt::DictionaryPanel *dictionaryPanel = nullptr;
     std::unique_ptr<kobalt::DictionaryService> dictionary;
     QString lookupText;
