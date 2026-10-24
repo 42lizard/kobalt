@@ -1,6 +1,7 @@
 #pragma once
 #include "reading/reading_progress.h"
 #include <QObject>
+#include <QPointer>
 #include <QVariantMap>
 
 namespace kobalt {
@@ -40,11 +41,19 @@ private slots:
         transitioning = processing = false;
         changed = true;
     }
+    void finishUnplug() {
+        if (!processing)
+            endTransition();
+    }
     void markChanged() {
         changed = true;
     }
 
 private:
+    static QPointer<NativeProgress> active;
+#ifndef KOBALT_READER_HARDWARE
+    static bool failNextWrite;
+#endif
     QString book;
     quint64 connectionId;
     bool transitioning = false, processing = false, changed = true;

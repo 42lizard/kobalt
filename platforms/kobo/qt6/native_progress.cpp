@@ -83,11 +83,6 @@ const Api &api() {
     static const Api value;
     return value;
 }
-quint64 nextConnectionId = 0;
-QPointer<NativeProgress> active;
-#ifndef KOBALT_READER_HARDWARE
-bool failNextWrite = false;
-#endif
 ReadingProgress snapshot(const QVariantMap &values) {
     ReadingProgress result;
     result.book = values.value("ContentID").toString();
@@ -110,32 +105,6 @@ ReadingProgress snapshot(const QVariantMap &values) {
     result.valid = !result.book.isEmpty();
     return result;
 }
-}
-NativeProgress::NativeProgress(QString identity) : book(std::move(identity)), connectionId(++nextConnectionId) {
-    active = this;
-#ifndef KOBALT_READER_HARDWARE
-    failNextWrite = false;
-#endif
-    const auto manager = symbol<QObject *(*)()>("_ZN19PlugWorkflowManager14sharedInstanceEv");
-    if (manager) {
-        auto *usb = manager();
-        connect(usb, SIGNAL(aboutToConnect()), this, SLOT(beginTransition()));
-        connect(usb, SIGNAL(aboutToUnplug()), this, SLOT(beginTransition()));
-        connect(usb, SIGNAL(startedProcessing()), this, SLOT(beginProcessing()));
-        connect(usb, SIGNAL(doneProcessing()), this, SLOT(endTransition()));
-    }
-    if (const auto sync = symbol<QObject *(*)()>("_ZN13N3SyncManager14sharedInstanceEv")) {
-        connect(sync(), SIGNAL(finished()), this, SLOT(markChanged()));
-        connect(sync(), SIGNAL(userProfileUpdated()), this, SLOT(markChanged()));
-    }
-}
-NativeProgress::~NativeProgress() {
-    if (active == this)
-        active.clear();
-}
-void NativeProgress::disconnected() {
-    if (active && !active->processing)
-        active->endTransition();
 }
 bool NativeProgress::available() {
     return api().ready();
