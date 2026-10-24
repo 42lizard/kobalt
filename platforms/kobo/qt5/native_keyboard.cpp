@@ -3,6 +3,7 @@
 #include "platforms/kobo/common/native_keyboard.h"
 #include "support/diagnostics.h"
 #include <QApplication>
+#include <QGraphicsEffect>
 #include <QLineEdit>
 #include <QLocale>
 #include <QMetaType>
@@ -63,6 +64,7 @@ bool NativeKeyboard::create() {
         frame->setObjectName("rrSearchKeyboard");
         frame->setPalette(QApplication::palette());
         frame->setStyleSheet("QWidget{background:white;color:black;}");
+        styleNativeKeyboard(frame);
     }
     auto *controller = api().create(frame, script, QLocale());
     if (!controller)
@@ -100,6 +102,8 @@ bool NativeKeyboard::show() {
         frame->raise();
     }
     host->window()->setProperty("reader_keyboard_bounds", QRect(frame->mapTo(host->window(), QPoint()), frame->size()));
+    if (frame->graphicsEffect())
+        frame->graphicsEffect()->update();
     editor->setFocus();
     return true;
 }

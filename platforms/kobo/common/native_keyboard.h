@@ -6,6 +6,9 @@ class QLineEdit;
 class QWidget;
 enum KeyboardScript : int;
 namespace kobalt {
+extern void (*nativeKeyboardRepaint)(QWidget *, bool);
+void styleNativeKeyboard(QWidget *frame);
+
 // Used only after firmwareSupported() accepts Nickel.
 class NativeKeyboard : public QObject {
     Q_OBJECT

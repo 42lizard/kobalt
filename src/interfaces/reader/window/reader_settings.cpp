@@ -504,6 +504,15 @@ void Reader::applyTheme(bool dark) {
     applyColors(this);
     textRefresh(this);
     for (auto *widget : findChildren<QWidget *>()) {
+        // Native controls manage their own source colors and cached icons.
+        bool nativeColors = false;
+        for (auto *ancestor = widget; ancestor && ancestor != this; ancestor = ancestor->parentWidget())
+            if (ancestor->property("reader_native_colors").toBool()) {
+                nativeColors = true;
+                break;
+            }
+        if (nativeColors)
+            continue;
         applyColors(widget);
         textRefresh(widget);
         if (auto *button = qobject_cast<QPushButton *>(widget))
