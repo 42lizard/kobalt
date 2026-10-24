@@ -188,7 +188,7 @@ inline QString textSize(const QString &size) {
     return size == "medium" || size == "large" ? size : QString("small");
 }
 inline int stripHeight(const QString &size) {
-    return px(size == "large" ? 80 : size == "medium" ? 64 : 48);
+    return px(size == "large" ? 56 : size == "medium" ? 52 : 48);
 }
 inline constexpr Px progressHeight{24};
 inline constexpr Px headerSide{28}, headerTextGap{24}, batteryGap{8};

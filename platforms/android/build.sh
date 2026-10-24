@@ -11,7 +11,7 @@ read -r arch sdk_id < <("$engine" image inspect "$image" --format '{{.Architectu
 mkdir -p "$root/build/android-$arch" "$root/build/gradle"
 release=${KOBALT_ANDROID_RELEASE:-0}
 [[ "$release" == 0 || "$release" == 1 ]] || { echo 'KOBALT_ANDROID_RELEASE must be 0 or 1' >&2; exit 2; }
-extra=()
+extra=(--pull=never)
 if [[ "$release" == 1 ]]; then
     for name in KOBALT_RELEASE_VERSION KOBALT_ANDROID_KEYSTORE KOBALT_ANDROID_KEY_ALIAS KOBALT_ANDROID_KEYSTORE_PASSWORD KOBALT_ANDROID_KEY_PASSWORD KOBALT_ANDROID_CERT_SHA256; do
         [[ -n ${!name:-} ]] || { echo "Missing $name" >&2; exit 2; }
@@ -22,7 +22,7 @@ fi
 commit=$(git -C "$root" rev-parse --short HEAD)
 modified=OFF
 if [[ -n $(git -C "$root" status --porcelain) ]]; then modified=ON; fi
-"$engine" run --rm --pull=never --user "$(id -u):$(id -g)" \
+"$engine" run --rm --user "$(id -u):$(id -g)" \
     "${extra[@]}" -e KOBALT_RELEASE_VERSION -e KOBALT_ANDROID_RELEASE="$release" \
     -e KOBALT_ANDROID_KEYSTORE=/signing/release.keystore -e KOBALT_ANDROID_KEY_ALIAS \
     -e KOBALT_ANDROID_KEYSTORE_PASSWORD -e KOBALT_ANDROID_KEY_PASSWORD -e KOBALT_ANDROID_CERT_SHA256 \
@@ -44,7 +44,7 @@ if [[ -n $(git -C "$root" status --porcelain) ]]; then modified=ON; fi
         if [[ $KOBALT_ANDROID_RELEASE == 1 ]]; then
             apk="/work/build/android-$KOBALT_ANDROID_HOST_ARCH/android-build/build/outputs/apk/release/android-build-release-unsigned.apk"
             [[ -f $apk ]] || { echo "Missing unsigned release APK: $apk" >&2; exit 1; }
-            bash /work/platforms/android/sign-apk.sh "$apk" "/work/build/android-$KOBALT_ANDROID_HOST_ARCH/Kobalt-$KOBALT_RELEASE_VERSION-android-arm64.apk"
+            bash /work/platforms/android/sign-apk.sh "$apk" "/work/build/android-$KOBALT_ANDROID_HOST_ARCH/Kobalt-android-arm64.apk"
         fi
         echo "Build and APK: $((SECONDS - started)) seconds"
     ' kobalt-android "$jobs" "$commit" "$modified" "$sdk_id"

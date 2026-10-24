@@ -1729,8 +1729,8 @@ int main(int argc, char **argv) {
                 kobalt::ui::metrics::reading::textPixels("large", true) == 30,
             "Chrome text sizes have the wrong increments");
     require(kobalt::ui::metrics::reading::stripHeight("small") == 48 &&
-                kobalt::ui::metrics::reading::stripHeight("medium") == 64 &&
-                kobalt::ui::metrics::reading::stripHeight("large") == 80,
+                kobalt::ui::metrics::reading::stripHeight("medium") == 52 &&
+                kobalt::ui::metrics::reading::stripHeight("large") == 56,
             "Chrome strips have the wrong heights");
     require(kobalt::ui::metrics::reading::textSize("invalid") == "small" &&
                 kobalt::ui::metrics::reading::textPixels("invalid", false) == 24,

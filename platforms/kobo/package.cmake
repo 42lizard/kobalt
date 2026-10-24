@@ -18,7 +18,7 @@ if(result EQUAL 0)
 endif()
 if(result EQUAL 0)
     file(COPY "${ASSETS}/" DESTINATION "${stage}/zip/.adds/kobalt/assets")
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${CMAKE_CURRENT_BINARY_DIR}/Kobalt-${VERSION}-qt${QT_MAJOR}.zip"
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${CMAKE_CURRENT_BINARY_DIR}/Kobalt-qt${QT_MAJOR}.zip"
         --format=zip .kobo .adds WORKING_DIRECTORY "${stage}/zip" RESULT_VARIABLE result)
 endif()
 file(REMOVE_RECURSE "${stage}")

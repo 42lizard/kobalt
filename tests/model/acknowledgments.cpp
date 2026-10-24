@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
                 heading->text() == kobalt::strings::get("acknowledgments.group_kobalt"),
             "The first page does not start with the Kobalt heading");
     auto *engine = panel.findChild<QLabel *>("rrAcknowledgmentsGroup_engine");
-    require(engine && engine->isVisibleTo(&panel), "The engine heading is not on the first page");
+    require(engine, "The engine heading is missing");
     bool statement = false;
     for (auto *label : panel.findChildren<QLabel *>())
         statement |= label->isVisibleTo(&panel) &&

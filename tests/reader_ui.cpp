@@ -1768,6 +1768,11 @@ private slots:
             int previousIconHeight = 0, smallIconHeight = 0;
             for (const auto &size : {QStringLiteral("small"), QStringLiteral("medium"), QStringLiteral("large")}) {
                 page.chrome.headerSize = page.chrome.footerSize = size;
+                const int step = size == "large" ? 2 : size == "medium" ? 1 : 0;
+                QCOMPARE(page.topHeight(), ui::px(48 + step * 4));
+                QCOMPARE(page.bottomHeight(), ui::px(48 + step * 4));
+                QCOMPARE(page.headerTextPixels(), ui::px(24 + step * 2));
+                QCOMPARE(page.footerTextPixels(), ui::px(26 + step * 2));
                 int iconHeight = 0;
                 int textHeights[2] = {};
                 for (int percent : {9, 50, 100}) {

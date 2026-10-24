@@ -3,7 +3,7 @@
 set -euo pipefail
 version=${KOBALT_RELEASE_VERSION:?}
 [[ ${GITHUB_REF:-} == "refs/tags/$version" ]] || { echo 'Draft releases require the matching tag push' >&2; exit 2; }
-for name in "Kobalt-$version-qt5.zip" "Kobalt-$version-qt6.zip" "Kobalt-$version-android-arm64.apk" "Kobalt-$version-sources.tar.gz"; do
+for name in Kobalt-qt5.zip Kobalt-qt6.zip Kobalt-android-arm64.apk Kobalt-sources.tar.gz; do
     [[ -s build/release/$name ]] || { echo "Missing release artifact: $name" >&2; exit 1; }
 done
 (cd build/release && shasum -a 256 Kobalt-* build-*.json > SHA256SUMS)

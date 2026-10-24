@@ -40,3 +40,7 @@ set(KOBALT_ASSETS "${runtime}" PARENT_SCOPE)
 
 list(TRANSFORM managed PREPEND "${runtime}/")
 set(KOBALT_ASSET_INPUTS "${managed}" PARENT_SCOPE)
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/../platforms/strings.cmake")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/en.strings")
+kobalt_generate_strings("${CMAKE_CURRENT_SOURCE_DIR}/en.strings" "${CMAKE_CURRENT_BINARY_DIR}/../kobalt_strings.inc")

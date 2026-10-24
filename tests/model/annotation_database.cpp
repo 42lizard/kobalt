@@ -588,7 +588,7 @@ void unsupportedDatabaseEncoding() {
             QSqlQuery q(db);
             require(q.exec("PRAGMA encoding='UTF-16le'") && q.exec("CREATE TABLE sentinel(value TEXT)") &&
                     q.exec("INSERT INTO sentinel VALUES('preserve this')") && q.exec("PRAGMA application_id=1262571057") &&
-                    q.exec("PRAGMA user_version=1"), "Cannot initialize UTF-16 fixture");
+                    q.exec("PRAGMA user_version=2"), "Cannot initialize UTF-16 fixture");
         }
         db.close();
     }

@@ -1,0 +1,376 @@
+{
+  "sdk_image": "ghcr.io/nicoverbruggen/kobuild@sha256:013a0509703e6499529a438659ea3a8d0a18d3eedaf24fdfea548840878008b3",
+  "qt_version": "6.11.3",
+  "qtbase_revision": "5a1194b2d368e2d72c230205c464b04a2f23eccd",
+  "qtsensors_revision": "fecaa82dcc63b5703b4e0b88b9da1b929a654531",
+  "ndk_version": "27.2.12479018",
+  "llvm_source": "https://android.googlesource.com/toolchain/llvm-project/+/d8003a456d14a3deb8054cdaa529ffbf02d9b262",
+  "llvm_build_recipe": "https://android.googlesource.com/toolchain/llvm_android/+/31a1d3747b77b10185c0adf03ae6036b474719c7",
+  "native_libraries": [
+    "libQt6Core_arm64-v8a.so",
+    "libQt6Gui_arm64-v8a.so",
+    "libQt6Network_arm64-v8a.so",
+    "libQt6Sensors_arm64-v8a.so",
+    "libQt6Sql_arm64-v8a.so",
+    "libQt6Widgets_arm64-v8a.so",
+    "libc++_shared.so",
+    "libcrypto_3.so",
+    "libkobalt_android_arm64-v8a.so",
+    "libplugins_imageformats_qgif_arm64-v8a.so",
+    "libplugins_imageformats_qico_arm64-v8a.so",
+    "libplugins_imageformats_qjpeg_arm64-v8a.so",
+    "libplugins_networkinformation_qandroidnetworkinformation_arm64-v8a.so",
+    "libplugins_platforms_qoffscreen_arm64-v8a.so",
+    "libplugins_platforms_qtforandroid_arm64-v8a.so",
+    "libplugins_sensors_qtsensors_android_arm64-v8a.so",
+    "libplugins_sensors_qtsensors_generic_arm64-v8a.so",
+    "libplugins_sqldrivers_qsqlite_arm64-v8a.so",
+    "libplugins_styles_qandroidstyle_arm64-v8a.so",
+    "libplugins_tls_qopensslbackend_arm64-v8a.so",
+    "libssl_3.so"
+  ],
+  "notices": {
+    "Qt-Android-Third-Party": "2b8b5386aee33395b90fb0e4f08b18e7799aab471f26affedab530839a25fefa",
+    "Android-Cxx-Runtime": "a3837ba46f3d39bb69f84d03bbdc3764ee9b6c95f7c0dce062cded23e275d939",
+    "SQLite": "592db1199aab67aafe4515db9808b420db122083807c5329b2f061951e79acbe"
+  },
+  "qt_attributions": [
+    {
+      "id": "aglfn",
+      "name": "Adobe Glyph List For New Fonts",
+      "license": "BSD-3-Clause",
+      "files": [
+        "src/gui/text/LICENSE.AGLFN.txt"
+      ]
+    },
+    {
+      "id": "android-compass",
+      "name": "Android getRotationMatrix and getOrientation",
+      "license": "Apache-2.0",
+      "files": [
+        "LICENSES/Apache-2.0.txt"
+      ]
+    },
+    {
+      "id": "blake2",
+      "name": "BLAKE2 (reference implementation)",
+      "license": "CC0-1.0 OR Apache-2.0",
+      "files": [
+        "src/3rdparty/blake2/COPYING"
+      ]
+    },
+    {
+      "id": "doubleconversion",
+      "name": "Efficient Binary-Decimal and Decimal-Binary Conversion Routines for IEEE Doubles",
+      "license": "BSD-3-Clause",
+      "files": [
+        "src/3rdparty/double-conversion/LICENSE"
+      ]
+    },
+    {
+      "id": "easing",
+      "name": "Easing Equations by Robert Penner",
+      "license": "BSD-3-Clause",
+      "files": [
+        "src/3rdparty/easing/LICENSE"
+      ]
+    },
+    {
+      "id": "emoji-segmenter",
+      "name": "Emoji Segmenter",
+      "license": "Apache-2.0",
+      "files": [
+        "LICENSES/Apache-2.0.txt"
+      ]
+    },
+    {
+      "id": "forkfd",
+      "name": "forkfd",
+      "license": "MIT",
+      "files": [
+        "src/3rdparty/forkfd/LICENSE"
+      ]
+    },
+    {
+      "id": "freetype",
+      "name": "Freetype 2",
+      "license": "FTL OR GPL-2.0-only",
+      "files": [
+        "src/3rdparty/freetype/LICENSE.txt"
+      ]
+    },
+    {
+      "id": "freetype-bdf",
+      "name": "Freetype 2 - Bitmap Distribution Format (BDF) support",
+      "license": "MIT",
+      "files": [
+        "src/3rdparty/freetype/BDF-LICENSE.txt"
+      ]
+    },
+    {
+      "id": "freetype-pcf",
+      "name": "Freetype 2 - Portable Compiled Format (PCF) support",
+      "license": "MIT AND MIT-open-group",
+      "files": [
+        "src/3rdparty/freetype/PCF-LICENSE.txt"
+      ]
+    },
+    {
+      "id": "freetype-zlib",
+      "name": "Freetype 2 - zlib",
+      "license": "Zlib",
+      "files": [
+        "src/3rdparty/freetype/ZLIB-LICENSE.txt"
+      ]
+    },
+    {
+      "id": "grayraster",
+      "name": "Anti-aliasing rasterizer from FreeType 2",
+      "license": "FTL OR GPL-2.0-only",
+      "files": [
+        "src/3rdparty/freetype/LICENSE.txt"
+      ]
+    },
+    {
+      "id": "harfbuzz-ng",
+      "name": "HarfBuzz-NG",
+      "license": "MIT",
+      "files": [
+        "src/3rdparty/harfbuzz-ng/COPYING"
+      ]
+    },
+    {
+      "id": "icc-srgb-color-profile",
+      "name": "sRGB color profile icc file",
+      "license": "LicenseRef-ICC-License",
+      "files": [
+        "src/3rdparty/icc/LICENSE.txt"
+      ]
+    },
+    {
+      "id": "libjpeg",
+      "name": "LibJPEG-turbo",
+      "license": "IJG AND BSD-3-Clause",
+      "files": [
+        "src/3rdparty/libjpeg/LICENSE",
+        "src/3rdparty/libjpeg/ijg-license.txt"
+      ]
+    },
+    {
+      "id": "libpng",
+      "name": "LibPNG",
+      "license": "Libpng AND libpng-2.0",
+      "files": [
+        "src/3rdparty/libpng/LICENSE"
+      ]
+    },
+    {
+      "id": "libpsl",
+      "name": "libpsl - C library to handle the Public Suffix List",
+      "license": "BSD-3-Clause",
+      "files": [
+        "src/3rdparty/libpsl/src/LICENSE.chromium"
+      ]
+    },
+    {
+      "id": "md4",
+      "name": "MD4",
+      "license": "CC0-1.0",
+      "files": [
+        "LICENSES/CC0-1.0.txt"
+      ]
+    },
+    {
+      "id": "md4c",
+      "name": "MD4C",
+      "license": "MIT",
+      "files": [
+        "src/3rdparty/md4c/LICENSE.md"
+      ]
+    },
+    {
+      "id": "md5",
+      "name": "MD5",
+      "license": "CC0-1.0",
+      "files": [
+        "LICENSES/CC0-1.0.txt"
+      ]
+    },
+    {
+      "id": "opengl-es2-headers",
+      "name": "OpenGL ES 2 Headers",
+      "license": "MIT",
+      "files": [
+        "src/gui/opengl/LICENSE.KHRONOS.txt"
+      ]
+    },
+    {
+      "id": "opengl-headers",
+      "name": "OpenGL Headers",
+      "license": "MIT",
+      "files": [
+        "src/gui/opengl/LICENSE.KHRONOS.txt"
+      ]
+    },
+    {
+      "id": "pcre2",
+      "name": "PCRE2",
+      "license": "LicenseRef-BSD-3-Clause-with-PCRE2-Binary-Like-Packages-Exception",
+      "files": [
+        "src/3rdparty/pcre2/LICENCE.md"
+      ]
+    },
+    {
+      "id": "pcre2-sljit",
+      "name": "PCRE2 - Stack-less Just-In-Time Compiler",
+      "license": "BSD-2-Clause",
+      "files": [
+        "src/3rdparty/pcre2/LICENSE-SLJIT"
+      ]
+    },
+    {
+      "id": "psl-data",
+      "name": "The Public Suffix List",
+      "license": "MPL-2.0",
+      "files": [
+        "src/3rdparty/libpsl/PSL-LICENSE.txt"
+      ]
+    },
+    {
+      "id": "rfc6234",
+      "name": "Secure Hash Algorithms SHA-384 and SHA-512",
+      "license": "BSD-3-Clause",
+      "files": [
+        "src/3rdparty/rfc6234/LICENSE"
+      ]
+    },
+    {
+      "id": "rhi-miniengine-d3d12-mipmap",
+      "name": "Mipmap generator for D3D12",
+      "license": "MIT",
+      "files": [
+        "src/gui/rhi/LICENSE.MiniEngine.txt"
+      ]
+    },
+    {
+      "id": "sha1",
+      "name": "Secure Hash Algorithm SHA-1",
+      "license": "LicenseRef-SHA1-Public-Domain",
+      "files": [
+        "LICENSES/LicenseRef-SHA1-Public-Domain.txt"
+      ]
+    },
+    {
+      "id": "sha3_endian",
+      "name": "Secure Hash Algorithm SHA-3 - brg_endian",
+      "license": "BSD-2-Clause",
+      "files": [
+        "src/3rdparty/sha3/BRG_ENDIAN_LICENSE"
+      ]
+    },
+    {
+      "id": "sha3_keccak",
+      "name": "Secure Hash Algorithm SHA-3 - Keccak",
+      "license": "CC0-1.0",
+      "files": [
+        "src/3rdparty/sha3/CC0_LICENSE"
+      ]
+    },
+    {
+      "id": "siphash",
+      "name": "SipHash Algorithm",
+      "license": "CC0-1.0",
+      "files": [
+        "LICENSES/CC0-1.0.txt"
+      ]
+    },
+    {
+      "id": "smooth-scaling-algorithm",
+      "name": "Smooth Scaling Algorithm",
+      "license": "BSD-2-Clause AND Imlib2",
+      "files": [
+        "src/gui/painting/LICENSE.QIMAGETRANSFORM.txt"
+      ]
+    },
+    {
+      "id": "sqlite",
+      "name": "SQLite",
+      "license": "blessing",
+      "files": [
+        "LICENSES/blessing.txt"
+      ]
+    },
+    {
+      "id": "tika-mimetypes",
+      "name": "Apache Tika MimeType Definitions",
+      "license": "Apache-2.0",
+      "files": [
+        "LICENSES/Apache-2.0.txt"
+      ]
+    },
+    {
+      "id": "tinycbor",
+      "name": "TinyCBOR",
+      "license": "MIT",
+      "files": [
+        "src/3rdparty/tinycbor/LICENSE"
+      ]
+    },
+    {
+      "id": "tlexpected",
+      "name": "tl::expected",
+      "license": "CC0-1.0",
+      "files": [
+        "LICENSES/CC0-1.0.txt"
+      ]
+    },
+    {
+      "id": "unicode-character-database",
+      "name": "Unicode Character Database (UCD)",
+      "license": "Unicode-3.0",
+      "files": [
+        "LICENSES/Unicode-3.0.txt"
+      ]
+    },
+    {
+      "id": "unicode-cldr",
+      "name": "Unicode Common Locale Data Repository (CLDR)",
+      "license": "Unicode-3.0",
+      "files": [
+        "LICENSES/Unicode-3.0.txt"
+      ]
+    },
+    {
+      "id": "vulkan-xml-spec",
+      "name": "Vulkan API Registry",
+      "license": "Apache-2.0 OR MIT",
+      "files": [
+        "src/gui/vulkan/LICENSE.txt"
+      ]
+    },
+    {
+      "id": "vulkanmemoryallocator",
+      "name": "Vulkan Memory Allocator",
+      "license": "MIT",
+      "files": [
+        "src/3rdparty/VulkanMemoryAllocator/LICENSE.txt"
+      ]
+    },
+    {
+      "id": "webgradients",
+      "name": "WebGradients",
+      "license": "MIT",
+      "files": [
+        "util/gradientgen/LICENSE.WEBGRADIENTS.txt"
+      ]
+    },
+    {
+      "id": "xserverhelper",
+      "name": "X Server helper",
+      "license": "X11 AND HPND",
+      "files": [
+        "src/gui/painting/LICENSE.XCONSORTIUM.txt"
+      ]
+    }
+  ]
+}

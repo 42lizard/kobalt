@@ -13,13 +13,14 @@ if [[ $1 == android ]]; then
     export KOBALT_ANDROID_RELEASE=1
     bash platforms/android/build.sh
     arch=$(docker image inspect "$image" --format '{{.Architecture}}')
-    package="build/android-$arch/Kobalt-$version-android-arm64.apk"
+    package="build/android-$arch/Kobalt-android-arm64.apk"
+    bash platforms/android/check-notices.sh "$package"
     docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp --volume "$root:/work" --workdir /work "$image" \
         bash platforms/android/test-signing.sh "build/android-$arch/android-build/build/outputs/apk/release/android-build-release-unsigned.apk"
     cp "$package" "$package.signing.txt" build/release/
 else
     bash platforms/kobo/build.sh "$1"
-    package="build/kobo-$1/Kobalt-$version-$1.zip"
+    package="build/kobo-$1/Kobalt-$1.zip"
     cp "$package" build/release/
 fi
 jq -n --arg version "$version" --arg target "$1" --arg commit "$(git rev-parse HEAD)" \

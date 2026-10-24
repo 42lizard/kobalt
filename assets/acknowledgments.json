@@ -23,6 +23,41 @@
     ]
   },
   {
+    "group": "kobalt",
+    "name": "Qt",
+    "version": "Android 6.11.3; device-supplied on Kobo",
+    "description": "Application controls, graphics, networking, sensors and database access. Copyright The Qt Company Ltd. and other contributors. Android bundles Qt and its third-party code. Open-source license texts are included below; Qt also offers commercial licenses.",
+    "license": "LGPL v3 / GPL v3",
+    "url": "https://www.qt.io",
+    "notices": [
+      "Qt-LGPL-3",
+      "Qt-GPL-3",
+      "Qt-Android-Third-Party"
+    ]
+  },
+  {
+    "group": "kobalt",
+    "name": "Android C++ runtime",
+    "version": "NDK 27.2.12479018",
+    "description": "LLVM libc++, libc++abi and libunwind used by the Android application. Copyright the LLVM Project contributors.",
+    "license": "Apache License 2.0 with LLVM exceptions and legacy notices",
+    "url": "https://libcxx.llvm.org/",
+    "notices": [
+      "Android-Cxx-Runtime"
+    ]
+  },
+  {
+    "group": "engine",
+    "name": "SQLite",
+    "version": "Android Qt plugin 3.53.4; device or SDK library on other targets",
+    "description": "Persistent reading data, bookmarks, annotations and the standalone library. The SQLite authors dedicate their source code to the public domain.",
+    "license": "Public domain",
+    "url": "https://www.sqlite.org/",
+    "notices": [
+      "SQLite"
+    ]
+  },
+  {
     "group": "engine",
     "name": "CREngine",
     "version": "KOReader fork, b05cf00791d2",
@@ -204,18 +239,6 @@
     "url": "https://github.com/pgaskin/NickelHook",
     "notices": [
       "NickelHook"
-    ]
-  },
-  {
-    "group": "nickel",
-    "name": "Qt",
-    "version": "Device-supplied libraries",
-    "description": "Application controls, graphics, networking and sensors. Copyright The Qt Company Ltd. and other contributors. Open-source license texts are included below; Qt also offers commercial licenses.",
-    "license": "LGPL v3 / GPL v3",
-    "url": "https://www.qt.io",
-    "notices": [
-      "Qt-LGPL-3",
-      "Qt-GPL-3"
     ]
   },
   {

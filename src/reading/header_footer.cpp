@@ -62,6 +62,7 @@ Layout presetLayout(Preset preset) {
         layout.slotFields = {Field::Time,             Field::Chapter, Field::Nothing,
                              Field::ChapterPagesLeft, Field::Nothing, Field::BookPercent};
         layout.uppercase.fill(false);
+        layout.uppercase[1] = true;
         layout.progressBar = false;
         break;
     case Preset::AlternativeA:

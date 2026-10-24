@@ -13,7 +13,7 @@ struct Entry {
 };
 inline const Entry *entries(int *count) {
     static const Entry values[] = {
-#include "kobalt_strings.inc"
+#include <kobalt_strings.inc>
     };
     *count = sizeof(values) / sizeof(values[0]);
     return values;

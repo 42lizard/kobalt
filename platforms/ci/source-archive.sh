@@ -25,4 +25,4 @@ while IFS=$'\t' read -r name url checksum; do
 done < <(jq -r 'to_entries[] | [.key,.value.url,.value.sha256] | @tsv' "$bundle/upstream/manifest.json")
 cp platforms/sdk-image.sh "$bundle/SDK.txt"
 printf '%s\n' "Application commit: $(git rev-parse HEAD)" "Version: $version" > "$bundle/SOURCE.txt"
-(cd "$stage" && tar -czf "$root/build/release/Kobalt-$version-sources.tar.gz" "Kobalt-$version-sources")
+(cd "$stage" && tar -czf "$root/build/release/Kobalt-sources.tar.gz" "Kobalt-$version-sources")

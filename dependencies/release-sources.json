@@ -6,5 +6,13 @@
   "libron": {
     "url": "https://codeload.github.com/nicoverbruggen/libron/tar.gz/refs/tags/v0.32",
     "sha256": "6f8f4f95271a7d4bf1ea8d6141c72a1ce9c53e84c9568cf4b73cbd3862e60afd"
+  },
+  "qtbase-android": {
+    "url": "https://codeload.github.com/qt/qtbase/tar.gz/5a1194b2d368e2d72c230205c464b04a2f23eccd",
+    "sha256": "eb79a9425ca4818e0cb993d30dd3c43821a2e42a643f66d167fd32350373c9e4"
+  },
+  "qtsensors-android": {
+    "url": "https://codeload.github.com/qt/qtsensors/tar.gz/fecaa82dcc63b5703b4e0b88b9da1b929a654531",
+    "sha256": "ed8b631acad5a403c7a477af528e04caaaa1314c7881a472729a60546ccfbeb0"
   }
 }

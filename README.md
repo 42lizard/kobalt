@@ -2,7 +2,7 @@
   <img src="assets/kobalt.svg" alt="Kobalt" width="320" height="208">
 </p>
 
-**Kobalt is an experimental EPUB reader with a CREngine renderer and a Qt reading interface, with a focus on speed and an excellent user experience.**
+**Kobalt is an alternative EPUB reader with a CREngine renderer and a Qt reading interface, with a focus on speed and an excellent user experience.**
 
 The reader app is its own thing, and as such is planned to be ported to various platforms. On Android, it runs as a standalone app, and on Kobo it runs somewhat integrated into Kobo's own OS.
 
@@ -17,11 +17,15 @@ Protected books, previews, PDFs and other unsupported formats show “Opening in
 
 ### What about the other versions?
 
-The source code is included, but the Android and Mac versions are not ready for general release yet.
+The Android version is now available for testing, as of beta 4. You can download the APK file and install it manually. For the other versions, the source code is included in this repository. The Mac version is not ready for general release yet, it's for local testing.
 
-- The Android version opens unprotected EPUBs through the document picker or Open with. It keeps reading progress and bookmarks locally. See [Android setup, building, signing and limitations](doc/building.md#android) for more information.
+#### Android
 
-- The macOS development app uses the same reader in a resizable window for testing books. For more information, take a look at [the documentation](doc/building.md#mac).
+The Android version has a Library feature that can scan a directory for books, but it also opens unprotected EPUBs through the document picker or Open with. It keeps reading progress and bookmarks locally. See [Android setup, building, signing and limitations](doc/building.md#android) for more information.
+
+#### macOS
+
+The macOS development app uses the same reader in a resizable window for testing books. For more information, take a look at [the documentation](doc/building.md#mac).
 
 ## Compatibility and installation
 
@@ -32,7 +36,7 @@ The source code is included, but the Android and Mac versions are not ready for 
 
 #### Automatic installation via Chrome
 
-The easiest way is via [the website](https://kobalt.nicoverbruggen.be). Click on **Install or remove Kobalt** and you should follow the steps on the website. The website will check if your device is compatible.
+The easiest way is via [the website](https://kobalt.nicoverbruggen.be). Click on **Install or remove on Kobo** and you should follow the steps on the website. The website will check if your device is compatible.
 
 #### Manual installation
 
@@ -40,10 +44,10 @@ There are two installation packages: one for the firmware 4.x line, and one for 
 
 | Package | Firmware
 |---|---|
-| `Kobalt-qt5.zip` | 4.38.21908 and later 4.x | Stable Kobo release (4.38 or 4.45)
-| `Kobalt-qt6.zip` | 5.18 and later 5.x, including 6.0
+| `Kobalt-qt5.zip` | 4.38.21908 and later 4.x (tested up to 4.46)
+| `Kobalt-qt6.zip` | 5.18 and later 5.x, and 6.x (tested up to 6.0.2)
 
-_(*) Due to how software updates work on Kobo OS 6, you may need a future version of [NickelModManager](https://github.com/nicoverbruggen/NickelModManager) to avoid needing to reinstall mods. The first releases may not be available for Qt 6 (Kobo OS 6) yet._
+_(*) Due to how software updates work on Kobo OS 6, you may need a future version of [NickelModManager](https://github.com/nicoverbruggen/NickelModManager) to avoid needing to reinstall mods._
 
 1. Connect your Kobo over USB and extract the ZIP package on your computer. Show hidden files so you can see `.adds` and `.kobo`.
 2. Copy the complete `.adds` folder to the root of the Kobo drive. Merge it with the existing folder and replace matching package files. Keep other apps, settings and reading data.
@@ -51,6 +55,16 @@ _(*) Due to how software updates work on Kobo OS 6, you may need a future versio
 4. Eject the Kobo safely, disconnect USB and let it install the update.
 
 Copy every file supplied in the ZIP, keeping its folder path. Copy `.adds` before `.kobo` so the assets are present when the update starts. Do not copy only the `.tgz` file or unpack it yourself. Kobalt creates its support files and installation marker on first startup.
+
+### Removing Kobalt from Kobo devices
+
+#### Automatic removal via Chrome
+
+Like the installation, the easiest way is via [the website](https://kobalt.nicoverbruggen.be). Click on **Install or remove on Kobo** and you should follow the steps on the website. Removal is the easiest this way.
+
+#### Manual removal
+
+You can also connect your device via USB and remove the uninstallation file (`.adds/kobalt/uninstall`) which will cause Kobalt to remove itself but retain your configuration files, annotations and more. If you would like to remove _everything_, remove `.adds/kobalt` in its entirety. After removing either of these, make sure to safely eject your device.
 
 ## Issues and contributions
 

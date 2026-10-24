@@ -132,10 +132,10 @@ else()
     qt6_add_resources(compiled_resources "${CMAKE_CURRENT_BINARY_DIR}/notices.qrc")
 endif()
 target_sources(kobalt PRIVATE ${compiled_resources})
-set(package_file "${CMAKE_CURRENT_BINARY_DIR}/Kobalt-${KOBALT_VERSION}-qt${KOBALT_QT_MAJOR}.zip")
+set(package_file "${CMAKE_CURRENT_BINARY_DIR}/Kobalt-qt${KOBALT_QT_MAJOR}.zip")
 add_custom_command(OUTPUT "${package_file}"
     COMMAND "${CMAKE_COMMAND}" "-DLIBRARY=$<TARGET_FILE:kobalt>" "-DSTRIP=${CMAKE_STRIP}"
-        "-DASSETS=${KOBALT_ASSETS}" "-DQT_MAJOR=${KOBALT_QT_MAJOR}" "-DVERSION=${KOBALT_VERSION}"
+        "-DASSETS=${KOBALT_ASSETS}" "-DQT_MAJOR=${KOBALT_QT_MAJOR}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/package.cmake"
     DEPENDS kobalt ${asset_inputs} "${CMAKE_CURRENT_SOURCE_DIR}/package.cmake" VERBATIM)
 add_custom_target(package DEPENDS "${package_file}")

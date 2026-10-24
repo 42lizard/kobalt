@@ -7,6 +7,7 @@ for script in platforms/ci/*.sh platforms/android/*.sh platforms/kobo/*.sh platf
 mkdir -p build
 scratch=$(mktemp -d "$root/build/release-check.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
+cmake "-DTEST_TMP_ROOT=$scratch" -P platforms/strings-test.cmake
 cat > "$scratch/version.cmake" <<'CMAKE'
 include("$ENV{KOBALT_TEST_ROOT}/platforms/release-version.cmake")
 kobalt_release_version(actual v1.0-beta.4)
@@ -26,7 +27,51 @@ jq -es '([.[0]|keys[]] + [.[1]|keys[]]) as $keys | ($keys|length)==($keys|unique
 # Fail closed before consulting tools or producing an APK when secrets are absent.
 if env -u KOBALT_ANDROID_KEYSTORE bash platforms/android/sign-apk.sh missing.apk "$scratch/output.apk" > "$scratch/error" 2>&1; then echo 'Signing accepted a missing key' >&2; exit 1; fi
 [[ ! -e "$scratch/output.apk" ]]
+# The debug launcher must also work with macOS's Bash 3 and no signing mounts.
+cat > "$scratch/container-engine" <<'SH'
+#!/bin/bash
+if [[ $1 == image && $2 == inspect ]]; then
+    printf 'arm64 fixture-sdk\n'
+elif [[ $1 != run ]]; then
+    exit 1
+fi
+SH
+chmod +x "$scratch/container-engine"
+CONTAINER_ENGINE="$scratch/container-engine" KOBALT_ANDROID_IMAGE=fixture-sdk KOBALT_ANDROID_RELEASE=0 \
+    bash platforms/android/build.sh
+# Release filenames stay fixed while the tag selects the release and version.
+mkdir -p "$scratch/bin" "$scratch/draft/build/release"
+cat > "$scratch/bin/gh" <<'SH'
+#!/bin/bash
+printf '%s\n' "$*" >> "$KOBALT_TEST_GH_LOG"
+if [[ $1 == release && $2 == view ]]; then printf 'true\n'; fi
+SH
+chmod +x "$scratch/bin/gh"
+for name in Kobalt-qt5.zip Kobalt-qt6.zip Kobalt-android-arm64.apk Kobalt-sources.tar.gz build-qt5.json; do
+    printf 'fixture\n' > "$scratch/draft/build/release/$name"
+done
+for version in v1.0-beta.4 v1.2.3; do
+    (
+        cd "$scratch/draft"
+        PATH="$scratch/bin:$PATH" KOBALT_TEST_GH_LOG="$scratch/gh.log" \
+            KOBALT_RELEASE_VERSION="$version" GITHUB_REF="refs/tags/$version" \
+            bash "$root/platforms/ci/draft-release.sh"
+    )
+    grep -F "release upload $version build/release/Kobalt-android-arm64.apk build/release/Kobalt-qt5.zip build/release/Kobalt-qt6.zip build/release/Kobalt-sources.tar.gz" "$scratch/gh.log" > /dev/null
+done
 echo 'PASS: release helper syntax, versions, source pins and missing signing key'
+# Changes to bundled native libraries require a fresh notice audit.
+mkdir -p "$scratch/apk/lib/arm64-v8a"
+while IFS= read -r library; do
+    printf 'fixture\n' > "$scratch/apk/lib/arm64-v8a/$library"
+done < <(jq -r '.native_libraries[]' dependencies/android-runtime.json)
+(cd "$scratch/apk" && cmake -E tar cf "$scratch/notices.apk" --format=zip lib)
+bash platforms/android/check-notices.sh "$scratch/notices.apk"
+rm "$scratch/apk/lib/arm64-v8a/libc++_shared.so"
+(cd "$scratch/apk" && cmake -E tar cf "$scratch/missing-runtime.apk" --format=zip lib)
+if bash platforms/android/check-notices.sh "$scratch/missing-runtime.apk" > "$scratch/error" 2>&1; then
+    echo 'Notice check accepted a changed APK runtime' >&2; exit 1
+fi
 # Verify that the staged runtime manifest receives the tag version.
 mkdir "$scratch/assets-project"
 cat > "$scratch/assets-project/CMakeLists.txt" <<'CMAKE'

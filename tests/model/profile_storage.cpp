@@ -1,7 +1,6 @@
 #include "storage/reader_storage.h"
 #include "storage/annotation_database.h"
 #include "storage/bookmark_store.h"
-#include "storage/highlight_store.h"
 #ifndef KOBALT_TEST_NO_LIBRARY
 #include "library/library_index.h"
 #endif
@@ -42,36 +41,7 @@ QVariant rawValue(const QString &directory, const QString &sql) {
     db.close(); db = QSqlDatabase(); QSqlDatabase::removeDatabase(name);
     return result;
 }
-void versionOne(const QString &directory, const QVector<QPair<QString, QJsonObject>> &documents) {
-    require(AnnotationDatabase::transaction(directory, [&](QSqlDatabase &db) {
-        QSqlQuery q(db);
-        if (!q.exec("DROP TABLE book_state") || !q.exec("DROP TABLE profile_state") ||
-            !q.exec("CREATE TABLE records(name TEXT PRIMARY KEY,format INTEGER NOT NULL)") ||
-            !q.exec("CREATE TABLE record_fields(record TEXT NOT NULL,key TEXT NOT NULL,type INTEGER NOT NULL,value BLOB NOT NULL,"
-                    "PRIMARY KEY(record,key),FOREIGN KEY(record) REFERENCES records(name) ON DELETE CASCADE)")) return false;
-        for (const auto &document : documents) {
-            if (!q.prepare("INSERT INTO records VALUES(?,1)")) return false;
-            q.addBindValue(document.first);
-            if (!q.exec()) return false;
-            for (auto it = document.second.begin(); it != document.second.end(); ++it) {
-                const auto value = it.value();
-                QByteArray bytes;
-                switch (value.type()) {
-                case QJsonValue::Bool: bytes = value.toBool() ? "1" : "0"; break;
-                case QJsonValue::Double: bytes = QByteArray::number(value.toDouble(), 'g', 17); break;
-                case QJsonValue::String: bytes = value.toString().toUtf8(); break;
-                case QJsonValue::Array: bytes = QJsonDocument(value.toArray()).toJson(QJsonDocument::Compact); break;
-                case QJsonValue::Object: bytes = QJsonDocument(value.toObject()).toJson(QJsonDocument::Compact); break;
-                default: bytes = ""; break;
-                }
-                if (!q.prepare("INSERT INTO record_fields VALUES(?,?,?,?)")) return false;
-                q.addBindValue(document.first); q.addBindValue(it.key()); q.addBindValue(int(value.type())); q.addBindValue(bytes);
-                if (!q.exec()) return false;
-            }
-        }
-        return q.exec("PRAGMA user_version=1");
-    }), "Create authentic schema-1 field records");
-}
+
 
 }
 int main(int argc, char **argv) {
@@ -105,8 +75,7 @@ int main(int argc, char **argv) {
     edited["position"] = QStringLiteral("/body/p[51]");
     require(storage::writeBookState(paths, identity, edited), "Update one JSON checkpoint");
     require(rawValue(root.path(), "SELECT count(*) FROM book_state").toInt() == 1 &&
-            rawValue(root.path(), "SELECT revision FROM book_state").toInt() == 2 &&
-            rawValue(root.path(), "SELECT count(*) FROM sqlite_master WHERE name IN ('records','record_fields')").toInt() == 0,
+            rawValue(root.path(), "SELECT revision FROM book_state").toInt() == 2,
             "Book state is not one JSON row per book");
     write(paths.bookState(identity), original);
     require(storage::readBookState(paths, identity).object == edited, "Stale JSON replaced a newer checkpoint");
@@ -178,7 +147,6 @@ int main(int argc, char **argv) {
             bytes(retry.directory + "/diagnostics/events.jsonl") == "New session\n" &&
             bytes(retry.directory + "/migration-backup/diagnostics/events.jsonl") == "Previous session\n",
             "Startup log prevented cleanup or replaced previous diagnostics");
-    QTemporaryDir upgrade;
     QTemporaryDir beta3;
     const storage::Paths oldPaths{beta3.path()};
     qputenv("KOBALT_ANNOTATIONS_SQLITE", "0");
@@ -218,56 +186,17 @@ int main(int argc, char **argv) {
     BookmarkStore changed(editionPaths.annotations(), editedIdentity, QByteArray(64, 'c'), "Changed book", editionPaths.database());
     require(changed.load() && changed.bookmarks().size() == 1 && changed.bookmarks().first().excerpt == "Newest saved edition",
             "Bulk migration chose an edition by traversal order instead of source chronology");
-    BookmarkStore marks(upgrade.path() + "/annotations", "beta3", {}, "Invented title", upgrade.path() + "/kobalt.sqlite");
-    require(marks.load(), "Create owned database");
-    marks.setBookmarks({mark});
-    require(marks.save(), "Populate schema upgrade bookmarks");
-    HighlightStore highlights(upgrade.path() + "/annotations", "beta3", {}, "Invented title", upgrade.path() + "/kobalt.sqlite");
-    require(highlights.load(), "Load schema upgrade highlights");
-    Highlight highlight;
-    highlight.id = "kept-note"; highlight.start = "/body/p[1]/text().0"; highlight.end = "/body/p[1]/text().8";
-    highlight.text = "An invented passage"; highlight.chapter = "First chapter"; highlight.note = "A note\nwith two lines";
-    highlight.created = QDateTime::currentDateTimeUtc(); highlight.style = "dotted"; highlight.color = "blue";
-    highlights.setHighlights({highlight});
-    require(highlights.save(), "Populate schema upgrade highlights");
-    versionOne(upgrade.path(), {{"book:" + identity, state},
-        {"reading-speed", qt::object({{"words", 700}, {"milliseconds", 120000}})},
-        {"last-book", qt::object({{"path", "/invented/recent.epub"}, {"title", "An invented recent book"}})}});
-    require(storage::readBookState(storage::Paths{upgrade.path()}, identity).object == state &&
-            rawValue(upgrade.path(), "PRAGMA user_version").toInt() == 2 &&
-            storage::readRecord(upgrade.path(), "reading-speed", {}).object.value("words") == 700 &&
-            storage::readRecord(upgrade.path(), "last-book", {}).object.value("path") == "/invented/recent.epub" &&
-            marks.load() && marks.bookmarks().size() == 1 && highlights.load() &&
-            highlights.highlights().first().note == highlight.note,
-            "Schema-1 JSON conversion lost state, profile records or annotations");
-    QTemporaryDir rejectedUpgrade;
-    auto unsupportedState = state; unsupportedState["schema"] = 99;
-    versionOne(rejectedUpgrade.path(), {{"book:" + identity, state}, {"future-record", unsupportedState}});
-    require(storage::readBookState(storage::Paths{rejectedUpgrade.path()}, identity).status == ReadStatus::DatabaseError &&
-            rawValue(rejectedUpgrade.path(), "PRAGMA user_version").toInt() == 1 &&
-            rawValue(rejectedUpgrade.path(), "SELECT count(*) FROM records").toInt() == 2 &&
-            rawValue(rejectedUpgrade.path(), "SELECT count(*) FROM sqlite_master WHERE name IN ('book_state','profile_state')").toInt() == 0,
-            "Rejected schema-1 upgrade partially changed the database");
-
-    require(AnnotationDatabase::transaction(upgrade.path(), [&](QSqlDatabase &db) {
-        QSqlQuery query(db);
-        for (const auto &table : {"book_state", "profile_state", "imports", "library_books", "library_folders"})
-            if (!query.exec(QString("DROP TABLE %1").arg(table))) return false;
-        return true;
-    }), "Create annotations-only prototype fixture");
-    // The annotations-only prototype predates the profile tables and used schema 1.
-    { auto db = QSqlDatabase::addDatabase("QSQLITE", "prototype-version"); db.setDatabaseName(upgrade.path() + "/kobalt.sqlite");
-      require(db.open(), "Open prototype"); { QSqlQuery q(db); require(q.exec("PRAGMA user_version=1"), "Set prototype version"); }
-      db.close(); db = QSqlDatabase(); QSqlDatabase::removeDatabase("prototype-version"); }
-    require(storage::readBookState(storage::Paths{upgrade.path()}, "new").status == ReadStatus::Missing && marks.load() &&
-            marks.bookmarks().size() == 1 && marks.bookmarks().first().position == mark.position &&
-            highlights.load() && highlights.highlights().size() == 1 && highlights.highlights().first().note == highlight.note &&
-            highlights.highlights().first().style == highlight.style && highlights.highlights().first().color == highlight.color,
-            "Prototype completion failed or removed annotations");
-    execute(upgrade.path(), "DROP TABLE library_folders");
-    const auto partialBytes = bytes(upgrade.path() + "/kobalt.sqlite");
-    require(storage::readBookState(storage::Paths{upgrade.path()}, "new").status == ReadStatus::DatabaseError &&
-            bytes(upgrade.path() + "/kobalt.sqlite") == partialBytes,
+    QTemporaryDir unsupportedDatabase;
+    execute(unsupportedDatabase.path(), "PRAGMA user_version=1");
+    const auto unsupportedBytes = bytes(unsupportedDatabase.path() + "/kobalt.sqlite");
+    require(storage::readBookState(storage::Paths{unsupportedDatabase.path()}, "new").status == ReadStatus::DatabaseError &&
+            bytes(unsupportedDatabase.path() + "/kobalt.sqlite") == unsupportedBytes,
+            "Unsupported SQLite schema was changed");
+    QTemporaryDir partialDatabase;
+    execute(partialDatabase.path(), "DROP TABLE library_folders");
+    const auto partialBytes = bytes(partialDatabase.path() + "/kobalt.sqlite");
+    require(storage::readBookState(storage::Paths{partialDatabase.path()}, "new").status == ReadStatus::DatabaseError &&
+            bytes(partialDatabase.path() + "/kobalt.sqlite") == partialBytes,
             "Partial schema was repaired or replaced");
     QTemporaryDir futureDatabase;
     execute(futureDatabase.path(), "PRAGMA user_version=3");
@@ -292,9 +221,6 @@ int main(int argc, char **argv) {
     require(imported.loadDatabase(catalogue.path()) && imported.books.value(book.key).json() == book.json() &&
             imported.settings.sort == library::Sort::Author && imported.settings.hideFinished &&
             !QFile::exists(catalogue.path() + "/library.json"), "Catalogue import changed books or preferences");
-    versionOne(catalogue.path(), {{"library", {}}});
-    require(imported.loadDatabase(catalogue.path()) && imported.books.value(book.key).json() == book.json(),
-            "Schema-1 catalogue migration lost the Library");
     imported.books[book.key].percent = 81;
     require(imported.saveDatabase(catalogue.path()), "Save catalogue update");
     library::Index reopened;
