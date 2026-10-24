@@ -478,7 +478,7 @@
 "reader.reading" = "Reading";
 "reader.recommended_fonts" = "Recommended Fonts";
 "reader.refresh_the_screen" = "Refresh the screen";
-"reader.bookmarks" = "Bookmarks";
+"reader.bookmarks" = "Annotations & Bookmarks";
 "reader.restore_appearance_defaults" = "Restore appearance defaults";
 "reader.restore_appearance_defaults_prompt" = "Restore appearance defaults?";
 "reader.restore_defaults" = "Restore defaults";
@@ -927,3 +927,15 @@
 "settings.column_spacing_description" = "Gap between columns as a multiple of the current text size. Applies to all books.";
 "settings.landscape_columns" = "Use two columns in landscape";
 "settings.landscape_columns_description" = "Portrait uses one column. Applies to all books.";
+
+"annotations.mode" = "Annotation mode";
+"annotations.summary_one" = "1 annotation";
+"error.saved_data_unavailable" = "Saved data could not be loaded. The original files have been preserved.";
+"marks.sort_button" = "Sort";
+"marks.sort_newest" = "Newest first";
+"marks.sort_newest_description" = "Recently created items come first.";
+"marks.sort_oldest" = "Oldest first";
+"marks.sort_oldest_description" = "Items created longest ago come first.";
+"marks.sort_position" = "Book order";
+"marks.sort_position_description" = "Earlier passages in the book come first.";
+"marks.sort_title" = "Sort by";

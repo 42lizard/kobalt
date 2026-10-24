@@ -51,7 +51,7 @@ The additional native integration groups reuse the same production objects. Run 
 
 Each platform uses `assets/CMakeLists.txt` to verify and stage the selected files under its own output directory. CMake tracks these inputs and removes retired files from the staging directory. The Mac app copies the runtime bundle into its Resources directory; Kobo packages it under `.adds/kobalt/assets`; Android embeds it as Qt resources. Artwork and notices are compiled from root `assets/`. Source metadata and unused font files are not copied into the runtime bundle.
 
-CMake generates the English string table from `assets/en.strings`. Ordinary builds reconfigure when that file changes, so edits appear without updating a separate snapshot. Icon geometry and the dictionary catalogue still use checked-in C++ snapshots. Their maintenance workflow has not been restored.
+CMake generates the English string table from `assets/en.strings` and rejects missing keys in literal `strings::get` and `strings::key` calls under `src/`. Ordinary builds reconfigure when that file changes, so edits appear without updating a separate snapshot. Icon geometry and the dictionary catalogue still use checked-in C++ snapshots. Their maintenance workflow has not been restored.
 
 ## Kobo
 
