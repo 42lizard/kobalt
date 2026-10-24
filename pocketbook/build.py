@@ -33,6 +33,8 @@ if args.host:
 if args.host or args.arm_test:
     import runpy
     runpy.run_path(str(ROOT / 'tests/fixtures/reader_fixture.py'))['book'](output / 'fixture.epub')
+    runpy.run_path(str(ROOT / 'tests/fixtures/dictionary_fixture.py'))['stardict'](
+        output / 'dictionary-fixture.zip', output / 'fixture.epub')
 options = json.loads((output / 'engine-options.json').read_text())
 version = release_version()
 manifest = output / 'assets/install/.adds/kobalt/assets/manifest.json'

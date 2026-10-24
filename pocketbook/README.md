@@ -106,7 +106,17 @@ library or desktop file picker.
 Positions, bookmarks and preferences remain in `system/kobalt/config`. Logs are
 in `system/kobalt/app.log` and `system/kobalt/diagnostics/`. Native progress and
 annotation interoperability, Readest sync, automatic sensor rotation, frontlight
-and dictionary integration are not implemented. See [reader behavior](../docs/reader.md#experimental-pocketbook-host).
+and native PocketBook dictionary integration are not implemented. See [reader behavior](../docs/reader.md#experimental-pocketbook-host).
+
+Kobalt's own dictionary catalogue is available under **Settings → Dictionaries**.
+Connect the reader to Wi-Fi through the PocketBook system, then use **Get** to
+install a dictionary. Downloads are checked against the pinned checksum;
+installed dictionaries work offline. Hold a word for its definition and use the
+lookup selector to change dictionaries. The choice is saved per book. Use
+**Remove** in the same settings tab to delete an installed dictionary.
+Dictionary files and their attribution live in `system/kobalt/config/dictionaries`.
+PocketBook's native dictionaries are not imported or changed. Device acceptance
+of downloads, touch interaction and e-ink refresh is still pending.
 
 To remove Kobalt, delete its two launchers and its `bin`, `assets` and `notices`
 directories. Keep `config` to retain reading state. Remove only `kobalt.app` from

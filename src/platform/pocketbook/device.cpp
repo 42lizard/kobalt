@@ -107,7 +107,7 @@ private:
 ReaderHostServices readerServices() {
     auto services = desktop::readerServices();
     services.desktopUi = false;
-    services.downloadableDictionaries = false;
+    services.downloadableDictionaries = true;
     services.browserAvailable = [] {
         return false;
     };

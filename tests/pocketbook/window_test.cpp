@@ -1,16 +1,28 @@
 #include "assets/assets.h"
 #include "assets/bundled_fonts.h"
+#include "dictionaries/manager.h"
+#include "interfaces/reader/settings/settings_panel.h"
+#include "interfaces/reader/ui/controls/paged_text.h"
 #include "interfaces/reader/ui/style/fonts.h"
+#include "interfaces/reader/ui/style/scale.h"
+#include "interfaces/reader/views/reading_page.h"
 #include "platform/pocketbook/application.h"
 #include "platform/pocketbook/window.h"
+#include "reading/reading_density.h"
+#include "storage/reader_storage.h"
+#include "support/strings.h"
 
 #include <QApplication>
+#include <QCryptographicHash>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFontDatabase>
 #include <QImage>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScopeGuard>
 #include <QSignalSpy>
+#include <QSslSocket>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -19,6 +31,188 @@ using namespace kobalt;
 class PocketBookTest : public QObject {
     Q_OBJECT
 private slots:
+    void downloadedDictionariesSurviveReopening_data() {
+        QTest::addColumn<bool>("dark");
+        QTest::addColumn<int>("ppi");
+        QTest::newRow("light-300") << false << 300;
+        QTest::newRow("dark-300") << true << 300;
+        QTest::newRow("light-212") << false << 212;
+        QTest::newRow("dark-212") << true << 212;
+    }
+
+    void downloadedDictionariesSurviveReopening() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        QVERIFY2(QSslSocket::supportsSsl(), "Dictionary downloads require a working TLS backend");
+        QTemporaryDir profile;
+        QVERIFY(profile.isValid());
+        storage::Paths paths{profile.path()};
+        QVERIFY(storage::writeJson(paths.preferences(), {{"dark_mode", dark}}));
+        QFile archive(QStringLiteral(KOBALT_DICTIONARY_FIXTURE));
+        QVERIFY(archive.open(QIODevice::ReadOnly));
+        const auto contents = archive.readAll();
+        for (auto entry : DictionaryManager::catalog()) {
+            if (entry.id != "en-en" && entry.id != "en-fr") {
+                continue;
+            }
+            entry.size = contents.size();
+            entry.sha256 = QCryptographicHash::hash(contents, QCryptographicHash::Sha256);
+            QString error;
+            QVERIFY2(
+                DictionaryManager::installArchive(profile.path() + "/dictionaries", entry, archive.fileName(), &error),
+                qPrintable(error));
+        }
+        AssetBundle assets(QStringLiteral(KOBALT_ASSETS), QStringLiteral(KOBALT_VERSION));
+        QVERIFY(assets.available());
+        QVERIFY(ui::initializeInterfaceFonts(assets));
+        for (const auto &font : bundledFontFiles(assets)) {
+            QVERIFY(QFontDatabase::addApplicationFont(font) >= 0);
+        }
+        FontCopies copies;
+        const auto fonts = engineFontInputs(assets, {}, {}, {});
+        const auto placeholder = placeholderFontFamily(assets, copies);
+        const auto capture = qEnvironmentVariable("KOBALT_TEST_CAPTURE");
+        for (int pass = 0; pass < 2; ++pass) {
+            pocketbook::Window window(paths, fonts, placeholder);
+            const auto cleanup = qScopeGuard([&window] {
+                window.close();
+                QElapsedTimer timer;
+                timer.start();
+                while (!window.idle() && timer.elapsed() < 10000) {
+                    QTest::qWait(10);
+                }
+            });
+            ui::setDensity(ppi);
+            readingPpi.store(ppi);
+            window.resize(1404, 1872);
+            window.show();
+            QSignalSpy opened(&window, &pocketbook::Window::bookOpened);
+            window.openBook(QStringLiteral(KOBALT_FIXTURE));
+            QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+            ReaderWindow *reader = nullptr;
+            for (auto *widget : QApplication::allWidgets()) {
+                if (auto *candidate = dynamic_cast<ReaderWindow *>(widget); candidate && candidate->isVisible()) {
+                    reader = candidate;
+                }
+            }
+            QVERIFY(reader);
+            QTRY_VERIFY_WITH_TIMEOUT(reader->readyForPresentation(), 30000);
+            auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
+            QVERIFY(page);
+            auto save = [&](const QString &scene) {
+                if (capture.isEmpty()) {
+                    return true;
+                }
+                QImage previous;
+                QElapsedTimer timer;
+                timer.start();
+                while (timer.elapsed() < 2000) {
+                    QTest::qWait(50);
+                    const auto current = window.grab().toImage();
+                    if (current == previous) {
+                        return current.save(capture + ".dictionary-" + QTest::currentDataTag() + "-" + scene + ".png");
+                    }
+                    previous = current;
+                }
+                return false;
+            };
+            if (pass == 0) {
+                QTest::mouseClick(page, Qt::LeftButton, Qt::NoModifier, page->rect().center());
+                auto *settings = reader->findChild<QPushButton *>("rrSettings");
+                QVERIFY(settings);
+                QTRY_VERIFY(settings->isVisible());
+                settings->click();
+                auto *panel = dynamic_cast<reader::SettingsPanel *>(reader->findChild<QWidget *>("rrGeneralSettings"));
+                QVERIFY(panel);
+                QTRY_VERIFY(panel->isVisible());
+                QVERIFY(save("settings"));
+                auto *tab = panel->findChild<QPushButton *>("rrSettingsDictionaries");
+                QVERIFY(tab);
+                QVERIFY(tab->isVisible() && tab->isEnabled());
+                tab->click();
+                QTRY_VERIFY(panel->dictionaries->isVisible());
+                auto rowsFit = [&] {
+                    auto *row = panel->dictionaries->findChild<QWidget *>("rrDictionaryRow0");
+                    auto *action = row ? row->findChild<QPushButton *>("rrDictionaryAction0") : nullptr;
+                    return row && action && row->width() >= panel->dictionaries->width() - 2 &&
+                           row->rect().contains(action->geometry());
+                };
+                QTRY_VERIFY(rowsFit());
+                bool installed = false;
+                for (auto *row : panel->dictionaries->findChildren<QWidget *>()) {
+                    if (row->property("dictionary_id").toString() == "en-en") {
+                        for (auto *action : row->findChildren<QPushButton *>()) {
+                            installed |= action->text() == strings::get("dictionaries.remove");
+                        }
+                    }
+                }
+                QVERIFY(installed);
+                QVERIFY(save("management"));
+                settings->click();
+                QTRY_VERIFY(!panel->isVisible());
+                QTest::mouseClick(page, Qt::LeftButton, Qt::NoModifier, page->rect().center());
+                QTRY_VERIFY(!settings->isVisible());
+                QTRY_VERIFY_WITH_TIMEOUT(reader->readyForPresentation(), 10000);
+            }
+            // Hold inside the first text line near the middle of the public
+            // reading surface, avoiding whitespace and glyph overhangs.
+            QPoint at(-1, -1);
+            auto inkAt = [&](int y) {
+                for (int x = page->image.width() / 3; x < page->image.width() * 2 / 3; ++x) {
+                    const int shade = qGray(page->image.pixel(x, y));
+                    if ((dark && shade > 160) || (!dark && shade < 96)) {
+                        return x;
+                    }
+                }
+                return -1;
+            };
+            for (int y = page->image.height() / 3; y < page->image.height() / 2; ++y) {
+                if (inkAt(y) < 0) {
+                    continue;
+                }
+                int bottom = y;
+                while (bottom + 1 < page->image.height() && inkAt(bottom + 1) >= 0) {
+                    ++bottom;
+                }
+                const int middle = (y + bottom) / 2;
+                at = QPoint(inkAt(middle) + 1, middle + page->topHeight());
+                break;
+            }
+            QVERIFY(at.x() >= 0);
+            QTRY_COMPARE(QGuiApplication::applicationState(), Qt::ApplicationActive);
+            QTest::mousePress(page, Qt::LeftButton, Qt::NoModifier, at);
+            QTest::qWait(ui::metrics::lookup::holdMilliseconds + 100);
+            QTest::mouseRelease(page, Qt::LeftButton, Qt::NoModifier, at);
+            auto *lookup = reader->findChild<QWidget *>("rrDictionary");
+            QVERIFY(lookup);
+            QTRY_VERIFY_WITH_TIMEOUT(lookup->isVisible(), 10000);
+            auto *selector = lookup->findChild<QPushButton *>("rrDictionarySelect");
+            auto *definition = dynamic_cast<ui::PagedText *>(lookup->findChild<QWidget *>("rrDefinition"));
+            QVERIFY(selector && definition);
+            QCOMPARE(selector->text(), pass == 0 ? QString("English monolingual") : QString("English to French"));
+            if (pass == 0) {
+                QVERIFY(definition->pages() > 1);
+                QVERIFY(save("definition"));
+                selector->click();
+                auto *translation = lookup->findChild<QPushButton *>("rrDictionaryChoice1");
+                QVERIFY(translation);
+                QTRY_VERIFY(translation->isVisible());
+                translation->click();
+                QTRY_COMPARE(selector->text(), QString("English to French"));
+                QCOMPARE(definition->pages(), 1);
+            } else {
+                QCOMPARE(definition->pages(), 1);
+                QVERIFY(save("reopened"));
+            }
+            auto *dismiss = lookup->findChild<QPushButton *>("rrDictionaryClose");
+            QVERIFY(dismiss);
+            dismiss->click();
+            QTRY_VERIFY(!lookup->isVisible());
+            window.close();
+            QTRY_VERIFY_WITH_TIMEOUT(window.idle(), 10000);
+        }
+    }
+
     void platformUpdatesReachReceiver() {
         class UpdateReceiver : public QObject {
         public:

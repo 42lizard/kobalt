@@ -77,7 +77,8 @@ def prepare(source, output, runtime_test=False):
         for archive, destination, members in (
                 (output / 'rootfs.raw', output / 'rootfs', ['lib/*', 'usr/lib/*']),
                 (output / 'ebrmain/cramfs.img', output / 'runtime', ['lib/*']),
-                (output / 'ebrmain.raw', output / 'ebrmain', ['plugins/platforms/libqoffscreen.so'])):
+                (output / 'ebrmain.raw', output / 'ebrmain',
+                 ['plugins/platforms/libqoffscreen.so', 'plugins/tls/*'])):
             subprocess.run([sevenzip(), 'x', '-y', str(archive), '-o' + str(destination), *members], check=True)
     files = {}
     for folder in ('rootfs/lib', 'rootfs/usr/lib', 'runtime/lib', 'ebrmain/plugins'):

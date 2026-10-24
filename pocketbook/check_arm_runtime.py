@@ -45,7 +45,8 @@ def run(firmware, binary, output, qemu, without_network=False, book=None):
     if without_network:
         # A fresh Linux network namespace has no configured loopback address.
         command = ['unshare', '--net', '--', *command]
-    subprocess.run(command, check=True, timeout=120)
+    # The reading workflow and four dictionary display profiles run under QEMU.
+    subprocess.run(command, check=True, timeout=240)
 
 
 if __name__ == '__main__':
