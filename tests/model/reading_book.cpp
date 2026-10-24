@@ -5,6 +5,8 @@
 #include "interfaces/opening_message.h"
 #include "reading/reader_session.h"
 #include "storage/reader_storage.h"
+#include "storage/annotation_database.h"
+#include <QSqlQuery>
 #include "publication/native_resources.h"
 #include "support/qt_compat.h"
 #include "publication/resource_server.h"
@@ -182,7 +184,7 @@ int main(int argc, char **argv) {
             require(benchmark.checkpoint(&snapshot), "Benchmark checkpoint failed");
             require(snapshot.value("font_pixels").toInt() == defaultFontPixels(),
                     "Live snapshot lost benchmark appearance");
-            const auto persisted = storage::readJson(statePath);
+            const auto persisted = storage::readBookState(paths, identity, statePath).object;
             require(appearance::same(persisted, migratedOriginal),
                     "Checkpoint persisted temporary appearance or added absent keys");
             require(benchmark.session()->turn(1), "Benchmark cannot turn");
@@ -190,21 +192,21 @@ int main(int argc, char **argv) {
                 return !benchmark.session()->busy();
             });
             require(benchmark.checkpoint(&snapshot), "Benchmark turn checkpoint failed");
-            require(appearance::same(storage::readJson(statePath), migratedOriginal),
+            require(appearance::same(storage::readBookState(paths, identity, statePath).object, migratedOriginal),
                     "Turn checkpoint changed original appearance");
             require(!storage::readJson(paths.preferences()).contains(appearance::lastTextLayoutKey),
                     "Temporary benchmark typography became the next book's style");
             retained = benchmark.session()->retained();
             require(bool(retained), "Benchmark could not retain its parsed document");
         }
-        require(appearance::same(storage::readJson(statePath), migratedOriginal),
+        require(appearance::same(storage::readBookState(paths, identity, statePath).object, migratedOriginal),
                 "Closing changed original appearance");
         ready = false;
         lease = std::make_shared<SourceLease>();
         retained->open({identity,
                         path,
                         QSize(758, 900),
-                        storage::readJson(statePath),
+                        storage::readBookState(paths, identity, statePath).object,
                         {},
                         {},
                         lease,
@@ -233,7 +235,7 @@ int main(int argc, char **argv) {
         require(local.saveDictionaryChoice("test-dictionary"), "Cannot save dictionary choice");
         QJsonObject layoutSnapshot;
         require(local.checkpoint(&layoutSnapshot), "Cannot checkpoint book layout");
-        const auto savedLayout = storage::readJson(paths.bookState("local-id"));
+        const auto savedLayout = storage::readBookState(paths, "local-id").object;
         require(!savedLayout.contains("show_clock") && !savedLayout.contains("header_text_size") &&
                     !savedLayout.contains("orientation") && !savedLayout.contains("margin_pixels"),
                 "Checkpoint persisted global layout with a book");
@@ -270,7 +272,7 @@ int main(int argc, char **argv) {
         require(local.writeNative({}, "no native mapping"), "Local-only save required a platform position");
         QJsonObject snapshot;
         require(local.checkpoint(&snapshot), "Local checkpoint failed");
-        require(persistedBook(snapshot) == storage::readJson(paths.bookState("local-id")), "Local checkpoint fields changed on disk");
+        require(persistedBook(snapshot) == storage::readBookState(paths, "local-id").object, "Local checkpoint fields changed on disk");
         require(snapshot.value("book") == QStringLiteral("local-id") && snapshot.value("schema") == 1 &&
                     snapshot.value("fingerprint").toString() == QString::fromLatin1(hash) &&
                     !snapshot.value("finished_position").toString().isEmpty() &&
@@ -307,7 +309,7 @@ int main(int argc, char **argv) {
         });
         first.observeReading();
         first.stopReading();
-        const auto saved = storage::readJson(paths.readingSpeed());
+        const auto saved = storage::readRecord(paths.directory, "reading-speed", paths.readingSpeed()).object;
         require(
             saved.value("samples").toInt() == 1 && saved.value("words").toDouble() == words,
             qPrintable(
@@ -329,7 +331,7 @@ int main(int argc, char **argv) {
         second.observeReading();
         second.observeReading(false);
         second.stopReading();
-        require(storage::readJson(paths.readingSpeed()) == saved, "Unsampled reading overwrote saved history");
+        require(storage::readRecord(paths.directory, "reading-speed", paths.readingSpeed()).object == saved, "Unsampled reading overwrote saved history");
     }
     {
         Calls calls;
@@ -386,12 +388,17 @@ int main(int argc, char **argv) {
         const int writes = calls.writes;
         require(book.writeNative({}, "unmappable store position") && calls.writes == writes,
                 "Store book accepted a time-only write");
-        const auto statePath = paths.bookState("store-id");
-        require(QFile::remove(statePath) && QDir().mkpath(statePath), "Cannot obstruct checkpoint destination");
+        const auto changeSql = [&](const QString &sql) {
+            return AnnotationDatabase::transaction(paths.directory, [&](QSqlDatabase &db) {
+                QSqlQuery query(db); return query.exec(sql);
+            });
+        };
+        require(changeSql("CREATE TRIGGER fail_checkpoint BEFORE INSERT ON record_fields BEGIN SELECT RAISE(ABORT,'test'); END"),
+                "Cannot obstruct checkpoint transaction");
         require(!book.checkpoint(&snapshot), "Checkpoint reported success when storage refused the write");
-        require(QDir().rmdir(statePath) && book.checkpoint(&snapshot),
+        require(changeSql("DROP TRIGGER fail_checkpoint") && book.checkpoint(&snapshot),
                 "Failed checkpoint was cached instead of retried");
-        require(storage::readJson(statePath) == persistedBook(snapshot), "Retried checkpoint lost the current state");
+        require(storage::readBookState(paths, "store-id").object == persistedBook(snapshot), "Retried checkpoint lost the current state");
         book.releaseNative();
         require(calls.destroyed == 1 && !book.canWriteNative(), "Release retained platform services");
         book.pollProgress();

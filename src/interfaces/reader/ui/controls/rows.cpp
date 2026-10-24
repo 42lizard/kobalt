@@ -67,6 +67,8 @@ void ListRow::setDetail(const QString &text) {
     if (detailText == text)
         return;
     detailText = text;
+    if (detailText.isEmpty())
+        detail->clear();
     arrange();
 }
 void ListRow::setDetailHighlight(const QString &style, QColor color, int lineSpacing) {

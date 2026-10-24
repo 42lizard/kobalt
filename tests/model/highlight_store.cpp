@@ -24,6 +24,8 @@ void replace(const QString &path, const QByteArray &data) {
 }
 }
 int main() {
+    // These cases obstruct legacy JSON files; SQLite behavior has its own database regressions.
+    qputenv("KOBALT_ANNOTATIONS_SQLITE", "0");
     QTemporaryDir root;
     require(root.isValid(), "No temporary folder");
     const QByteArray fingerprint(64, 'a');

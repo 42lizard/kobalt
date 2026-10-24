@@ -144,6 +144,8 @@ void Reader::annotationActionsFor(const QVector<AnnotationAction> &actions, QRec
     }
     if (highlights->error() == "overlap" && !annotationStart.isEmpty())
         card->message(strings::get("annotations.overlap"), "rrAnnotationOverlap");
+    if (!highlights->writable() && !highlights->error().isEmpty())
+        card->message(strings::get("annotations.load_failed"), "rrAnnotationLoadError");
     int desiredWidth = m::links::popupWidth;
     const auto section = [card, rows](const char *name, const char *key, bool divider = false) {
         auto *header = new ui::Panel(card);
@@ -937,6 +939,10 @@ void Reader::syncAnnotations() {
     if (!annotationPopover || model->busy()) {
         return;
     }
+    // A hidden loading panel cancels its request. Wake can reveal it again
+    // without opening a tab or changing the displayed page.
+    if (bookmarkList->isVisible() && bookmarkList->annotationsShown() && !highlights->sync())
+        bookmarkList->showAnnotations({}, true);
 
     if (annotationMode) {
         if (annotationPopover->isVisible()) {
@@ -990,7 +996,6 @@ void Reader::syncAnnotations() {
         draftHighlightGeometry = matchingDraft ? markup.draft : AnnotationGeometry{};
         page->installAnnotationFrame(draftHighlightRects, markup.saved, draftHighlightGeometry.vertical,
                                      annotationMode ? &draftHighlightGeometry : nullptr);
-        highlights->sync();
         if (showActions) {
             annotationShowActionsPending = false;
             showAnnotationActions();
@@ -1001,14 +1006,14 @@ void Reader::syncAnnotations() {
     if (annotationPresentationReady) {
         return;
     }
-    if (!highlights->sync()) {
-        return;
-    }
     if (annotationFrame == tintFrame) {
         if (showActions) {
             annotationShowActionsPending = false;
             updateAnnotationRects(true);
         }
+        return;
+    }
+    if (!highlights->sync()) {
         return;
     }
     annotationFrame = tintFrame;
@@ -1023,9 +1028,10 @@ void Reader::syncAnnotations() {
     QVector<QPair<QString, QString>> ranges;
     QVector<QString> colors, styles;
     const auto &items = highlights->highlights();
+    const auto locations = highlights->locations();
     for (int i = 0; i < items.size(); ++i) {
-        if (items[i].id != annotationEditing && highlights->page(i) <= model->page() &&
-            highlights->endPage(i) >= model->page() && highlights->page(i) >= 0) {
+        const int start = locations.pages.value(i * 2, -1), end = locations.pages.value(i * 2 + 1, -1);
+        if (items[i].id != annotationEditing && start >= 0 && start <= model->page() && end >= model->page()) {
             ranges.append(qMakePair(items[i].start, items[i].end));
             colors.append(colorAnnotations() ? highlightDisplayColor(items[i].color) : QString("gray"));
             styles.append(highlightDisplayStyle(items[i].style));
@@ -1054,13 +1060,15 @@ void Reader::syncAnnotations() {
 QVector<BookmarkRow> Reader::annotationRows() const {
     QVector<BookmarkRow> rows;
     const auto &items = highlights->highlights();
+    const auto locations = highlights->locations();
+    rows.reserve(items.size());
     for (int i = 0; i < items.size(); ++i) {
         const auto &item = items[i];
-        BookmarkRow row{item.id, item.chapter, item.text, item.created, highlights->page(i), false};
-        row.endPage = highlights->endPage(i);
+        BookmarkRow row{item.id, {}, {}, item.created, locations.pages.value(i * 2, -1), false};
+        row.endPage = locations.pages.value(i * 2 + 1, -1);
         row.style = item.style;
         row.color = item.color;
-        row.sourceOrder = highlights->sourceOrder(i);
+        row.sourceOrder = locations.order.value(i * 2, -1);
         rows.append(row);
     }
     return rows;
@@ -1089,6 +1097,11 @@ void Reader::editAnnotation(const QString &id, bool navigate) {
     for (const auto &item : highlights->highlights()) {
         if (item.id != id) {
             continue;
+        }
+        Highlight detail;
+        if (!highlights->detail(id, &detail)) {
+            annotationActionsFor({}, topControls->geometry());
+            return;
         }
         bookmarkList->hide();
         enterAnnotations();
@@ -1204,8 +1217,16 @@ void Reader::showAnnotationMatches(QVector<QString> ids, QRect anchor, int listP
     const int pages = qMax(1, (ids.size() + pageSize - 1) / pageSize);
     listPage = qBound(0, listPage, pages - 1);
     QVector<AnnotationAction> actions;
+    QStringList requested;
+    for (int i = listPage * pageSize; i < qMin(ids.size(), (listPage + 1) * pageSize); ++i)
+        requested.append(ids[i]);
+    QVector<HighlightExcerpt> excerpts;
+    if (!highlights->excerpts(requested, &excerpts)) {
+        annotationActionsFor({}, anchor);
+        return;
+    }
     for (int i = listPage * pageSize; i < qMin(ids.size(), (listPage + 1) * pageSize); ++i) {
-        for (const auto &item : highlights->highlights()) {
+        for (const auto &item : excerpts) {
             if (item.id != ids[i]) {
                 continue;
             }
@@ -1238,11 +1259,15 @@ void Reader::removeAnnotation(const QString &id) {
     if (removeDialog) {
         return;
     }
-    QString excerpt;
+    QVector<HighlightExcerpt> details;
+    if (!highlights->excerpts({id}, &details) || details.size() != 1) {
+        annotationActionsFor({}, topControls->geometry());
+        return;
+    }
+    QString excerpt = details.first().text;
     int number = -1;
     for (const auto &row : annotationRows()) {
         if (row.position == id) {
-            excerpt = row.excerpt;
             number = row.page;
             break;
         }
@@ -1269,11 +1294,7 @@ void Reader::removeAnnotation(const QString &id) {
         removeDialog.clear();
         if (remove) {
             highlights->remove(id);
-            annotationFrame.clear();
-            if (bookmarkList->isVisible()) {
-                bookmarkList->showAnnotations(annotationRows());
-            }
-            syncAnnotations();
+            // The session's changed callback updates the list and markup once.
         }
     };
     connect(choice->secondaryButton(), &QPushButton::clicked, this, [finish] {

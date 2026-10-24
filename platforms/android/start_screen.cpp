@@ -92,6 +92,8 @@ void StartScreen::showLibrary() {
     fitLibrary();
     view->setScanning(store.scanning(), store.found());
     view->refresh();
+    if (!store.available())
+        view->showNotice(strings::get("library.open_failed"), strings::get("error.saved_data_unavailable"));
 }
 void StartScreen::showLibraryError(const QString &error) {
     showLibrary();

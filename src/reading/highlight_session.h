@@ -3,15 +3,18 @@
 
 #include <QObject>
 #include <QRect>
+#include <atomic>
 #include <functional>
 #include <memory>
 
 namespace kobalt {
 class ReaderSession;
+struct BookmarkLocations;
 class HighlightSession final : public QObject {
 public:
     HighlightSession(ReaderSession &model, std::function<QString()> layout, const QString &annotations,
-                     const QString &identity, const QByteArray &fingerprint, const QString &title);
+                     const QString &identity, const QByteArray &fingerprint, const QString &title, const QString &database = {});
+    ~HighlightSession() override;
     bool available() const {
         return bool(store_);
     }
@@ -22,8 +25,15 @@ public:
         return error_;
     }
     const QVector<Highlight> &highlights() const;
+    // Payloads are fetched only for visible list rows or an edited passage.
+    bool excerpts(const QStringList &ids, QVector<HighlightExcerpt> *rows);
+    bool detail(const QString &id, Highlight *row);
     bool sync();
+    // Stop an abandoned lookup without discarding already resolved locations.
+    void cancelLookup();
     bool resolved() const;
+    // One validity check for callers rendering an entire annotation list.
+    BookmarkLocations locations() const;
     int page(int index) const;
     int endPage(int index) const;
     int sourceOrder(int index) const { return resolved() ? order_.value(index * 2, -1) : -1; }
@@ -49,7 +59,10 @@ private:
     std::unique_ptr<HighlightStore> store_;
     QString layout_, lookup_, error_;
     QVector<int> pages_, order_;
+    std::shared_ptr<std::atomic_bool> lookupCancelled_;
     quint64 generation_ = 0;
+    quint64 layoutRevision_ = 0, lookupRevision_ = 0, lookupRequest_ = 0;
+    quint64 rangesGeneration_ = 0, lookupGeneration_ = 0;
     bool loadFailed_ = false;
 };
 }

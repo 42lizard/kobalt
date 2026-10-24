@@ -25,7 +25,7 @@ QString bookmarkLayoutKey(int pages, const QJsonObject &state, const QSize &page
 class BookmarkSession final : public QObject {
 public:
     BookmarkSession(ReaderSession &model, std::function<QString()> layout, const QString &annotations,
-                    const QString &identity, const QByteArray &fingerprint, const QString &title);
+                    const QString &identity, const QByteArray &fingerprint, const QString &title, const QString &database = {});
     // False when the book has no stable key. The session then does nothing.
     bool available() const {
         return bool(store);
@@ -53,6 +53,8 @@ public:
     const QVector<int> &pages() const {
         return pages_;
     }
+    // One validity check for callers rendering an entire bookmark list.
+    QVector<int> resolvedPages() const { return resolved() ? pages_ : QVector<int>{}; }
     // The known pages changed: a lookup finished, needs repeating, or merged
     // bookmarks. The window refreshes.
     std::function<void()> changed;
@@ -73,6 +75,7 @@ private:
     // layout_ is set, pages_ has one entry per bookmark.
     QVector<int> pages_;
     QString layout_, lookup_;
+    quint64 layoutRevision_ = 0, lookupRevision_ = 0, lookupRequest_ = 0, lookupGeneration_ = 0;
     // Changes with every edit of the list, so an older page lookup is repeated.
     quint64 generation = 0;
     // Pages with an add waiting for the engine. A second tap there waits too.

@@ -12,9 +12,9 @@ ReadingBook::ReadingBook(std::unique_ptr<ReaderSession> session, QString statePa
     : model(std::move(session)), statePath(std::move(statePath)), identity_(std::move(identity)),
       paths_(std::move(paths)), digest(std::move(digest)), bridge(std::move(bridge)), baseline(std::move(baseline)),
       reconciliation(std::move(diskBaseline)) {
-    const auto saved = storage::readJson(this->statePath);
+    const auto saved = storage::readBookState(paths_, identity_, this->statePath).object;
     const auto preferences = appearance::readerPreferences(
-        storage::readJson(paths_.preferences()), saved.value("book").toString() == identity_ ? saved : QJsonObject());
+        storage::readPreferences(paths_.preferences()).object, saved.value("book").toString() == identity_ ? saved : QJsonObject());
     for (const auto *key : appearance::layoutKeys)
         if (preferences.contains(key))
             layoutPreferences_[key] = preferences.value(key);
@@ -27,7 +27,7 @@ ReadingBook::ReadingBook(std::unique_ptr<ReaderSession> session, QString statePa
     speedSaved.invalidate();
     if (!this->bridge) {
         speed = std::make_unique<ReadingSpeed>();
-        speed->restore(storage::readJson(paths_.readingSpeed()));
+        speed->restore(storage::readRecord(paths_.directory, "reading-speed", paths_.readingSpeed()).object);
     }
 }
 ReadingBook::~ReadingBook() {
@@ -111,7 +111,7 @@ void ReadingBook::saveSpeed(bool force) {
         return;
     }
     speedSaved.start();
-    if (storage::writeJson(paths_.readingSpeed(), speed->state())) {
+    if (storage::writeRecord(paths_.directory, "reading-speed", paths_.readingSpeed(), speed->state())) {
         speed->saved();
     } else {
         diagnostic("reading-speed-unsaved", {}, false);
@@ -244,15 +244,15 @@ bool ReadingBook::checkpoint(QJsonObject *snapshot) {
         persisted.remove(key);
     for (const auto *key : appearance::marginKeys)
         persisted.remove(key);
-    const bool saved = storage::writeJson(statePath, persisted);
+    const bool saved = storage::writeBookState(paths_, identity_, persisted, statePath);
     if (saved) {
         if (!model->temporaryTypography()) {
-            const auto settings = storage::readJsonFile(paths_.preferences());
+            const auto settings = storage::readPreferences(paths_.preferences());
             if (settings.status == storage::ReadStatus::Ok || settings.status == storage::ReadStatus::Missing) {
                 auto next = settings.object;
                 appearance::rememberTextLayout(next, state);
                 appearance::rememberPageMargins(next, state);
-                if (next != settings.object && !storage::writeJson(paths_.preferences(), next)) {
+                if (next != settings.object && !kobalt::storage::writePreferences(paths_.preferences(), next)) {
                     diagnostic("appearance-settings-unsaved", {}, false);
                     return false;
                 }

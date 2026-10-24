@@ -3,7 +3,7 @@ project(KobaltAndroid LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Network Sensors)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Network Sensors Sql)
 qt_standard_project_setup(REQUIRES 6.11)
 if(NOT ANDROID OR NOT ANDROID_ABI STREQUAL "arm64-v8a")
     message(FATAL_ERROR "Use the prepared Android ARM64 SDK and the android preset")
@@ -58,6 +58,14 @@ file(GLOB_RECURSE shared CONFIGURE_DEPENDS "${source}/*.cpp" "${source}/*.h")
 list(REMOVE_ITEM shared "${source}/publication/loopback.cpp" "${source}/assets/system_fonts.cpp")
 file(GLOB adapters CONFIGURE_DEPENDS "*.cpp" "*.h")
 qt_add_executable(kobalt_android ${shared} ${adapters})
+option(KOBALT_SQLITE_ANNOTATIONS_DEFAULT "Use SQLite annotation storage by default" ON)
+if(KOBALT_SQLITE_ANNOTATIONS_DEFAULT)
+    set_source_files_properties("${source}/storage/annotation_database.cpp" PROPERTIES
+        COMPILE_DEFINITIONS KOBALT_SQLITE_ANNOTATIONS_DEFAULT=1)
+else()
+    set_source_files_properties("${source}/storage/annotation_database.cpp" PROPERTIES
+        COMPILE_DEFINITIONS KOBALT_SQLITE_ANNOTATIONS_DEFAULT=0)
+endif()
 target_include_directories(kobalt_android PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${source}/interfaces/reader/ui/controls")
 target_include_directories(kobalt_android SYSTEM PRIVATE "${CRENGINE_SOURCE}/crengine/include" "${CRENGINE_BUILD}"
     "${prefix}/include" "${prefix}/include/harfbuzz" "${prefix}/include/freetype2" "${prefix}/include/fribidi")
@@ -73,7 +81,7 @@ add_custom_command(OUTPUT "${engine}"
 add_custom_target(reader-engine DEPENDS "${engine}")
 add_dependencies(reader-engine kobalt-dependencies)
 add_dependencies(kobalt_android reader-engine)
-target_link_libraries(kobalt_android PRIVATE Qt6::Widgets Qt6::Network Qt6::Sensors "${engine}"
+target_link_libraries(kobalt_android PRIVATE Qt6::Widgets Qt6::Network Qt6::Sensors Qt6::Sql "${engine}"
     "${prefix}/lib/libharfbuzz.a" "${prefix}/lib/libxxhash.a" "${prefix}/lib/libutf8proc.a"
     "${prefix}/lib/libjpeg.a" "${prefix}/lib/liblunasvg.a" "${prefix}/lib/libfreetype.a"
     "${prefix}/lib/libfribidi.a" "${prefix}/lib/libunibreak.a" "${prefix}/lib/libpng16.a" z)

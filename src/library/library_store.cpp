@@ -1,5 +1,6 @@
 #include "library_store.h"
 #include "book_metadata.h"
+#include "support/diagnostics.h"
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -14,13 +15,8 @@ qint64 now() {
 Store::Store(QString directory, std::shared_ptr<Source> source, QObject *parent)
     : QObject(parent), directory(directory), coverDirectory(directory + "/library-covers"),
       scanner(std::move(source), coverDirectory) {
-    const auto path = directory + "/library.json";
-    if (!data.load(path)) {
-        // Keep a damaged index for inspection and start an empty library.
-        QFile::remove(path + ".damaged");
-        QFile::rename(path, path + ".damaged");
-        data = {};
-    }
+    ready = data.loadDatabase(directory);
+    if (!ready) diagnostic("library-storage-unavailable");
     saving.setSingleShot(true);
     saving.setInterval(500);
     connect(&saving, &QTimer::timeout, this, &Store::save);
@@ -65,6 +61,7 @@ bool Store::scanning() const {
     return scanner.running();
 }
 void Store::scan() {
+    if (!ready) return;
     if (scanner.running()) {
         // A folder added during a scan is listed by the next one.
         rescan = true;
@@ -96,16 +93,19 @@ void Store::scan() {
         changed();
 }
 void Store::addFolder(const Folder &folder) {
+    if (!ready) return;
     data.addFolder(folder);
     touch();
     scan();
 }
 void Store::removeFolder(const QString &key) {
+    if (!ready) return;
     for (const auto &cover : data.removeFolder(key))
         QFile::remove(coverPath(cover));
     touch();
 }
 bool Store::addBook(const QString &path) {
+    if (!ready) return false;
     const QFileInfo info(path);
     const auto key = info.absoluteFilePath();
     QFile file(key);
@@ -137,6 +137,7 @@ bool Store::addBook(const QString &path) {
     return true;
 }
 void Store::removeBook(const QString &key) {
+    if (!ready) return;
     QFile::remove(coverPath(data.removeBook(key)));
     touch();
 }
@@ -176,7 +177,7 @@ void Store::setSettings(const Settings &settings) {
 void Store::save() {
     saving.stop();
     QDir().mkpath(directory);
-    data.save(directory + "/library.json");
+    if (ready && !data.saveDatabase(directory)) diagnostic("library-save-failed");
 }
 void Store::touch() {
     saving.start();

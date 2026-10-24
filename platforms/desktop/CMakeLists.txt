@@ -9,9 +9,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 include(CTest)
-set(qt_components Core Gui Widgets Network Sensors)
+set(qt_components Core Gui Widgets Network Sensors Sql)
 if(BUILD_TESTING)
-    list(APPEND qt_components Test Sql)
+    list(APPEND qt_components Test)
 endif()
 find_package(Qt6 6.11.3 EXACT REQUIRED COMPONENTS ${qt_components})
 file(REAL_PATH "${Qt6_DIR}/.." qt_config_root)
@@ -90,7 +90,15 @@ target_include_directories(kobalt-core SYSTEM PUBLIC
 target_compile_definitions(kobalt-core PUBLIC KOBALT_READER_HARDWARE KOBALT_VERSION="${KOBALT_VERSION}"
     KOBALT_LAYOUT_POLICY="native-public-v1" fdatasync=fsync)
 target_compile_options(kobalt-core PRIVATE -Wall -Wextra)
-target_link_libraries(kobalt-core PUBLIC Qt6::Widgets Qt6::Network Qt6::Sensors
+option(KOBALT_SQLITE_ANNOTATIONS_DEFAULT "Use SQLite annotation storage by default" ON)
+if(KOBALT_SQLITE_ANNOTATIONS_DEFAULT)
+    set_source_files_properties("${source}/storage/annotation_database.cpp" PROPERTIES
+        COMPILE_DEFINITIONS KOBALT_SQLITE_ANNOTATIONS_DEFAULT=1)
+else()
+    set_source_files_properties("${source}/storage/annotation_database.cpp" PROPERTIES
+        COMPILE_DEFINITIONS KOBALT_SQLITE_ANNOTATIONS_DEFAULT=0)
+endif()
+target_link_libraries(kobalt-core PUBLIC Qt6::Widgets Qt6::Network Qt6::Sensors Qt6::Sql
     "${CRENGINE_BUILD}/libcrengine.a"
     "${KOBALT_TEST_DEPENDENCIES}/lib/libharfbuzz.a" "${KOBALT_TEST_DEPENDENCIES}/lib/libxxhash.a"
     "${KOBALT_TEST_DEPENDENCIES}/lib/libutf8proc.a" "${KOBALT_TEST_DEPENDENCIES}/lib/libjpeg.a"
@@ -162,6 +170,13 @@ add_custom_target(kobalt-runtime-assets DEPENDS "${bundle_assets}/manifest.json"
 add_dependencies(Kobalt kobalt-runtime-assets)
 
 if(BUILD_TESTING)
+    add_executable(kobalt-annotation-engine-benchmark EXCLUDE_FROM_ALL "${KOBALT_ROOT}/tests/annotation_engine_benchmark.cpp")
+    target_link_libraries(kobalt-annotation-engine-benchmark PRIVATE kobalt-desktop kobalt-core)
+    target_include_directories(kobalt-annotation-engine-benchmark PRIVATE "${KOBALT_ROOT}/tests/support")
+    target_compile_definitions(kobalt-annotation-engine-benchmark PRIVATE KOBALT_TEST_ASSET_ROOT="${KOBALT_ASSETS}")
+    add_executable(kobalt-annotation-gui-benchmark EXCLUDE_FROM_ALL "${KOBALT_ROOT}/tests/annotation_gui_benchmark.cpp")
+    target_link_libraries(kobalt-annotation-gui-benchmark PRIVATE kobalt-desktop kobalt-core)
+    target_compile_definitions(kobalt-annotation-gui-benchmark PRIVATE KOBALT_TEST_ASSET_ROOT="${KOBALT_ASSETS}")
     add_test(NAME build.cachePolicy COMMAND "${CMAKE_COMMAND}"
         "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cache-policy-test"
         "-DPOLICY_FILE=${KOBALT_ROOT}/platforms/cache-policy.cmake"
@@ -232,7 +247,7 @@ if(BUILD_TESTING)
             finishChoiceSurvivesSleepAndRequiresActiveReader nativeProgressAutosave usbFinalSave
             progressChoiceKeepAndGo finishedSyncWithoutPositionKeepsLocalReading
             progressChoiceForOlderAlert progressChoiceUnavailablePosition
-            appearanceOpeningDoesNotRepaintToolbar annotationFramesKeepFirstPaintComplete)
+            appearanceOpeningDoesNotRepaintToolbar annotationFramesKeepFirstPaintComplete annotationListResolvesPagesOnDemand)
         add_test(NAME lifecycle.${check} COMMAND "${CMAKE_COMMAND}"
             "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-reader-lifecycle-tests>" "-DTEST_ARGUMENTS=${check}"
             "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp"
@@ -263,6 +278,7 @@ if(BUILD_TESTING)
             annotationModeNotice
             continuationHintClears
             marksSortingAndAnnotationRows
+            annotationDetailsOnlyLoadVisiblePage
             hidingSelectionMenuKeepsDamageCompact
             delayedProgressPaintsAfterTheEventLoop
             progressPaintsOnlyChangedPixels
@@ -354,7 +370,7 @@ if(BUILD_TESTING)
                 ENVIRONMENT "${headless_environment}" LABELS "${group};${lane}" TIMEOUT 35)
         endforeach()
     endfunction()
-    kobalt_regressions(model storage_assets bookmark_store highlight_store appearance_settings header_footer
+    kobalt_regressions(model storage_assets profile_storage bookmark_store highlight_store annotation_database appearance_settings header_footer
         layout_cache resource_cache layout_compatibility reading_pace reading_speed engine_activity
         local_resources zip_resource diagnostics dictionary_store image_damage page_pixels
         logical_word_counter brightness_gesture qt_compat page_refresh_regions screen_refresh plain_archive reading_progress
@@ -362,7 +378,7 @@ if(BUILD_TESTING)
     kobalt_regressions(model font_axes touch_rotation)
     kobalt_regressions(platform reader_orientation font_sources system_fonts nickel_dictionary_selection
         nickel_reading_pace_cache nickel_session_calls nickel_book_menu native_progress usb_removal page_transition_native)
-    kobalt_regressions(engine columns advanced_text alignment indentation page_layout vertical_writing mathml line_breaking
+    kobalt_regressions(engine source_index columns advanced_text alignment indentation page_layout vertical_writing mathml line_breaking
         fallback_styles svg_limits whitespace links search word_selection reader publisher_markup local_reader document_word_count document_cache)
     kobalt_regressions(component ui acknowledgments font_data font_registration)
     kobalt_regressions(session reading_book bookmark_session highlight_session reader_session)

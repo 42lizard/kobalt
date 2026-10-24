@@ -367,11 +367,28 @@ struct Fixture {
         return item && item->isVisible();
     }
     QString storedPath(const QString &filename) {
+        if (annotationDatabaseEnabled())
+            return paths.database();
         QDirIterator files(paths.annotations(), {filename}, QDir::Files, QDirIterator::Subdirectories);
         return files.hasNext() ? files.next() : QString();
     }
     QJsonArray stored(const QString &filename, const QString &key) {
-        return storage::readJson(storedPath(filename)).value(key).toArray();
+        if (!annotationDatabaseEnabled())
+            return storage::readJson(storedPath(filename)).value(key).toArray();
+        const auto current = state();
+        const auto identity = current.value("book").toString();
+        const auto fingerprint = current.value("fingerprint").toString().toLatin1();
+        QJsonArray rows;
+        if (key == "highlights") {
+            HighlightStore store(paths.annotations(), identity, fingerprint, "Fixture", paths.database());
+            if (!store.load()) qFatal("Cannot read saved SQLite highlights");
+            for (const auto &row : store.highlights()) rows.append(highlightJson(row));
+        } else {
+            BookmarkStore store(paths.annotations(), identity, fingerprint, "Fixture", paths.database());
+            if (!store.load()) qFatal("Cannot read saved SQLite bookmarks");
+            for (const auto &row : store.bookmarks()) rows.append(bookmarkJson(row));
+        }
+        return rows;
     }
     template<class Result, class Query>
     Result coordinateQuery(const QString &path, Result fallback, Query query) {
@@ -625,16 +642,15 @@ void tour(Fixture &fixture, const QString &name, bool screenshots) {
         QSignalSpy reopened(&fixture.window, &desktop::Window::bookOpened);
         fixture.window.readerWindow()->close();
         QTRY_VERIFY(fixture.window.idle());
-        const auto path = fixture.storedPath("bookmarks.json");
-        auto stored = storage::readJson(path);
-        auto entries = stored.value("bookmarks").toArray();
-        for (int i = 0; i < entries.size(); ++i) {
-            auto entry = entries.at(i).toObject();
-            entry["created"] = "2000-01-01T12:00:00Z";
-            entries[i] = entry;
-        }
-        stored["bookmarks"] = entries;
-        QVERIFY(storage::writeJson(path, stored));
+        const auto current = fixture.state();
+        BookmarkStore store(fixture.paths.annotations(), current.value("book").toString(),
+                            current.value("fingerprint").toString().toLatin1(), "Fixture", fixture.paths.database());
+        QVERIFY(store.load());
+        auto entries = store.bookmarks();
+        for (auto &entry : entries)
+            entry.created = QDateTime::fromString("2000-01-01T12:00:00Z", Qt::ISODate).toUTC();
+        store.setBookmarks(entries);
+        QVERIFY(store.save());
         fixture.window.openBook(book);
         QTRY_COMPARE(reopened.count(), 1);
         QTRY_VERIFY(!fixture.state().value("busy").toBool());
@@ -737,6 +753,20 @@ void tour(Fixture &fixture, const QString &name, bool screenshots) {
         QVERIFY(fixture.press("rrAnnotationSave"));
         QTRY_COMPARE(fixture.stored("highlights.json", "highlights").size(), 1);
         QTRY_VERIFY(!fixture.visible("rrAnnotationPopover"));
+        // Persistence finishes before the engine delivers saved markup. Wait
+        // for the yellow mark at the selected word before capturing the page.
+        const auto savedTintPixels = [&] {
+            const auto image = page->snapshot();
+            const auto area = QRect(word - QPoint(80, 80), QSize(160, 160)).intersected(image.rect());
+            int colored = 0;
+            for (int y = area.top(); y <= area.bottom(); ++y)
+                for (int x = area.left(); x <= area.right(); ++x) {
+                    const auto pixel = image.pixelColor(x, y);
+                    colored += pixel.red() > pixel.blue() + 5 && pixel.green() > pixel.blue() + 5;
+                }
+            return colored;
+        };
+        QTRY_VERIFY(savedTintPixels() > 0);
         QVERIFY(scene("annotation-saved"));
         QVERIFY(fixture.selectWord(page, word));
         QTRY_VERIFY(fixture.visible("rrAnnotationEdit"));
@@ -847,9 +877,11 @@ private slots:
         auto *start = fixture.window.findChild<android::StartScreen *>();
         QVERIFY(start);
         const auto libraryBooks = [&fixture] {
-            return storage::readJsonFile(fixture.directory.path() + "/library.json", 1 << 20)
-                .object.value("books")
-                .toArray();
+            library::Index index;
+            QJsonArray books;
+            if (index.loadDatabase(fixture.directory.path()))
+                for (const auto &book : index.books) books.append(book.json());
+            return books;
         };
         QVERIFY(start->libraryShown());
         QTRY_COMPARE(start->library()->size(), QSize(1072, 1448));
@@ -926,17 +958,16 @@ private slots:
 
         // A previously read book has both a position and a distinct override.
         const auto identity = first.value("book").toString();
-        const auto checkpointPath = fixture.paths.bookState(identity);
-        auto saved = storage::readJson(checkpointPath);
+        auto saved = storage::readBookState(fixture.paths, identity).object;
         QVERIFY(!saved.value("position").toString().isEmpty());
         saved["font_pixels"] = first.value("font_pixels").toInt() + 12;
-        QVERIFY(storage::writeJson(checkpointPath, saved));
+        QVERIFY(storage::writeBookState(fixture.paths, identity, saved));
         const auto fingerprint = saved.value("fingerprint").toString().toLatin1();
-        BookmarkStore bookmarks(fixture.paths.annotations(), identity, fingerprint, "Reader fixture");
+        BookmarkStore bookmarks(fixture.paths.annotations(), identity, fingerprint, "Reader fixture", fixture.paths.database());
         bookmarks.setBookmarks({{saved.value("position").toString(), "Prologue", "Saved bookmark",
                                  QDateTime::currentDateTimeUtc()}});
         QVERIFY(bookmarks.save());
-        HighlightStore highlights(fixture.paths.annotations(), identity, fingerprint, "Reader fixture");
+        HighlightStore highlights(fixture.paths.annotations(), identity, fingerprint, "Reader fixture", fixture.paths.database());
         highlights.setHighlights({{"kept-highlight", original.value("position").toString(),
                                   saved.value("position").toString(), "Saved highlight", "Prologue",
                                   QDateTime::currentDateTimeUtc()}});
@@ -945,7 +976,7 @@ private slots:
         auto *start = fixture.window.findChild<android::StartScreen *>();
         QVERIFY(start && start->libraryShown());
         start->library()->markBook(book, library::Book::Mark::Unread);
-        QCOMPARE(storage::readJson(checkpointPath), QJsonObject({{"book", identity}}));
+        QCOMPARE(storage::readBookState(fixture.paths, identity).object, QJsonObject({{"book", identity}}));
         QCOMPARE(storage::readJson(fixture.paths.preferences()), preferences);
         QVERIFY(bookmarks.load() && bookmarks.bookmarks().size() == 1);
         QVERIFY(highlights.load() && highlights.highlights().size() == 1);
@@ -2846,7 +2877,7 @@ private slots:
         QCOMPARE(margins.value("margin_pixels").toInt(), marginDesign(first.value("margin_pixels").toInt()));
         QCOMPARE(margins.value("top_margin_pixels").toInt(), marginDesign(first.value("top_margin_pixels").toInt()));
         QVERIFY(!settings.value("last_text_layout").toObject().contains("margin_pixels"));
-        const auto firstSaved = storage::readJson(fixture.paths.bookState(first.value("book").toString()));
+        const auto firstSaved = storage::readBookState(fixture.paths, first.value("book").toString()).object;
         QVERIFY(!firstSaved.contains("margin_pixels") && !firstSaved.contains("orientation"));
         const auto other = fixture.directory.path() + "/other-layout.epub";
         QVERIFY(QFile::copy(book, other));

@@ -18,9 +18,9 @@ QString bookmarkLayoutKey(int pages, const QJsonObject &state, const QSize &page
     return QString::fromUtf8(QJsonDocument(layout).toJson(QJsonDocument::Compact));
 }
 BookmarkSession::BookmarkSession(ReaderSession &model, std::function<QString()> layout, const QString &annotations,
-                                 const QString &identity, const QByteArray &fingerprint, const QString &title)
+                                 const QString &identity, const QByteArray &fingerprint, const QString &title, const QString &database)
     : model(model), layout(std::move(layout)),
-      store(std::make_unique<BookmarkStore>(annotations, identity, fingerprint, title)) {
+      store(std::make_unique<BookmarkStore>(annotations, identity, fingerprint, title, database)) {
     if (!store->available()) {
         store.reset();
         return;
@@ -37,7 +37,7 @@ const QVector<Bookmark> &BookmarkSession::bookmarks() const {
     return store ? store->bookmarks() : none;
 }
 bool BookmarkSession::resolved() const {
-    return store && !layout_.isEmpty() && layout_ == layout();
+    return store && !layout_.isEmpty() && layoutRevision_ == model.layoutRevision() && layout_ == layout();
 }
 bool BookmarkSession::marked(int page) const {
     return resolved() && pages_.contains(page);
@@ -56,35 +56,43 @@ bool BookmarkSession::sync() {
     if (!store || loadFailed_ || model.busy() || model.pages() <= 0)
         return false;
     const auto key = layout();
-    if (key == layout_)
+    const auto revision = model.layoutRevision();
+    if (key == layout_ && layoutRevision_ == revision)
         return true;
     // There are no source positions to resolve. Queueing a lookup here leaves
     // the first tap after opening or reflow temporarily unable to add a mark.
     if (store->bookmarks().isEmpty()) {
+        ++lookupRequest_;
         lookup_.clear();
         layout_ = key;
+        layoutRevision_ = revision;
         pages_.clear();
         return true;
     }
-    if (lookup_ == key)
+    if (lookup_ == key && lookupRevision_ == revision && lookupGeneration_ == generation)
         return false;
     lookup_ = key;
+    lookupRevision_ = revision;
+    lookupGeneration_ = generation;
+    const auto request = ++lookupRequest_;
     QStringList positions;
     for (const auto &bookmark : store->bookmarks())
         positions << bookmark.position;
     QPointer<BookmarkSession> guard(this);
-    model.bookmarkPages(positions, [guard, key, positions, generation = generation](QVector<int> pages) {
-        if (!guard || guard->lookup_ != key)
+    model.bookmarkPages(positions, [guard, key, revision, request, positions, generation = generation](QVector<int> pages) {
+        if (!guard || guard->lookupRequest_ != request)
             return;
         guard->lookup_.clear();
         // An empty answer for a non-empty list means the layout changed
         // meanwhile. A changed list or window layout needs a new lookup too.
-        if (pages.size() != positions.size() || guard->generation != generation || guard->layout() != key) {
+        if (pages.size() != positions.size() || guard->generation != generation || guard->layout() != key ||
+            guard->model.layoutRevision() != revision) {
             if (guard->changed)
                 guard->changed();
             return;
         }
         guard->layout_ = key;
+        guard->layoutRevision_ = revision;
         guard->pages_ = pages;
         guard->merge();
         if (guard && guard->changed)
@@ -108,19 +116,20 @@ void BookmarkSession::merge() {
     auto summaries = std::make_shared<QMap<int, QPair<QString, QString>>>();
     auto remaining = std::make_shared<int>(shared.size());
     const auto key = layout_;
+    const auto revision = layoutRevision_;
     QPointer<BookmarkSession> guard(this);
     for (int p : shared) {
-        model.pageSummary(p, [guard, p, key, summaries, remaining](QString start, QString excerpt) {
+        model.pageSummary(p, [guard, p, key, revision, summaries, remaining](QString start, QString excerpt) {
             if (!guard)
                 return;
             (*summaries)[p] = {start, excerpt};
             // A layout change drops the merge; the next lookup merges again.
             // A list edit does not: the merge below reads the current list and
             // its pages, and the summaries still describe this layout.
-            if (--*remaining > 0 || guard->layout_ != key || guard->layout() != key)
+            if (--*remaining > 0 || guard->layout_ != key || guard->layout() != key ||
+                guard->model.layoutRevision() != revision)
                 return;
-            // A page turn can cancel summaries while keeping the same layout.
-            // Discard its resolved key so the next lookup retries the merge.
+            // An unavailable source cannot supply a replacement bookmark.
             for (auto it = summaries->begin(); it != summaries->end(); ++it) {
                 if (!it.value().first.isEmpty())
                     continue;
@@ -165,11 +174,15 @@ void BookmarkSession::merge() {
                 return;
             const auto mergedBookmarks = guard->store->bookmarks();
             guard->store->setBookmarks(previous);
-            if (!guard->save(mergedBookmarks, {}, "merged"))
+            // Each replacement starts on a known page. Keep that pairing rather
+            // than resolving the shorter list again after every merge.
+            for (auto it = summaries->begin(); it != summaries->end(); ++it)
+                pageOf.insert(it.value().first, it.key());
+            QVector<int> mergedPages;
+            for (const auto &bookmark : mergedBookmarks)
+                mergedPages.append(pageOf.value(bookmark.position, -1));
+            if (!guard->save(mergedBookmarks, mergedPages, "merged"))
                 return;
-            // The pages no longer pair with the shorter list. Look them up again.
-            guard->pages_.clear();
-            guard->layout_.clear();
             if (guard->changed)
                 guard->changed();
         });

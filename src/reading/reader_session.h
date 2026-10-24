@@ -140,9 +140,13 @@ public:
     bool goToNative(const QString &location, std::function<void(QString)> finished);
     void nativePosition(std::function<void(QString, QString)> finished);
     void compareNativePosition(const QString &location, std::function<void(PositionComparison)> finished);
+    // Source and pagination generation. Navigation within the same layout keeps it.
+    quint64 layoutRevision() const { return newestLayout->load(); }
     // Bookmark lookups on the engine thread. They report nothing when the
     // layout changed before they finished; the caller asks again.
-    void bookmarkLocations(QStringList positions, std::function<void(BookmarkLocations)> finished, bool rangeEndpoints = false, bool sourceOrder = true);
+    void bookmarkLocations(QStringList positions, std::function<void(BookmarkLocations)> finished,
+                           bool rangeEndpoints = false, bool sourceOrder = true,
+                           std::shared_ptr<std::atomic_bool> cancelled = {});
     void bookmarkPages(QStringList positions, std::function<void(QVector<int>)> finished, bool rangeEndpoints = false);
     void pageSummary(int page, std::function<void(QString position, QString excerpt)> finished);
     // Renders a bounded thumbnail with saved highlights without moving the reading position. Only
@@ -365,6 +369,7 @@ private:
     bool loadingImage = false;
     bool preview_ = false;
     bool retiring = false;
+    bool layoutReady_ = false;
     RenderProgress renderProgress_;
     QElapsedTimer renderTimer;
     void beginRenderProgress(RenderReason reason);
@@ -375,6 +380,7 @@ private:
     // The newest request number, readable on the engine worker. Work that only
     // prepares later page turns stops when it no longer matches its own job.
     std::shared_ptr<std::atomic<quint64>> newest = std::make_shared<std::atomic<quint64>>(0);
+    std::shared_ptr<std::atomic<quint64>> newestLayout = std::make_shared<std::atomic<quint64>>(0);
     std::shared_ptr<std::atomic<quint64>> newestPreview = std::make_shared<std::atomic<quint64>>(0);
     std::shared_ptr<std::atomic_bool> searchCancelled;
     QString searchQuery;

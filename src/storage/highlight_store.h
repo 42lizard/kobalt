@@ -2,6 +2,8 @@
 #include <QDateTime>
 #include <QString>
 #include <QVector>
+#include <QJsonObject>
+#include "annotation_database.h"
 
 namespace kobalt {
 struct Highlight {
@@ -15,7 +17,13 @@ struct Highlight {
     QString color = QStringLiteral("gray");
     QString style = QStringLiteral("shaded");
     QString note = {};
+    // Compact database records omit text, chapter and note until requested.
+    bool detailsLoaded = true;
 };
+struct HighlightExcerpt { QString id, text, chapter; };
+QJsonObject highlightJson(const Highlight &highlight);
+bool validHighlight(const Highlight &highlight);
+bool validHighlightMetadata(const Highlight &highlight);
 // Unknown future stored keys display gray without losing their original value.
 bool isHighlightColor(const QString &color);
 QString highlightDisplayColor(const QString &color);
@@ -28,11 +36,16 @@ public:
     static constexpr int maxTextUnits = 256 * 1024;
     static constexpr int maxNoteUnits = 64 * 1024;
     static constexpr qint64 maxFileBytes = 8 * 1024 * 1024;
-    HighlightStore(QString root, QString identity, QByteArray fingerprint, QString title);
+    // root contains legacy JSON; database selects the shared profile database.
+    // An omitted database path uses kobalt.sqlite under root for standalone stores.
+    HighlightStore(QString root, QString identity, QByteArray fingerprint, QString title, QString database = {});
     bool available() const {
         return !key_.isEmpty();
     }
     bool load(QString *error = nullptr);
+    bool loadCompact(QString *error = nullptr);
+    bool details(const QStringList &ids, QVector<Highlight> *rows, QString *error = nullptr) const;
+    bool excerpts(const QStringList &ids, QVector<HighlightExcerpt> *rows, QString *error = nullptr) const;
     bool save(QString *error = nullptr);
     QString folder() const;
     // Metadata files read while looking for a changed sideloaded book's highlights.
@@ -47,10 +60,16 @@ public:
     }
 
 private:
+    friend class AnnotationDatabase;
     bool readFolder(const QString &folder, QString *error);
-    QString root_, identity_, title_, key_;
+    bool load(bool compact, QString *error);
+    QString root_, identity_, title_, database_, key_;
     QByteArray fingerprint_;
     QVector<Highlight> highlights_;
+    QVector<Highlight> persistedHighlights_;
+    AnnotationDatabaseState databaseState_;
+    bool sqlite_ = annotationDatabaseEnabled();
+    bool compact_ = false;
     bool loadFailed_ = false;
     int adoptionMetadataReads_ = 0;
 };

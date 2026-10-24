@@ -1666,6 +1666,7 @@ void Reader::save(bool snapshot) {
 #else
     (void)snapshot;
 #endif
+    if (book->paths().stateReport.isEmpty()) return;
     state["page"] = model->page();
     state["pages"] = model->pages();
     state["cached_pages"] = model->cachedPages();

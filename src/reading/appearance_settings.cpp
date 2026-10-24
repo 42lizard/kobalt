@@ -1,5 +1,9 @@
 #include "appearance_settings.h"
 #include "support/qt_compat.h"
+#include "page_navigation.h"
+#include "header_footer.h"
+#include "sleep_screen.h"
+#include <QStringList>
 
 namespace kobalt::appearance {
 QJsonObject readerPreferences(const QJsonObject &global, const QJsonObject &book) {
@@ -24,12 +28,85 @@ QJsonObject readerPreferences(const QJsonObject &global, const QJsonObject &book
     return result;
 }
 QJsonObject globalPreferences(QJsonObject preferences) {
+    if (preferences.contains("schema") && preferences.value("schema").toDouble(-1) != 1)
+        return preferences;
+    if (!preferences.contains("bold_reading") && preferences.contains("bionic_reading"))
+        preferences["bold_reading"] = preferences.value("bionic_reading");
+    preferences.remove("bionic_reading");
     if (!preferences.contains("header_footer") && preferences.value(lastPresetKey).isString())
         preferences["header_footer"] = preferences.value(lastPresetKey);
     preferences.remove(lastPresetKey);
     preferences.remove(inheritHeaderFooterKey);
     preferences.remove("smooth_images");
     preferences.remove("heavier_interface_text");
+    preferences.remove("columns");
+    preferences.remove("column_spacing");
+    preferences.remove(pageNavigation::barVisibleKey);
+    if (!preferences.contains(pageNavigation::menuViewKey) &&
+        (preferences.contains("pin_stats") || preferences.contains(pageNavigation::thumbnailsKey)))
+        preferences[pageNavigation::menuViewKey] = pageNavigation::value(pageNavigation::menuView(preferences));
+    preferences.remove("pin_stats");
+    preferences.remove(pageNavigation::thumbnailsKey);
+    return preferences;
+}
+QJsonObject cleanPreferences(QJsonObject preferences) {
+    preferences = globalPreferences(std::move(preferences));
+    if (preferences.contains("schema") && preferences.value("schema").toDouble(-1) != 1) return preferences;
+    if (!preferences.contains(sleep::preferenceKey) && preferences.value("kobalt_sleep_screen").isBool())
+        preferences[sleep::preferenceKey] = sleep::value(sleep::mode(preferences));
+    preferences.remove("kobalt_sleep_screen");
+    preferences.remove("highlight_help_seen");
+    bool oldChrome = false;
+    for (const auto *key : {"show_header", "show_footer", "show_clock", "show_progress_bar", "header_text_size", "footer_text_size"})
+        oldChrome = oldChrome || preferences.contains(key);
+    if (oldChrome && !preferences.contains(headerfooter::presetKey)) {
+        const auto layout = headerfooter::select(preferences);
+        preferences[headerfooter::presetKey] = headerfooter::presetValue(layout.preset);
+        if (layout.preset == headerfooter::Preset::Custom)
+            preferences[headerfooter::customKey] = headerfooter::toJson(layout.layout);
+    }
+    for (const auto *key : {"show_header", "show_footer", "show_clock", "show_progress_bar", "header_text_size", "footer_text_size"})
+        preferences.remove(key);
+    for (const auto *key : {"dark_mode", "hide_tab_labels", "inherit_text_layout", "two_columns_landscape",
+                            "page_animations", "show_link_indicator", "edge_light_gestures", "dense_stats_chart",
+                            "native_hide_status_bar", "hide_nonlinear_fragments", "avoid_wasteful_styling",
+                            "minimal_annotation_mode", "show_header", "show_footer", "show_clock", "auto_rotate"})
+        if (preferences.contains(key) && !preferences.value(key).isBool()) preferences.remove(key);
+    const auto choice = [&](const char *key, const QStringList &values) {
+        if (preferences.contains(key) && !values.contains(preferences.value(key).toString())) preferences.remove(key);
+    };
+    choice("bold_reading", {"off", "bold"});
+    choice("widows_orphans", {"publisher", "avoid", "allow"});
+    choice("marks_sort", {"position", "newest", "oldest"});
+    choice("sleep_screen", {"stock", "cover", "page"});
+    choice("header_footer", {"default", "alternative_a", "alternative_b", "custom"});
+    choice("default_menu_view", {"none", "seek", "stats"});
+    choice("navigation_bar_buttons", {"chapters", "pages"});
+    choice("page_navigation", {"taps_and_swipes", "taps_only", "swipes_only", "buttons_only"});
+    choice("tap_zones", {"left_right", "reversed", "top_bottom", "one_handed"});
+    choice("screen_refresh", {"smart", "1", "chapter", "6", "10", "20", "manual"});
+    for (const auto *key : {"default_font_face", "ui_font_face", "ui_mono_font_face", "header_footer_font_face",
+                            "serif_font_face", "sans_font_face", "monospace_font_face"})
+        if (preferences.contains(key) && (!preferences.value(key).isString() || preferences.value(key).toString().size() > 512))
+            preferences.remove(key);
+    if (preferences.contains("orientation")) {
+        const auto value = preferences.value("orientation");
+        if (!value.isDouble() || (value != 1 && value != 2 && value != 4 && value != 8)) preferences.remove("orientation");
+    }
+    const auto number = [&](const char *key, int minimum, int maximum) {
+        const auto value = preferences.value(key);
+        if (preferences.contains(key) && (!value.isDouble() || value.toDouble() < minimum ||
+            value.toDouble() > maximum || value.toDouble() != value.toInt())) preferences.remove(key);
+    };
+    number("column_spacing_percent", 100, 300);
+    number("header_footer_added_weight", 0, 8);
+    if (preferences.value("header_footer_added_weight").toInt() % 2 != 0) preferences.remove("header_footer_added_weight");
+    if (preferences.contains("word_spacing") && (!preferences.value("word_spacing").isDouble() ||
+        preferences.value("word_spacing").toDouble() != preferences.value("word_spacing").toInt() ||
+        !validWordSpacing(preferences.value("word_spacing").toInt()))) preferences.remove("word_spacing");
+    if (preferences.contains("justification_tracking") && (!preferences.value("justification_tracking").isDouble() ||
+        preferences.value("justification_tracking").toDouble() != preferences.value("justification_tracking").toInt() ||
+        !validTracking(preferences.value("justification_tracking").toInt()))) preferences.remove("justification_tracking");
     return preferences;
 }
 QJsonObject bookDefaults(const QJsonObject &preferences) {

@@ -13,6 +13,7 @@ struct Paths {
     QString readingSpeed() const;
     QString selection() const;
     QString annotations() const;
+    QString database() const;
     QString layoutCache() const;
     // Parsed books, owned by CREngine. It deletes any other file it finds there.
     QString documentCache() const;
@@ -20,7 +21,7 @@ struct Paths {
 };
 bool writeJson(const QString &path, const QJsonObject &object);
 
-enum class ReadStatus { Ok, Missing, Unreadable, TooLarge, Invalid };
+enum class ReadStatus { Ok, Missing, Unreadable, TooLarge, Invalid, Unsupported, DatabaseError };
 struct JsonRead {
     QJsonObject object;
     ReadStatus status = ReadStatus::Missing;
@@ -33,4 +34,18 @@ const char *readStatusName(ReadStatus status);
 // The object, or an empty one after any failure. Use readJsonFile when a
 // damaged file must be told apart from a missing one.
 QJsonObject readJson(const QString &path);
+// Durable profile records. Legacy JSON is imported once and then archived.
+// Objects are split into typed fields; nested objects retain their JSON encoding.
+JsonRead readRecord(const QString &directory, const QString &name, const QString &legacy,
+                    qint64 maxBytes = maxJsonBytes);
+bool writeRecord(const QString &directory, const QString &name, const QString &legacy,
+                 const QJsonObject &value, qint64 maxBytes = maxJsonBytes);
+JsonRead readBookState(const Paths &, const QString &identity, const QString &legacy = {});
+bool writeBookState(const Paths &, const QString &identity, const QJsonObject &, const QString &legacy = {});
+JsonRead readPreferences(const QString &path);
+bool writePreferences(const QString &path, const QJsonObject &);
+// Imports recognized durable files and tidies known transient files. Unknown
+// files and failed imports are kept. Safe to retry after an interruption.
+bool prepareProfile(const Paths &);
+void archiveImportedSource(const QString &directory, const QString &source);
 }

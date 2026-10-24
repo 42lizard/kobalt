@@ -40,6 +40,7 @@ void rememberPageMargins(QJsonObject &preferences, const QJsonObject &state);
 QJsonObject readerPreferences(const QJsonObject &global, const QJsonObject &book);
 // Keeps global layout and removes retired inheritance keys.
 QJsonObject globalPreferences(QJsonObject preferences);
+QJsonObject cleanPreferences(QJsonObject preferences);
 // The saved settings that decide how the book is laid out and drawn. A
 // retained layout is reused only when all of them match.
 inline constexpr std::array<const char *, 27> keys{

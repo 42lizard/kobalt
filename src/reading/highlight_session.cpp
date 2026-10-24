@@ -3,28 +3,63 @@
 #include "support/diagnostics.h"
 
 #include <QPointer>
+#include <QHash>
 #include <QUuid>
+#include <algorithm>
 
 namespace kobalt {
 HighlightSession::HighlightSession(ReaderSession &model, std::function<QString()> layout, const QString &annotations,
-                                   const QString &identity, const QByteArray &fingerprint, const QString &title)
+                                   const QString &identity, const QByteArray &fingerprint, const QString &title, const QString &database)
     : model_(model), layout(std::move(layout)),
-      store_(std::make_unique<HighlightStore>(annotations, identity, fingerprint, title)) {
+      store_(std::make_unique<HighlightStore>(annotations, identity, fingerprint, title, database)) {
     if (!store_->available()) {
         store_.reset();
         return;
     }
-    loadFailed_ = !store_->load(&error_);
+    loadFailed_ = !store_->loadCompact(&error_);
     if (loadFailed_) {
         diagnostic("highlights-load", {{"error", error_}}, false);
     }
+}
+HighlightSession::~HighlightSession() {
+    cancelLookup();
+}
+void HighlightSession::cancelLookup() {
+    if (lookupCancelled_)
+        lookupCancelled_->store(true);
+    lookupCancelled_.reset();
+    ++lookupRequest_;
+    lookup_.clear();
 }
 const QVector<Highlight> &HighlightSession::highlights() const {
     static const QVector<Highlight> none;
     return store_ ? store_->highlights() : none;
 }
+bool HighlightSession::excerpts(const QStringList &ids, QVector<HighlightExcerpt> *rows) {
+    if (!store_ || loadFailed_)
+        return false;
+    if (!store_->excerpts(ids, rows, &error_)) {
+        loadFailed_ = true;
+        return false;
+    }
+    return true;
+}
+bool HighlightSession::detail(const QString &id, Highlight *row) {
+    if (!store_ || loadFailed_)
+        return false;
+    QVector<Highlight> loaded;
+    if (!store_->details({id}, &loaded, &error_) || loaded.size() != 1) {
+        loadFailed_ = true;
+        return false;
+    }
+    *row = std::move(loaded.first());
+    return true;
+}
 bool HighlightSession::resolved() const {
-    return store_ && !layout_.isEmpty() && layout_ == layout();
+    return store_ && !layout_.isEmpty() && layoutRevision_ == model_.layoutRevision() && layout_ == layout();
+}
+BookmarkLocations HighlightSession::locations() const {
+    return resolved() ? BookmarkLocations{pages_, order_} : BookmarkLocations{};
 }
 int HighlightSession::page(int index) const {
     return resolved() && index >= 0 ? pages_.value(index * 2, -1) : -1;
@@ -37,13 +72,27 @@ bool HighlightSession::sync() {
         return false;
     }
     const auto key = layout();
-    if (layout_ == key) {
+    const auto revision = model_.layoutRevision();
+    if (layout_ == key && layoutRevision_ == revision) {
         return true;
     }
-    if (lookup_ == key) {
+    if (highlights().isEmpty()) {
+        cancelLookup();
+        layout_ = key;
+        layoutRevision_ = revision;
+        pages_.clear();
+        order_.clear();
+        return true;
+    }
+    if (lookup_ == key && lookupRevision_ == revision && lookupGeneration_ == rangesGeneration_) {
         return false;
     }
+    cancelLookup();
+    lookupCancelled_ = std::make_shared<std::atomic_bool>(false);
     lookup_ = key;
+    lookupRevision_ = revision;
+    lookupGeneration_ = rangesGeneration_;
+    const auto request = lookupRequest_;
     QStringList positions;
     for (const auto &h : highlights()) {
         positions << h.start << h.end;
@@ -51,13 +100,16 @@ bool HighlightSession::sync() {
     QPointer<HighlightSession> guard(this);
     model_.bookmarkLocations(
         positions,
-        [guard, key, count = positions.size(), generation = generation_](BookmarkLocations locations) {
-            if (!guard || guard->lookup_ != key) {
+        [guard, key, revision, request, count = positions.size(), generation = rangesGeneration_](BookmarkLocations locations) {
+            if (!guard || guard->lookupRequest_ != request) {
                 return;
             }
             guard->lookup_.clear();
-            if (guard->generation_ == generation && guard->layout() == key && locations.pages.size() == count) {
+            guard->lookupCancelled_.reset();
+            if (guard->rangesGeneration_ == generation && guard->model_.layoutRevision() == revision &&
+                guard->layout() == key && locations.pages.size() == count && locations.order.size() == count) {
                 guard->layout_ = key;
+                guard->layoutRevision_ = revision;
                 guard->pages_ = std::move(locations.pages);
                 guard->order_ = std::move(locations.order);
             }
@@ -65,7 +117,7 @@ bool HighlightSession::sync() {
                 guard->changed();
             }
         },
-        true);
+        true, true, lookupCancelled_);
     return false;
 }
 bool HighlightSession::persist(QVector<Highlight> highlights) {
@@ -87,8 +139,46 @@ bool HighlightSession::persist(QVector<Highlight> highlights) {
     }
     error_.clear();
     ++generation_;
-    layout_.clear();
-    pages_.clear();
+    const auto &current = store_->highlights();
+    bool sameRanges = previous.size() == current.size();
+    for (int i = 0; sameRanges && i < current.size(); ++i)
+        sameRanges = previous[i].id == current[i].id && previous[i].start == current[i].start &&
+                     previous[i].end == current[i].end;
+    if (!sameRanges) {
+        ++rangesGeneration_;
+        cancelLookup();
+        // Removing passages preserves the order of every remaining endpoint.
+        // Added or changed endpoints need a new batch to assign relative ranks.
+        QHash<QString, int> oldIndices;
+        for (int i = 0; i < previous.size(); ++i)
+            oldIndices.insert(previous[i].id, i);
+        bool retained = resolved();
+        QVector<int> pages, order;
+        for (const auto &h : current) {
+            const int index = oldIndices.value(h.id, -1);
+            if (!retained || index < 0 || previous[index].start != h.start || previous[index].end != h.end) {
+                retained = false;
+                break;
+            }
+            pages << pages_.value(index * 2, -1) << pages_.value(index * 2 + 1, -1);
+            order << order_.value(index * 2, -1) << order_.value(index * 2 + 1, -1);
+        }
+        if (retained) {
+            QVector<int> indices;
+            for (int i = 0; i < order.size(); ++i)
+                if (order[i] >= 0)
+                    indices.append(i);
+            std::sort(indices.begin(), indices.end(), [&order](int a, int b) { return order[a] < order[b]; });
+            for (int rank = 0; rank < indices.size(); ++rank)
+                order[indices[rank]] = rank;
+            pages_ = std::move(pages);
+            order_ = std::move(order);
+        } else {
+            layout_.clear();
+            pages_.clear();
+            order_.clear();
+        }
+    }
     if (changed) {
         changed();
     }
@@ -118,13 +208,15 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
     }
     QPointer<HighlightSession> guard(this);
     const auto generation = generation_;
+    const auto revision = model_.layoutRevision();
     model_.textRange(start, end,
-                     [guard, id, generation, finished, chosenEnd, sentenceEndPolicy, chosenStart, sentenceStartPolicy,
+                     [guard, id, generation, revision, finished, chosenEnd, sentenceEndPolicy, chosenStart, sentenceStartPolicy,
                       color, style](TextRange range) {
                          if (!guard) {
                              return;
                          }
-                         if (range.text.isEmpty() || guard->generation_ != generation) {
+                         if (range.text.isEmpty() || guard->generation_ != generation ||
+                             guard->model_.layoutRevision() != revision) {
                              if (finished) {
                                  finished(false);
                              }
@@ -142,6 +234,13 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
                              if (finished) {
                                  finished(false);
                              }
+                             return;
+                         }
+                         // An adjusted passage must preserve a note that was
+                         // deliberately left out of the rendering metadata.
+                         if (index >= 0 && !list[index].detailsLoaded && !guard->detail(id, &list[index])) {
+                             if (finished)
+                                 finished(false);
                              return;
                          }
                          Highlight h{id.isEmpty() ? QUuid::createUuid().toString().mid(1, 36) : id,
@@ -163,10 +262,11 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
                                  others.append({item.start, item.end});
                          }
                          guard->model_.intersectingRanges(range.start, range.end, others,
-                             [guard, list, h, index, generation, finished](QVector<int> hits) mutable {
+                             [guard, list, h, index, generation, revision, finished](QVector<int> hits) mutable {
                                  if (!guard)
                                      return;
-                                 if (guard->generation_ != generation || !hits.isEmpty()) {
+                                 if (guard->generation_ != generation || guard->model_.layoutRevision() != revision ||
+                                     !hits.isEmpty()) {
                                      if (!hits.isEmpty()) {
                                          guard->error_ = QStringLiteral("overlap");
                                          if (guard->failed)
@@ -179,11 +279,12 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
                                  // Chapter lookup follows the start endpoint, even after a cross-page selection.
                                  const auto positions = QStringList{h.start};
                                  guard->model_.bookmarkPages(
-                                     positions, [guard, list, h, index, generation, finished](QVector<int> pages) mutable {
+                                     positions, [guard, list, h, index, generation, revision, finished](QVector<int> pages) mutable {
                                          if (!guard) {
                                              return;
                                          }
-                                         if (pages.size() != 1 || guard->generation_ != generation) {
+                                         if (pages.size() != 1 || guard->generation_ != generation ||
+                                             guard->model_.layoutRevision() != revision) {
                                              if (finished) {
                                                  finished(false);
                                              }

@@ -208,7 +208,7 @@ public:
         lease = std::make_shared<SourceLease>();
         const auto identity = QUrl::fromLocalFile(QFileInfo(path).absoluteFilePath()).toString();
         const auto statePath = paths.bookState(identity);
-        auto saved = storage::readJson(statePath);
+        auto saved = storage::readBookState(paths, identity, statePath).object;
         const auto preferences = appearance::readerPreferences(storage::readJson(paths.preferences()), saved);
         saved["dark_mode"] = preferences.value("dark_mode").toBool();
         saved["bold_reading"] = preferences.value("bold_reading").toString("off");
@@ -2354,7 +2354,7 @@ private slots:
         } else {
             QVERIFY(host.progress->current == before);
         }
-        QCOMPARE(storage::readJson(paths.bookState(identity)).value("position").toString(), anchor);
+        QCOMPARE(storage::readBookState(paths, identity).object.value("position").toString(), anchor);
     }
 
     void usbFinalSave_data() {
@@ -2411,7 +2411,7 @@ private slots:
         if (outcome != "saved") {
             QVERIFY(host.progress->current == before);
         }
-        const auto local = storage::readJson(paths.bookState(identity));
+        const auto local = storage::readBookState(paths, identity).object;
         QVERIFY(!local.value("position").toString().isEmpty());
     }
 
@@ -2643,6 +2643,148 @@ private slots:
         QCoreApplication::processEvents();
         QCOMPARE(paints.count, 0);
     }
+    void annotationListResolvesPagesOnDemand() {
+        QTemporaryDir directory;
+        storage::Paths paths{directory.path()};
+        ReaderFixture host(paths, testFonts, testPlaceholder);
+        CloseHost cleanup{host};
+        QSignalSpy opened(&host, &ReaderFixture::opened);
+        host.open(textBook, nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        QVector<SearchHit> hits;
+        bool done = false;
+        host.session()->search("reader", [&](SearchBatch batch) {
+            hits += batch.hits;
+            done = batch.done;
+        });
+        QTRY_VERIFY(done);
+        QVERIFY(hits.size() > 2);
+        const QString identity = QUrl::fromLocalFile(QFileInfo(textBook).absoluteFilePath()).toString();
+        HighlightStore store(paths.annotations(), identity, host.session()->sourceHash(), "test", paths.database());
+        QVERIFY(store.load());
+        QVector<Highlight> entries;
+        for (int i = 0; i < 2000; ++i) {
+            const bool first = i == 1999;
+            const auto &hit = first ? hits.first() : hits.last();
+            entries.append({QString("lazy-%1").arg(i), hit.start, hit.end, hit.text,
+                            first ? QString("First passage") : QString("Later passage"),
+                            QDateTime::currentDateTimeUtc()});
+        }
+        store.setHighlights(entries);
+        QVERIFY(store.save());
+        host.shutdown();
+        QTRY_VERIFY(host.idle());
+        host.open(textBook, nativeSize);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 2, 30000);
+        done = false;
+        bool prepared = false;
+        host.window()->preparePresentation([&](bool ready) { prepared = ready; done = true; });
+        QTRY_VERIFY(done && prepared);
+        Canvas canvas(host.window(), nativeSize);
+        canvas.resize(900, 900);
+        canvas.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&canvas));
+        QTRY_VERIFY(!host.session()->busy());
+        auto *page = static_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
+        auto *list = host.window()->findChild<QWidget *>("rrBookmarkList");
+        auto *empty = host.window()->findChild<QLabel *>("rrBookmarkListEmpty");
+        QVERIFY(page && list && empty);
+        auto drain = [&] {
+            bool drained = false;
+            ReaderSession::drain([&] { drained = true; });
+            return QTest::qWaitFor([&] { return drained; }, 10000);
+        };
+        struct ResumeEngine {
+            ~ResumeEngine() { engineActivity().pause(false); }
+        } resume;
+        for (int pass = 0; pass < 2; ++pass) {
+            // Drain ordinary opening/reflow and repeated refreshes first. If
+            // either eagerly resolved endpoints, opening the list below would
+            // display rows immediately instead of its pending state.
+            for (int i = 0; i < 3; ++i) {
+                QCoreApplication::processEvents();
+                QVERIFY(drain());
+            }
+            QCOMPARE(host.session()->markup().imageKey, host.session()->image().cacheKey());
+            QCOMPARE(host.session()->markup().request.saved.size(), 2000);
+            QVERIFY(!host.session()->markup().saved.isEmpty());
+            engineActivity().pause(true);
+            host.window()->findChild<QPushButton *>("rrBookmarks")->click();
+            QVERIFY(list->isVisible() && empty->isVisible());
+            QCOMPARE(empty->text(), QString::fromUtf8("Finding pages…"));
+            QVERIFY(!host.window()->findChild<QWidget *>("rrBookmarkListEmptyHint")->isVisible());
+            // Cancel before the queued job can run, then drain it without an
+            // annotation list demanding another lookup. Reopening must still
+            // wait, rather than accepting the abandoned result.
+            if (pass == 0)
+                host.window()->findChild<QPushButton *>("rrBookmarkListClose")->click();
+            else
+                host.window()->findChild<QPushButton *>("rrBookmarksTab")->click();
+            if (pass == 0)
+                QVERIFY(host.session()->turn(1));
+            engineActivity().pause(false);
+            QTRY_VERIFY(!host.session()->busy());
+            QVERIFY(drain());
+            if (pass == 0) {
+                QVERIFY(host.session()->turn(-1));
+                QTRY_VERIFY(!host.session()->busy());
+                QVERIFY(drain());
+            }
+            engineActivity().pause(true);
+            host.window()->findChild<QPushButton *>(pass == 0 ? "rrBookmarks" : "rrAnnotationsTab")->click();
+            QVERIFY(list->isVisible() && empty->isVisible());
+            QCOMPARE(empty->text(), QString::fromUtf8("Finding pages…"));
+            if (pass == 0) {
+                host.window()->sleepReader();
+                host.window()->sleepViewReady();
+                QVERIFY(!host.window()->isVisible());
+                engineActivity().pause(false);
+                QVERIFY(drain());
+                engineActivity().pause(true);
+                host.window()->prepareWake();
+                host.window()->wakeReader();
+                QVERIFY(list->isVisible() && empty->isVisible());
+            }
+            // Tabs remain usable while the worker has not answered.
+            if (pass == 1) {
+                host.window()->findChild<QPushButton *>("rrBookmarksTab")->click();
+                QCOMPARE(empty->text(), strings::get("bookmarks.empty"));
+                host.window()->findChild<QPushButton *>("rrAnnotationsTab")->click();
+                QCOMPARE(empty->text(), QString::fromUtf8("Finding pages…"));
+            }
+            engineActivity().pause(false);
+            QTRY_VERIFY(!empty->isVisible());
+            auto *first = host.window()->findChild<QPushButton *>("rrAnnotation0");
+            QVERIFY(first && first->isVisible() && first->isEnabled());
+            QCOMPARE(first->accessibleName(), QString("First passage"));
+            if (pass == 0) {
+                host.window()->findChild<QPushButton *>("rrBookmarkListClose")->click();
+                QVERIFY(!list->isVisible());
+                auto appearance = host.session()->state();
+                appearance["font_pixels"] = appearance.value("font_pixels").toInt() + 4;
+                host.session()->apply(appearance);
+                QTRY_VERIFY(!host.session()->busy());
+            }
+        }
+        host.window()->findChild<QPushButton *>("rrAnnotationRemove0")->click();
+        auto *confirm = host.window()->findChild<QPushButton *>("rrConfirmRemoveAnnotation");
+        QTRY_VERIFY(confirm && confirm->isVisible());
+        confirm->click();
+        QVERIFY(drain());
+        host.window()->findChild<QPushButton *>("rrBookmarkListClose")->click();
+        QVERIFY(drain());
+        QVERIFY(host.session()->turn(1));
+        QTRY_VERIFY(!host.session()->busy());
+        QVERIFY(host.session()->turn(-1));
+        QTRY_VERIFY(!host.session()->busy());
+        QVERIFY(drain());
+        QCOMPARE(host.session()->markup().request.saved.size(), 1999);
+        QCOMPARE(host.session()->markup().imageKey, host.session()->image().cacheKey());
+        QVERIFY(host.session()->markup().saved.isEmpty());
+        QVERIFY(store.load());
+        QCOMPARE(store.highlights().size(), 1999);
+    }
+
     void annotationFramesKeepFirstPaintComplete_data() {
         QTest::addColumn<QString>("markup");
         for (const auto *name : {"none", "saved", "draft", "elsewhere", "elsewhere-256", "grayscale"}) {
@@ -2681,7 +2823,7 @@ private slots:
         QTRY_VERIFY(done);
         QVERIFY(!passage.text.isEmpty());
         const QString identity = QUrl::fromLocalFile(QFileInfo(textBook).absoluteFilePath()).toString();
-        HighlightStore store(paths.annotations(), identity, host.session()->sourceHash(), "test");
+        HighlightStore store(paths.annotations(), identity, host.session()->sourceHash(), "test", paths.database());
         if (markup != "none") {
             Highlight entry{"frame-one", passage.start, passage.end, passage.text, {}, QDateTime::currentDateTimeUtc()};
             entry.color = "blue";

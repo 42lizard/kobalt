@@ -31,6 +31,8 @@ QJsonObject readObject(const QString &path, QString *error) {
         problem = "too-large";
         break;
     case storage::ReadStatus::Invalid:
+    case storage::ReadStatus::Unsupported:
+    case storage::ReadStatus::DatabaseError:
         problem = "invalid";
         break;
     }
@@ -210,8 +212,8 @@ QString BookmarkStore::bookKey(const QString &identity, const QByteArray &finger
     return {};
 }
 
-BookmarkStore::BookmarkStore(QString root, QString identity, QByteArray fingerprint, QString title)
-    : root_(std::move(root)), identity_(std::move(identity)), title_(std::move(title)),
+BookmarkStore::BookmarkStore(QString root, QString identity, QByteArray fingerprint, QString title, QString database)
+    : root_(std::move(root)), identity_(std::move(identity)), title_(std::move(title)), database_(std::move(database)),
       key_(bookKey(identity_, fingerprint)), fingerprint_(std::move(fingerprint)) {}
 
 QString BookmarkStore::folder() const {
@@ -253,6 +255,15 @@ bool BookmarkStore::load(QString *error) {
         if (error)
             *error = "no-stable-key";
         return false;
+    }
+    if (sqlite_) {
+        loadFailed_ = !AnnotationDatabase::load({root_, identity_, title_, key_, fingerprint_, database_}, &bookmarks_,
+                                              &databaseState_, error);
+        if (!loadFailed_) {
+            persistedBookmarks_ = bookmarks_;
+            adoptedFrom_ = databaseState_.adoptedFrom;
+        }
+        return !loadFailed_;
     }
     if (QFile::exists(folder() + "/bookmarks.json")) {
         loadFailed_ = !readFolder(folder(), error);
@@ -319,6 +330,17 @@ bool BookmarkStore::save(QString *error) {
         if (error)
             *error = "no-stable-key";
         return false;
+    }
+    if (sqlite_) {
+        const AnnotationBook book{root_, identity_, title_, key_, fingerprint_, database_};
+        if (databaseState_.revision < 0 &&
+            !AnnotationDatabase::load(book, &persistedBookmarks_, &databaseState_, error))
+            return false;
+        if (!AnnotationDatabase::save(book, bookmarks_, persistedBookmarks_, &databaseState_, error))
+            return false;
+        persistedBookmarks_ = bookmarks_;
+        adoptedFrom_.clear();
+        return true;
     }
     QJsonObject book;
     book["version"] = formatVersion;

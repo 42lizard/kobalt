@@ -1,4 +1,5 @@
 #include "reading/appearance_settings.h"
+#include "support/strings.h"
 #include "reader.h"
 #include "interfaces/reader_interface.h"
 #include "interfaces/opening_message.h"
@@ -29,28 +30,29 @@ ReaderController::ReaderController(storage::Paths paths, EngineFontInputs fonts,
                                    std::function<ReaderHostServices()> services,
                                    std::function<void(Qt::ScreenOrientation)> rotate, QObject *parent)
     : QObject(parent), paths(std::move(paths)), fonts(std::move(fonts)), placeholder(std::move(placeholder)),
-      services(std::move(services)), orientation(nullptr, std::move(rotate)) {}
+      services(std::move(services)), orientation(nullptr, std::move(rotate)) {
+    storage::prepareProfile(this->paths);
+}
 ReaderController::~ReaderController() {
     Q_ASSERT(idle());
 }
 QJsonObject ReaderController::lastBook() const {
-    auto book = storage::readJsonFile(paths.directory + "/last-book.json", 256 * 1024).object;
+    auto book = storage::readRecord(paths.directory, "last-book", paths.directory + "/last-book.json", 256 * 1024).object;
     const QFileInfo file(book.value("path").toString());
     if (!file.isFile() || !file.isReadable())
         return {};
     return book;
 }
 bool ReaderController::forgetLastBook() {
-    const auto file = paths.directory + "/last-book.json";
-    return !QFile::exists(file) || QFile::remove(file);
+    return storage::writeRecord(paths.directory, "last-book", paths.directory + "/last-book.json", {}, 256 * 1024);
 }
 QJsonObject ReaderController::savedState(const QString &path) const {
     const auto identity = QUrl::fromLocalFile(QFileInfo(path).absoluteFilePath()).toString();
-    const auto saved = storage::readJson(paths.bookState(identity));
+    const auto saved = storage::readBookState(paths, identity).object;
     return saved.value("book").toString() == identity ? saved : QJsonObject();
 }
 QJsonObject ReaderController::preferences() const {
-    return appearance::readerPreferences(storage::readJson(paths.preferences()), {});
+    return appearance::readerPreferences(storage::readPreferences(paths.preferences()).object, {});
 }
 bool ReaderController::resetBook(const QString &path) {
     if (!idle() || path.isEmpty())
@@ -58,7 +60,7 @@ bool ReaderController::resetBook(const QString &path) {
     const auto identity = QUrl::fromLocalFile(QFileInfo(path).absoluteFilePath()).toString();
     // Keep an identity-only checkpoint so the prototype fallback cannot restore
     // old settings or progress on the next opening.
-    return storage::writeJson(paths.bookState(identity), {{"book", identity}});
+    return storage::writeBookState(paths, identity, {{"book", identity}});
 }
 void ReaderController::open(const QString &path, QSize pixels) {
     if (phase == Phase::Reading && path == current)
@@ -85,17 +87,32 @@ void ReaderController::begin(const QString &path, QSize pixels) {
     const auto identity = QUrl::fromLocalFile(QFileInfo(path).absoluteFilePath()).toString();
     QDir().mkpath(paths.directory);
     const auto statePath = paths.bookState(identity);
-    auto saved = storage::readJson(statePath);
+    const auto stored = storage::readBookState(paths, identity);
+    if (stored.status != storage::ReadStatus::Ok && stored.status != storage::ReadStatus::Missing) {
+        emit failed(strings::get("error.saved_data_unavailable"));
+        retire();
+        return;
+    }
+    auto saved = stored.object;
     // Keep checkpoints from the Android prototype when the file identity
     // matches. New checkpoints use the shared identity-based storage naming.
-    if (saved.isEmpty()) {
+    if (stored.status == storage::ReadStatus::Missing) {
         const auto previous =
             QFileInfo(paths.directory).absolutePath() + "/state/" + QFileInfo(path).completeBaseName() + ".json";
-        saved = storage::readJson(previous);
+        const auto legacy = storage::readJsonFile(previous);
+        if (legacy.object.value("book").toString() == identity) {
+            const auto imported = storage::readBookState(paths, identity, previous);
+            if (imported.status != storage::ReadStatus::Ok) {
+                emit failed(strings::get("error.saved_data_unavailable"));
+                retire();
+                return;
+            }
+            saved = imported.object;
+        }
     }
     if (saved.value("book").toString() != identity)
         saved = {};
-    const auto settings = appearance::readerPreferences(storage::readJson(paths.preferences()), saved);
+    const auto settings = appearance::readerPreferences(storage::readPreferences(paths.preferences()).object, saved);
     saved["dark_mode"] = settings.value("dark_mode").toBool(false);
     saved["bold_reading"] = settings.value("bold_reading").toString("off");
     saved["avoid_wasteful_styling"] = settings.value("avoid_wasteful_styling").toBool(true);
@@ -124,7 +141,8 @@ void ReaderController::begin(const QString &path, QSize pixels) {
             buffer.open(QIODevice::WriteOnly);
             if (guard->opening->coverThumbnail().save(&buffer, "PNG") && cover.size() <= 128 * 1024)
                 last["cover"] = QString::fromLatin1(cover.toBase64());
-            storage::writeJson(guard->paths.directory + "/last-book.json", last);
+            storage::writeRecord(guard->paths.directory, "last-book", guard->paths.directory + "/last-book.json", last,
+                                 256 * 1024);
             const auto hash = guard->opening->sourceHash();
             auto book = std::make_unique<ReadingBook>(std::move(guard->opening), statePath, guard->paths, identity,
                                                       hash, nullptr, ReadingProgress{}, ReadingProgress{});

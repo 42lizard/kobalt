@@ -5,6 +5,7 @@
 #include <lvdocview.h>
 #include <QTextBoundaryFinder>
 #include <QSet>
+#include <QHash>
 #include <vector>
 
 namespace kobalt {
@@ -28,42 +29,198 @@ QString contextText(const QString &text) {
     return result;
 }
 }
-QVector<int> ReaderModel::pagesOf(const QStringList &positions, bool rangeEndpoints, QVector<int> *sourceOrder) const {
-    QVector<int> pages;
-    QVector<ldomXPointerEx> pointers;
-    if (sourceOrder) {
-        pointers.resize(positions.size());
-        sourceOrder->fill(-1, positions.size());
+// Engine pointers belong to one document and one rendered DOM. Reflow can
+// change boxing nodes, so even source-only comparisons use the layout epoch.
+struct ReaderModel::SourceIndex {
+    struct Position {
+        ldomXPointerEx pointer;
+        int page[2] = {-2, -2}; // Normal anchor and exclusive passage end.
+        int textEndpoint = -1;
+        bool selectable() {
+            if (textEndpoint < 0)
+                textEndpoint = !pointer.isNull() && pointer.isText() && pointer.getOffset() >= 0 &&
+                    pointer.getOffset() <= pointer.getNode()->getText().length() && pointer.isVisible();
+            return textEndpoint;
+        }
+    };
+    struct Range { int start, end, input; };
+    struct Node { int range, left = -1, right = -1, maximumEnd; };
+    quint64 layout = 0;
+    qint64 retainedBytes = 0;
+    QHash<QString, int> lookup;
+    std::vector<Position> positions;
+    QVector<QPair<QString, QString>> ranges;
+    QVector<Range> compiled;
+    QVector<Node> tree;
+    bool ordered = true;
+    int root = -1;
+
+    int buildTree(QVector<int> &order, int first, int last) {
+        if (first == last)
+            return -1;
+        const int middle = first + (last - first) / 2;
+        const int node = tree.size();
+        tree.append({order[middle], -1, -1, compiled[order[middle]].end});
+        const int left = buildTree(order, first, middle), right = buildTree(order, middle + 1, last);
+        tree[node].left = left;
+        tree[node].right = right;
+        for (const int child : {left, right}) {
+            if (child >= 0 && positions[tree[node].maximumEnd].pointer.compare(positions[tree[child].maximumEnd].pointer) < 0)
+                tree[node].maximumEnd = tree[child].maximumEnd;
+        }
+        return node;
     }
+    void query(int node, const ldomXPointerEx &first, const ldomXPointerEx &last, QVector<int> &result) const {
+        if (node < 0 || positions[tree[node].maximumEnd].pointer.compare(first) <= 0)
+            return;
+        const auto &entry = compiled[tree[node].range];
+        query(tree[node].left, first, last, result);
+        if (positions[entry.start].pointer.compare(last) >= 0)
+            return;
+        if (first.compare(positions[entry.end].pointer) < 0)
+            result.append(entry.input);
+        query(tree[node].right, first, last, result);
+    }
+    QVector<int> intersections(const ldomXPointerEx &first, const ldomXPointerEx &last) const {
+        QVector<int> result;
+        if (ordered && !(first.isElement() && first.getOffset() > 0) && !(last.isElement() && last.getOffset() > 0)) {
+            query(root, first, last, result);
+            std::sort(result.begin(), result.end());
+        } else {
+            for (const auto &range : compiled)
+                if (positions[range.start].pointer.compare(last) < 0 && first.compare(positions[range.end].pointer) < 0)
+                    result.append(range.input);
+        }
+        return result;
+    }
+};
+
+QPair<int, qint64> ReaderModel::sourceIndexUsage() const {
+    if (!sourceIndex_)
+        return {};
+    const auto &index = *sourceIndex_;
+    return {int(index.positions.size()), index.retainedBytes +
+        qint64(index.ranges.capacity()) * sizeof(QPair<QString, QString>) +
+        qint64(index.compiled.capacity()) * sizeof(SourceIndex::Range) +
+        qint64(index.tree.capacity()) * sizeof(SourceIndex::Node)};
+}
+
+std::shared_ptr<ReaderModel::SourceIndex> ReaderModel::sourceIndex(
+    const QStringList &anchors, const std::function<bool()> &current) const {
+    // Allow room for highlight endpoints, bookmarks and a changing draft.
+    // The byte budget includes UTF-16 key payloads, pointer records and a
+    // conservative hash allocation allowance. Range/tree arrays have their
+    // separate fixed 2001-entry bound and fit in the reserved 256 KiB.
+    constexpr int maximumPositions = 8192;
+    constexpr qint64 maximumBytes = 4 * 1024 * 1024 - 256 * 1024;
+    const auto layout = layoutSignature();
+    if (!sourceIndex_ || sourceIndex_->layout != layout) {
+        sourceIndex_ = std::make_shared<SourceIndex>();
+        sourceIndex_->layout = layout;
+    }
+    auto index = sourceIndex_;
+    QSet<QString> missing;
+    qint64 missingBytes = 0;
+    const auto collect = [&] {
+        missing.clear();
+        missingBytes = 0;
+        int processed = 0;
+        for (const auto &anchor : anchors) {
+            if (processed++ % 64 == 0 && current && !current())
+                return false;
+            if (!index->lookup.contains(anchor) && !missing.contains(anchor)) {
+                missing.insert(anchor);
+                missingBytes += sizeof(SourceIndex::Position) + 96 + qint64(anchor.size()) * sizeof(QChar);
+            }
+        }
+        return true;
+    };
+    if (!collect())
+        return {};
+    if (index->positions.size() + size_t(missing.size()) > maximumPositions ||
+        index->retainedBytes + missingBytes > maximumBytes) {
+        // Replace the whole cache, including its interval tree. Its integer
+        // references must never survive eviction of their source positions.
+        index = std::make_shared<SourceIndex>();
+        index->layout = layout;
+        if (!collect())
+            return {};
+        if (missing.size() <= maximumPositions && missingBytes <= maximumBytes)
+            sourceIndex_ = index;
+        else
+            sourceIndex_.reset(); // Oversized caller data is used only for this call.
+    }
+    index->positions.reserve(index->positions.size() + missing.size());
+    auto *doc = engine_->getDocument();
+    int processed = 0;
+    for (const auto &anchor : missing) {
+        if (processed++ % 64 == 0) {
+            engineActivity().checkpoint();
+            if (current && !current())
+                return {};
+        }
+        SourceIndex::Position entry;
+        if (!anchor.isEmpty())
+            entry.pointer = ldomXPointerEx(doc->createXPointer(cre(anchor)));
+        // Do not keep a caller's oversized QString allocation alive when its
+        // logical key is short. Range snapshots share these compact key copies.
+        index->lookup.insert(QString(anchor.constData(), anchor.size()), int(index->positions.size()));
+        index->positions.push_back(std::move(entry));
+        index->retainedBytes += sizeof(SourceIndex::Position) + 96 + qint64(anchor.size()) * sizeof(QChar);
+    }
+    return index;
+}
+
+QVector<int> ReaderModel::pagesOf(const QStringList &positions, bool rangeEndpoints, QVector<int> *sourceOrder,
+                                 std::function<bool()> current) const {
+    QVector<int> pages;
+    if (sourceOrder)
+        sourceOrder->fill(-1, positions.size());
     if (!engine_) {
         pages.fill(-1, positions.size());
         return pages;
     }
-    auto *doc = engine_->getDocument();
+    if (current && !current())
+        return {};
+    const auto index = sourceIndex(positions, current);
+    if (!index)
+        return {};
+    QVector<int> resolved;
+    resolved.reserve(positions.size());
     for (int i = 0; i < positions.size(); ++i) {
-        const auto &position = positions[i];
-        ldomXPointerEx pointer(position.isEmpty() ? ldomXPointer() : doc->createXPointer(cre(position)));
-        if (sourceOrder)
-            pointers[i] = pointer;
+        if (i % 64 == 0) {
+            engineActivity().checkpoint();
+            if (current && !current())
+                return {};
+        }
+        const int positionIndex = index->lookup.value(positions[i]);
+        resolved.append(positionIndex);
+        auto &entry = index->positions[positionIndex];
+        const bool exclusive = rangeEndpoints && i % 2 == 1;
         // Passage ends are exclusive. Locate their preceding character so a
         // boundary exactly at the next page does not add an empty final page.
-        if (rangeEndpoints && i % 2 == 1 && !pointer.isNull()) {
-            pointer.prevVisibleChar(false);
+        if (entry.page[exclusive] == -2) {
+            if (current && !current())
+                return {};
+            auto pointer = entry.pointer;
+            if (exclusive && !pointer.isNull())
+                pointer.prevVisibleChar(false);
+            entry.page[exclusive] = pointer.isNull() ? -1 : engine_->getBookmarkPage(pointer);
         }
-        pages.append(pointer.isNull() ? -1 : engine_->getBookmarkPage(pointer));
+        pages.append(entry.page[exclusive]);
     }
     if (sourceOrder) {
         QVector<int> indices;
         for (int i = 0; i < positions.size(); ++i)
-            if (!pointers[i].isNull())
+            if (!index->positions[resolved[i]].pointer.isNull())
                 indices.append(i);
         std::stable_sort(indices.begin(), indices.end(), [&](int a, int b) {
-            return pointers[a].compare(pointers[b]) < 0;
+            return index->positions[resolved[a]].pointer.compare(index->positions[resolved[b]].pointer) < 0;
         });
         for (int rank = 0; rank < indices.size(); ++rank)
             (*sourceOrder)[indices[rank]] = rank;
     }
-    return pages;
+    return current && !current() ? QVector<int>() : pages;
 }
 QString ReaderModel::pageStart(int page) const {
     if (!engine_ || page < 0 || page >= pages())
@@ -952,51 +1109,110 @@ QVector<int> ReaderModel::intersectingRanges(const QString &start, const QString
     if (first.isNull() || last.isNull() || first.compare(last) >= 0) {
         return result;
     }
-    for (int i = 0; i < ranges.size(); ++i) {
-        const auto a = resolve(ranges[i].first), b = resolve(ranges[i].second);
-        if (!a.isNull() && !b.isNull() && a.compare(b) < 0 && a.compare(last) < 0 && first.compare(b) < 0) {
+    const auto index = sourceRanges(ranges);
+    for (const int i : index->intersections(first, last)) {
+        auto &a = index->positions[index->lookup.value(ranges[i].first)];
+        auto &b = index->positions[index->lookup.value(ranges[i].second)];
+        // Visibility accepts normalized element ranges. Saving a passage has
+        // always required forward, visible text endpoints, so filter candidates
+        // with that stricter contract before reporting an overlap.
+        if (a.selectable() && b.selectable() && a.pointer.compare(b.pointer) < 0)
             result.append(i);
-        }
     }
     return result;
 }
-QVector<int> ReaderModel::visibleRanges(const QVector<QPair<QString, QString>> &ranges) const {
-    QVector<int> result;
-    if (ranges.isEmpty() || ranges.size() > 2001 || !engine_ || pages() <= 0) {
-        return result;
+std::shared_ptr<ReaderModel::SourceIndex> ReaderModel::sourceRanges(const QVector<QPair<QString, QString>> &ranges) const {
+    auto index = sourceIndex_;
+    if (!index || index->layout != layoutSignature() || index->ranges != ranges) {
+        QStringList anchors;
+        anchors.reserve(ranges.size() * 2);
+        bool oversized = ranges.size() > 2001;
+        for (const auto &range : ranges) {
+            if (range.first.size() <= 4096 && range.second.size() <= 4096)
+                anchors << range.first << range.second;
+            else
+                oversized = true;
+        }
+        index = sourceIndex(anchors);
+        if (oversized)
+            sourceIndex_.reset(); // Do not retain unbounded range arrays or invalid key payloads.
+        index->ranges.clear();
+        index->ranges.reserve(ranges.size());
+        for (const auto &range : ranges) {
+            const auto start = index->lookup.constFind(range.first), end = index->lookup.constFind(range.second);
+            index->ranges.append({start == index->lookup.cend() ? range.first : start.key(),
+                                  end == index->lookup.cend() ? range.second : end.key()});
+        }
+        index->compiled.clear();
+        index->compiled.reserve(ranges.size());
+        index->tree.clear();
+        index->tree.reserve(ranges.size());
+        index->ordered = true;
+        for (int i = 0; i < ranges.size(); ++i) {
+            if (i % 64 == 0)
+                engineActivity().checkpoint();
+            const auto &range = ranges[i];
+            if (range.first.isEmpty() || range.second.isEmpty() || range.first.size() > 4096 || range.second.size() > 4096)
+                continue;
+            int start = index->lookup.value(range.first), end = index->lookup.value(range.second);
+            const auto &a = index->positions[start].pointer, &b = index->positions[end].pointer;
+            if (a.isNull() || b.isNull())
+                continue;
+            const int direction = a.compare(b);
+            if (direction == 0)
+                continue;
+            if (direction > 0)
+                std::swap(start, end);
+            if (index->positions[start].pointer.compare(index->positions[end].pointer) >= 0)
+                continue;
+            // Element child offsets do not have an antisymmetric source order
+            // in CREngine. Preserve the original scan for these uncommon inputs.
+            if ((a.isElement() && a.getOffset() > 0) || (b.isElement() && b.getOffset() > 0))
+                index->ordered = false;
+            index->compiled.append({start, end, i});
+        }
+        QVector<int> order;
+        order.reserve(index->compiled.size());
+        for (int i = 0; i < index->compiled.size(); ++i)
+            order.append(i);
+        if (index->ordered) {
+            std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+                return index->positions[index->compiled[a].start].pointer.compare(
+                           index->positions[index->compiled[b].start].pointer) < 0;
+            });
+            index->root = index->buildTree(order, 0, order.size());
+        }
     }
+    return index;
+}
+QVector<int> ReaderModel::visibleRanges(const QVector<QPair<QString, QString>> &ranges) const {
+    if (ranges.isEmpty() || ranges.size() > 2001 || !engine_ || pages() <= 0)
+        return {};
     auto *doc = engine_->getDocument();
+    const int current = page();
+    // Page boundaries come from the current layout, never from stored page
+    // numbers. A long passage remains visible on every intervening page.
+    const ldomXPointerEx first(engine_->getPageBookmark(current));
+    const ldomXPointerEx last = current + 1 < pages() ? ldomXPointerEx(engine_->getPageBookmark(current + 1))
+                                                      : ldomXRange(doc->getRootNode(), true).getEnd();
+    if (first.isNull() || last.isNull())
+        return {};
+    return sourceRanges(ranges)->intersections(first, last);
+}
+bool ReaderModel::rangeVisible(const QString &start, const QString &end) const {
+    if (!engine_ || pages() <= 0 || start.isEmpty() || end.isEmpty() || start.size() > 4096 || end.size() > 4096)
+        return false;
+    auto *doc = engine_->getDocument();
+    ldomXPointerEx a(doc->createXPointer(cre(start))), b(doc->createXPointer(cre(end)));
+    if (a.isNull() || b.isNull())
+        return false;
+    if (a.compare(b) > 0)
+        std::swap(a, b);
     const int current = page();
     const ldomXPointerEx first(engine_->getPageBookmark(current));
     const ldomXPointerEx last = current + 1 < pages() ? ldomXPointerEx(engine_->getPageBookmark(current + 1))
                                                       : ldomXRange(doc->getRootNode(), true).getEnd();
-    if (first.isNull() || last.isNull()) {
-        return result;
-    }
-    for (int i = 0; i < ranges.size(); ++i) {
-        if (i % 64 == 0) {
-            engineActivity().checkpoint();
-        }
-        const auto &range = ranges[i];
-        if (range.first.isEmpty() || range.second.isEmpty() || range.first.size() > 4096 ||
-            range.second.size() > 4096) {
-            continue;
-        }
-        ldomXPointerEx start(doc->createXPointer(cre(range.first))), end(doc->createXPointer(cre(range.second)));
-        // rangeRects also accepts element boundaries, including page bookmarks.
-        // Keep the same anchor contract when filtering an existing passage.
-        if (start.isNull() || end.isNull()) {
-            continue;
-        }
-        if (start.compare(end) > 0) {
-            std::swap(start, end);
-        }
-        // Page bookmarks compare source positions without formatting either end.
-        if (start.compare(end) < 0 && start.compare(last) < 0 && first.compare(end) < 0) {
-            result.append(i);
-        }
-    }
-    return result;
+    return !first.isNull() && !last.isNull() && a.compare(b) < 0 && a.compare(last) < 0 && first.compare(b) < 0;
 }
 AnnotationGeometry ReaderModel::annotationGeometry(const QString &start, const QString &end) {
     AnnotationGeometry result;

@@ -536,10 +536,12 @@ void Reader::openBookmarks() {
     bottomControls->hide();
     const int top = navigation ? navigation->statusHeight() : 0;
     bookmarkList->setGeometry(0, top, width(), (navigation ? navigation->contentBottom(size()) : height()) - top);
-    if (!highlights->highlights().isEmpty())
-        bookmarkList->showAnnotations(annotationRows());
-    else
+    if (!highlights->highlights().isEmpty()) {
+        const bool ready = highlights->resolved() || highlights->sync();
+        bookmarkList->showAnnotations(ready ? annotationRows() : QVector<BookmarkRow>(), !ready);
+    } else {
         bookmarkList->showBookmarks(bookmarkRows());
+    }
     refresh();
 }
 
@@ -607,10 +609,12 @@ void Reader::showBookmarkError() {
 QVector<kobalt::BookmarkRow> Reader::bookmarkRows() const {
     QVector<kobalt::BookmarkRow> rows;
     const auto &list = bookmarks->bookmarks();
+    const auto pages = bookmarks->resolvedPages();
     const auto contents = model->chapters();
+    rows.reserve(list.size());
     for (int i = 0; i < list.size(); ++i) {
         kobalt::BookmarkRow row{list[i].position, list[i].chapter,    list[i].excerpt,
-                                list[i].created,  bookmarks->page(i), false};
+                                list[i].created,  pages.value(i, -1), false};
         row.current = row.page >= 0 && row.page == model->page();
         // Name the chapter the page is in now; the stored title covers a missing contents list.
         for (const auto &link : contents)

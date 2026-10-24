@@ -61,7 +61,10 @@ public:
     Settings settings;
 
     bool load(const QString &path);
+    bool restore(const QJsonObject &legacy);
     bool save(const QString &path) const;
+    bool loadDatabase(const QString &directory);
+    bool saveDatabase(const QString &directory) const;
     bool hasFolder(const QString &key) const;
     // Adds or relabels a folder. Returns false when it was already present.
     bool addFolder(const Folder &folder);

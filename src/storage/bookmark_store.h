@@ -4,6 +4,7 @@
 #include <QString>
 #include <QVector>
 #include <functional>
+#include "annotation_database.h"
 
 namespace kobalt {
 // A bookmark marks the page that starts at `position`, a CREngine XPointer.
@@ -18,10 +19,10 @@ struct Bookmark {
     }
 };
 
-// Kobalt's own bookmarks, separate from Nickel's. Each book has a folder in
-// `root` (.adds/kobalt/annotations). A purchased book's folder is named after
-// Kobo's book ID, which stays the same across downloads; a sideloaded book's
-// after its content fingerprint, which stays the same when the file moves.
+// Kobalt's own bookmarks, separate from Nickel's. Legacy JSON uses one
+// folder per book under `root`. SQLite shares the supplied database file.
+// Purchased books use Kobo's stable book ID; sideloaded books use their
+// content fingerprint, which stays the same when the file moves.
 class BookmarkStore {
 public:
     static constexpr int maxBookmarks = 2000;
@@ -30,7 +31,8 @@ public:
     // The folder name for a book, or an empty string when it has no stable key.
     static QString bookKey(const QString &identity, const QByteArray &fingerprint);
 
-    BookmarkStore(QString root, QString identity, QByteArray fingerprint, QString title);
+    // An omitted database path uses kobalt.sqlite under root for standalone stores.
+    BookmarkStore(QString root, QString identity, QByteArray fingerprint, QString title, QString database = {});
     // Reads the book's folder. A sideloaded file that changed has a new
     // fingerprint; its bookmarks then come from the folder that last saw its
     // path, and the next save writes them to the new folder.
@@ -63,9 +65,13 @@ public:
                const std::function<Bookmark(int page, const QDateTime &created)> &atPage);
 
 private:
-    QString root_, identity_, title_, key_, adoptedFrom_;
+    friend class AnnotationDatabase;
+    QString root_, identity_, title_, database_, key_, adoptedFrom_;
     QByteArray fingerprint_;
     QVector<Bookmark> bookmarks_;
+    QVector<Bookmark> persistedBookmarks_;
+    AnnotationDatabaseState databaseState_;
+    bool sqlite_ = annotationDatabaseEnabled();
     bool loadFailed_ = false;
     int adoptionMetadataReads_ = 0;
     bool readFolder(const QString &folder, QString *error);

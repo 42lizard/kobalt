@@ -3,6 +3,7 @@
 #include "assets/bundled_fonts.h"
 #include "assets/system_fonts.h"
 #include "storage/reader_storage.h"
+#include "support/diagnostics.h"
 
 namespace kobalt::nickel {
 inline constexpr auto configDir = "/mnt/onboard/.adds/kobalt";
@@ -10,8 +11,8 @@ inline constexpr auto selectionPath = "/mnt/onboard/.adds/kobalt/config.json";
 #ifdef KOBALT_READER_HARDWARE
 inline constexpr auto startupPath = KOBALT_CONFIG_DIR "/startup-session";
 inline constexpr auto activePath = KOBALT_CONFIG_DIR "/active-session.json";
-inline constexpr auto stateReport = KOBALT_CONFIG_DIR "/state.json";
-inline constexpr auto sessionReport = KOBALT_CONFIG_DIR "/session.json";
+inline constexpr auto stateReport = KOBALT_CONFIG_DIR "/diagnostics/state.json";
+inline constexpr auto sessionReport = KOBALT_CONFIG_DIR "/diagnostics/session.json";
 #else
 inline constexpr auto activePath = "/instance/kobalt-active";
 inline constexpr auto stateReport = "/instance/artifacts/kobalt-state.json";
@@ -21,6 +22,17 @@ inline constexpr auto sessionReport = "/instance/artifacts/kobalt-session.json";
 // Nickel owns one environment for the loaded modification. Sessions receive
 // values from it; engine and UI code do not look up a platform environment.
 struct ReaderEnvironment {
+    ReaderEnvironment() {
+#ifdef KOBALT_READER_HARDWARE
+        if (!diagnosticsRequested(QString::fromLatin1(configDir))) {
+            paths.stateReport.clear();
+            paths.sessionReport.clear();
+        }
+#endif
+    }
+    void reportSession(const QJsonObject &report) const {
+        if (!paths.sessionReport.isEmpty()) storage::writeJson(paths.sessionReport, report);
+    }
     AssetBundle assets{QStringLiteral("/mnt/onboard/.adds/kobalt/assets"), QStringLiteral(KOBALT_VERSION)};
     FontCopies fontCopies;
     storage::Paths paths{QString::fromLatin1(configDir),

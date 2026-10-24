@@ -211,7 +211,7 @@ public:
             if (elapsed.elapsed() >= 30000) {
                 rejected = true;
                 retry.stop();
-                writeJson(sessionReport,
+                environment().reportSession(
                           kobalt::qt::object({{"status", "stock"}, {"reason", "Native initialization not observed"}}));
                 kobalt::diagnostic("startup-failed", kobalt::qt::object({{"reason", "native-initialization"}}));
                 return;
@@ -326,7 +326,7 @@ public:
         controller = candidate;
         retry.stop();
         finish(false);
-        writeJson(sessionReport, kobalt::qt::object({{"status", "ready"}}));
+        environment().reportSession(kobalt::qt::object({{"status", "ready"}}));
         kobalt::diagnostic("ready",
                            kobalt::qt::object({{"startup_ms", double(elapsed.elapsed())}, {"opener", fromOpener}}));
         nh_log("reader: native controller ready");
@@ -352,7 +352,12 @@ private:
 };
 
 int initialize() {
-    kobalt::initializeDiagnostics(QString::fromLatin1(configDir));
+#ifdef KOBALT_READER_HARDWARE
+    if (kobalt::diagnosticsRequested(QString::fromLatin1(configDir)))
+        kobalt::initializeDiagnostics(QString::fromLatin1(configDir) + "/diagnostics");
+#else
+    kobalt::initializeDiagnostics(QString::fromLatin1(configDir) + "/diagnostics");
+#endif
     kobalt::diagnostic("startup-hooks",
                        kobalt::qt::object({{"finish_hook_available", bool(nativeFinishInitialization)},
                                            {"finish_next_is_stock",
@@ -391,7 +396,7 @@ int initialize() {
 #ifdef KOBALT_READER_HARDWARE
     if (!supportedFirmware()) {
         kobalt::diagnostic("hardware-rejected");
-        writeJson(sessionReport,
+        environment().reportSession(
                   kobalt::qt::object({{"status", "stock"}, {"reason", "Requires firmware 4.38 or later"}}));
         return 0;
     }

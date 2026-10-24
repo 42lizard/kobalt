@@ -55,6 +55,8 @@ QByteArray read(const QString &path) {
 }
 
 int main(int argc, char **argv) {
+    // These cases obstruct legacy JSON files; SQLite behavior has its own database regressions.
+    qputenv("KOBALT_ANNOTATIONS_SQLITE", "0");
     QGuiApplication app(argc, argv);
     require(argc == 2, "Expected a synthetic EPUB");
     const auto path = QString::fromLocal8Bit(argv[1]);
@@ -293,6 +295,14 @@ int main(int argc, char **argv) {
         }
         require(session->bookmarks().size() == 2 && session->marked(1) && session->marked(3),
                 "Two bookmarks were not added");
+        layout = "navigation-during-lookup";
+        const int beforeLookup = changed;
+        require(!session->sync() && !session->sync(), "A new bookmark layout resolved synchronously");
+        require(model.go(2), "Cannot turn during bookmark lookup");
+        waitUntil([&] { return !model.busy(); });
+        drain(model);
+        require(session->resolved() && session->resolvedPages() == QVector<int>({1, 3}) && changed == beforeLookup + 1,
+                "A page turn discarded or repeated an otherwise valid bookmark lookup");
 
         // Two taps on one page before the engine answers add one bookmark.
         require(model.go(2), "Cannot turn to page 2");
@@ -375,7 +385,7 @@ int main(int argc, char **argv) {
                     pages.insert(page);
                 require(pages.size() < cancelled.pages().size(), "The cancelled merge needs bookmarks sharing a page");
                 // Merge summaries are queued before this callback. A page turn
-                // cancels their replies without changing the layout key.
+                // must keep them valid because their source layout is unchanged.
                 turnedDuringMerge = true;
                 require(model.go(1), "Cannot turn during the bookmark merge");
             };
@@ -384,19 +394,13 @@ int main(int argc, char **argv) {
                 return turnedDuringMerge && !model.busy();
             });
             drain(model);
-            waitUntil([&] {
-                return cancelled.sync();
-            });
-            drain(model);
-            waitUntil([&] {
-                return cancelled.sync();
-            });
+            require(cancelled.resolved(), "A page turn forced another bookmark lookup after merging");
             QSet<int> seen;
             for (int page : cancelled.pages()) {
-                require(page >= 0 && !seen.contains(page), "A page turn left bookmarks unmerged after retry");
+                require(page >= 0 && !seen.contains(page), "A page turn left bookmarks unmerged");
                 seen.insert(page);
             }
-            require(cancelled.bookmarks().size() == cancelled.pages().size(), "Retry lost bookmark page pairing");
+            require(cancelled.bookmarks().size() == cancelled.pages().size(), "Merge lost bookmark page pairing");
         }
         require(model.go(0), "Cannot return after the cancelled bookmark merge");
         waitUntil([&] {

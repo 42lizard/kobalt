@@ -34,14 +34,33 @@ bool colorToken(const QString &color) {
     }
     return true;
 }
-bool valid(const Highlight &h) {
+bool validMetadata(const Highlight &h) {
     return !h.id.isEmpty() && h.id.size() <= 128 && !h.start.isEmpty() && h.start.size() <= 4096 && !h.end.isEmpty() &&
            h.end.size() <= 4096 && (!h.sentenceEndPolicy || (!h.chosenEnd.isEmpty() && h.chosenEnd.size() <= 4096)) &&
            (!h.sentenceStartPolicy || (!h.chosenStart.isEmpty() && h.chosenStart.size() <= 4096)) && h.start != h.end &&
-           !h.text.isEmpty() && h.text.size() <= HighlightStore::maxTextUnits && h.chapter.size() <= 512 &&
-           h.created.isValid() && colorToken(h.color) && colorToken(h.style) &&
+           h.created.isValid() && colorToken(h.color) && colorToken(h.style);
+}
+bool valid(const Highlight &h) {
+    return h.detailsLoaded && validMetadata(h) && !h.text.isEmpty() &&
+           h.text.size() <= HighlightStore::maxTextUnits && h.chapter.size() <= 512 &&
            h.note.size() <= HighlightStore::maxNoteUnits;
 }
+}
+bool validHighlight(const Highlight &h) {
+    return valid(h);
+}
+bool validHighlightMetadata(const Highlight &h) { return validMetadata(h); }
+QJsonObject highlightJson(const Highlight &h) {
+    QJsonObject item = qt::object({{"id", h.id}, {"start", h.start}, {"end", h.end}, {"text", h.text},
+                                  {"chapter", h.chapter}, {"created", h.created.toUTC().toString(Qt::ISODate)}});
+    item["color"] = h.color;
+    item["style"] = h.style;
+    if (!h.note.isEmpty()) item["note"] = h.note;
+    if (h.sentenceEndPolicy)
+        item["sentence_end"] = qt::object({{"enabled", true}, {"chosen_end", h.chosenEnd}});
+    if (h.sentenceStartPolicy)
+        item["sentence_start"] = qt::object({{"enabled", true}, {"chosen_start", h.chosenStart}});
+    return item;
 }
 bool isHighlightColor(const QString &color) {
     return color == QLatin1String("gray") || color == QLatin1String("yellow") || color == QLatin1String("green") ||
@@ -56,8 +75,8 @@ bool isHighlightStyle(const QString &style) {
 QString highlightDisplayStyle(const QString &style) {
     return isHighlightStyle(style) ? style : QStringLiteral("shaded");
 }
-HighlightStore::HighlightStore(QString root, QString identity, QByteArray fingerprint, QString title)
-    : root_(std::move(root)), identity_(std::move(identity)), title_(std::move(title)),
+HighlightStore::HighlightStore(QString root, QString identity, QByteArray fingerprint, QString title, QString database)
+    : root_(std::move(root)), identity_(std::move(identity)), title_(std::move(title)), database_(std::move(database)),
       key_(BookmarkStore::bookKey(identity_, fingerprint)), fingerprint_(std::move(fingerprint)) {}
 QString HighlightStore::folder() const {
     return key_.isEmpty() ? QString() : root_ + '/' + key_;
@@ -134,11 +153,25 @@ bool HighlightStore::readFolder(const QString &folder, QString *error) {
     return true;
 }
 bool HighlightStore::load(QString *error) {
+    return load(false, error);
+}
+bool HighlightStore::loadCompact(QString *error) {
+    return load(true, error);
+}
+bool HighlightStore::load(bool compact, QString *error) {
+    compact_ = sqlite_ && compact;
     highlights_.clear();
     adoptionMetadataReads_ = 0;
     loadFailed_ = true;
     if (!available()) {
         return problem(error, "no-stable-key");
+    }
+    if (sqlite_) {
+        const AnnotationBook book{root_, identity_, title_, key_, fingerprint_, database_};
+        loadFailed_ = !(compact ? AnnotationDatabase::loadCompact(book, &highlights_, &databaseState_, error)
+                               : AnnotationDatabase::load(book, &highlights_, &databaseState_, error));
+        if (!loadFailed_) persistedHighlights_ = highlights_;
+        return !loadFailed_;
     }
     QString source = folder();
     if (!QFile::exists(source + "/highlights.json") && identity_.startsWith("file://")) {
@@ -162,12 +195,55 @@ bool HighlightStore::load(QString *error) {
     loadFailed_ = !readFolder(source, error);
     return !loadFailed_;
 }
+bool HighlightStore::details(const QStringList &ids, QVector<Highlight> *rows, QString *error) const {
+    if (loadFailed_) return problem(error, "load-failed");
+    if (ids.size() > maxHighlights) return problem(error, "storage-limit");
+    if (sqlite_)
+        return AnnotationDatabase::details({root_, identity_, title_, key_, fingerprint_, database_}, ids, databaseState_, rows, error);
+    QVector<Highlight> result;
+    QHash<QString, Highlight> indexed;
+    for (const auto &h : highlights_) indexed.insert(h.id, h);
+    for (const auto &id : ids) {
+        if (!indexed.contains(id)) return problem(error, "missing-highlight");
+        result.append(indexed.value(id));
+    }
+    *rows = std::move(result);
+    if (error) error->clear();
+    return true;
+}
+bool HighlightStore::excerpts(const QStringList &ids, QVector<HighlightExcerpt> *rows, QString *error) const {
+    if (loadFailed_) return problem(error, "load-failed");
+    if (ids.size() > maxHighlights) return problem(error, "storage-limit");
+    if (sqlite_)
+        return AnnotationDatabase::excerpts({root_, identity_, title_, key_, fingerprint_, database_}, ids, databaseState_, rows, error);
+    QVector<Highlight> full;
+    if (!details(ids, &full, error)) return false;
+    QVector<HighlightExcerpt> result;
+    for (const auto &h : full) result.append({h.id, h.text, h.chapter});
+    *rows = std::move(result);
+    return true;
+}
 bool HighlightStore::save(QString *error) {
     if (loadFailed_) {
         return problem(error, "load-failed");
     }
     if (!available()) {
         return problem(error, "no-stable-key");
+    }
+    if (sqlite_) {
+        const AnnotationBook book{root_, identity_, title_, key_, fingerprint_, database_};
+        if (databaseState_.revision < 0 &&
+            !AnnotationDatabase::load(book, &persistedHighlights_, &databaseState_, error))
+            return false;
+        if (!AnnotationDatabase::save(book, highlights_, persistedHighlights_, &databaseState_, error))
+            return false;
+        if (compact_) {
+            for (auto &h : highlights_) {
+                h.text.clear(); h.chapter.clear(); h.note.clear(); h.detailsLoaded = false;
+            }
+        }
+        persistedHighlights_ = highlights_;
+        return true;
     }
     if (highlights_.size() > maxHighlights) {
         return problem(error, "storage-limit");
@@ -179,23 +255,7 @@ bool HighlightStore::save(QString *error) {
             return problem(error, "invalid-highlight");
         }
         ids.insert(h.id);
-        QJsonObject item = qt::object({{"id", h.id},
-                                       {"start", h.start},
-                                       {"end", h.end},
-                                       {"text", h.text},
-                                       {"chapter", h.chapter},
-                                       {"created", h.created.toUTC().toString(Qt::ISODate)}});
-        item["color"] = h.color;
-        item["style"] = h.style;
-        if (!h.note.isEmpty())
-            item["note"] = h.note;
-        if (h.sentenceEndPolicy) {
-            item["sentence_end"] = qt::object({{"enabled", true}, {"chosen_end", h.chosenEnd}});
-        }
-        if (h.sentenceStartPolicy) {
-            item["sentence_start"] = qt::object({{"enabled", true}, {"chosen_start", h.chosenStart}});
-        }
-        list.append(item);
+        list.append(highlightJson(h));
     }
     const auto bytes = QJsonDocument(qt::object({{"version", 1}, {"highlights", list}})).toJson();
     const auto metadata = QJsonDocument(qt::object({{"version", 1},

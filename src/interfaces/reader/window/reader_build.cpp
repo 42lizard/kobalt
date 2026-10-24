@@ -85,7 +85,7 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
     setWindowModality(Qt::ApplicationModal);
     // A damaged settings file still falls back to the defaults, as a
     // missing one does, but the diagnostics say which it was.
-    const auto savedSettings = kobalt::storage::readJsonFile(book->paths().preferences());
+    const auto savedSettings = kobalt::storage::readPreferences(book->paths().preferences());
     if (savedSettings.status != kobalt::storage::ReadStatus::Ok &&
         savedSettings.status != kobalt::storage::ReadStatus::Missing)
         kobalt::diagnostic("settings-unreadable", {{"status", kobalt::storage::readStatusName(savedSettings.status)}},
@@ -99,7 +99,7 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
         auto global = appearance::globalPreferences(preferences);
         appearance::rememberTextLayout(global, model->state());
         appearance::rememberPageMargins(global, model->state());
-        if (global != savedSettings.object && !writeJson(book->paths().preferences(), global)) {
+        if (global != savedSettings.object && !kobalt::storage::writePreferences(book->paths().preferences(), global)) {
             kobalt::diagnostic("last-appearance-unsaved", {}, false);
         }
     }
@@ -108,18 +108,19 @@ Reader::Reader(std::unique_ptr<kobalt::ReadingBook> openedBook, kobalt::ReaderOr
         [this] {
             return layoutKey();
         },
-        book->paths().annotations(), book->identity(), book->fingerprint(), model->title());
+        book->paths().annotations(), book->identity(), book->fingerprint(), model->title(), book->paths().database());
     highlights = std::make_unique<kobalt::HighlightSession>(
         *model,
         [this] {
             return layoutKey();
         },
-        book->paths().annotations(), book->identity(), book->fingerprint(), model->title());
+        book->paths().annotations(), book->identity(), book->fingerprint(), model->title(), book->paths().database());
     highlights->changed = [this] {
         syncMarkupRequest();
         annotationFrame.clear();
         if (bookmarkList && bookmarkList->isVisible() && bookmarkList->annotationsShown()) {
-            bookmarkList->showAnnotations(annotationRows());
+            const bool ready = highlights->resolved() || highlights->sync();
+            bookmarkList->showAnnotations(ready ? annotationRows() : QVector<BookmarkRow>(), !ready);
         }
         if (!annotationSaving) {
             refresh();
@@ -629,6 +630,20 @@ void Reader::buildOverlays() {
     choices = new ChoiceScreen(this);
     choices->hide();
     bookmarkList = new kobalt::BookmarkList(this);
+    bookmarkList->annotationDetails = [this](const QStringList &ids, QVector<BookmarkRow> *rows) {
+        QVector<HighlightExcerpt> excerpts;
+        if (!highlights->excerpts(ids, &excerpts))
+            return false;
+        rows->clear();
+        rows->reserve(excerpts.size());
+        for (const auto &excerpt : excerpts)
+            rows->append({excerpt.id, excerpt.chapter, excerpt.text, {}, -1, false});
+        return true;
+    };
+    bookmarkList->loadingCancelled = [session = QPointer<HighlightSession>(highlights.get())] {
+        if (session)
+            session->cancelLookup();
+    };
     bookmarkList->setSortOrder(preferences.value("marks_sort").toString("position"));
     bookmarkList->sortRequested = [this](const QString &order) {
         auto next = preferences;
@@ -653,7 +668,8 @@ void Reader::buildOverlays() {
     bookmarkList->tabRequested = [this](bool annotations) {
         annotationPopover->hide();
         if (annotations) {
-            bookmarkList->showAnnotations(annotationRows());
+            const bool ready = highlights->resolved() || highlights->sync();
+            bookmarkList->showAnnotations(ready ? annotationRows() : QVector<BookmarkRow>(), !ready);
         } else {
             bookmarkList->showBookmarks(bookmarkRows());
         }

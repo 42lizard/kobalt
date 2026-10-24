@@ -59,6 +59,9 @@ void pauseDiagnostics(bool value) {
     QMutexLocker lock(&mutex);
     paused = value;
 }
+bool diagnosticsRequested(const QString &profile) {
+    return qgetenv("KOBALT_DIAGNOSTICS") == "1" || QFile::exists(profile + "/diagnostics-enabled");
+}
 void initializeDiagnostics(const QString &directory) {
     {
         QMutexLocker lock(&mutex);

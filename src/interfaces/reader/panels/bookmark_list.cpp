@@ -196,16 +196,28 @@ int BookmarkList::pageCount() const {
 int BookmarkList::listTop() const {
     return c::actionHeight + strip::stripHeight;
 }
-void BookmarkList::showAnnotations(QVector<BookmarkRow> list) {
-    showItems(std::move(list), true);
+void BookmarkList::showAnnotations(QVector<BookmarkRow> list, bool pending) {
+    showItems(std::move(list), true, pending);
 }
 void BookmarkList::showBookmarks(QVector<BookmarkRow> list) {
     showItems(std::move(list), false);
 }
-void BookmarkList::showItems(QVector<BookmarkRow> list, bool annotationTab) {
+void BookmarkList::showItems(QVector<BookmarkRow> list, bool annotationTab, bool pending) {
+    if (loading && annotations && !annotationTab && loadingCancelled)
+        loadingCancelled();
     const bool reopening = !isVisible() || annotations != annotationTab;
     annotations = annotationTab;
-    items = std::move(list);
+    loading = pending;
+    visibleDetailIds.clear();
+    visibleDetails.clear();
+    visibleDetailsReady = false;
+    items = loading ? QVector<BookmarkRow>() : std::move(list);
+    if (annotations && annotationDetails) {
+        for (auto &item : items) {
+            item.chapter.clear();
+            item.excerpt.clear();
+        }
+    }
     sortItems();
     if (reopening)
         page = 0;
@@ -217,6 +229,29 @@ void BookmarkList::showItems(QVector<BookmarkRow> list, bool annotationTab) {
 void BookmarkList::resizeEvent(QResizeEvent *) {
     arrange();
     redraw();
+}
+void BookmarkList::hideEvent(QHideEvent *event) {
+    visibleDetailIds.clear();
+    visibleDetails.clear();
+    visibleDetailsReady = false;
+    if (loading && annotations && loadingCancelled)
+        loadingCancelled();
+    if (annotations && annotationDetails) {
+        for (int i = 0; i < buttons.size(); ++i) {
+            auto *row = static_cast<ui::ListRow *>(buttons[i]);
+            row->setTitle({});
+            row->setDetail({});
+            row->setAccessibleName({});
+            row->setEnabled(false);
+            removes[i]->setEnabled(false);
+        }
+    }
+    ui::Panel::hideEvent(event);
+}
+void BookmarkList::showEvent(QShowEvent *event) {
+    ui::Panel::showEvent(event);
+    if (annotations && annotationDetails && !loading)
+        redraw();
 }
 void BookmarkList::paintEvent(QPaintEvent *event) {
     ui::Panel::paintEvent(event);
@@ -232,17 +267,32 @@ void BookmarkList::arrange() {
     const int textLineHeight = ui::needsPrivateText(QStringLiteral("Mg"), font)
         ? ui::measurePrivateTextLayout(QStringLiteral("Mg"), font).lineHeight : QFontMetrics(font).lineSpacing();
     const int textWidth = qMax(1, width() - c::cellWidth - 2 * ui::metrics::list::inset);
+    if (excerptCacheFont != font || excerptCacheWidth != textWidth || excerptCacheLineHeight != textLineHeight) {
+        excerptLineCache.clear();
+        excerptCacheFont = font;
+        excerptCacheWidth = textWidth;
+        excerptCacheLineHeight = textLineHeight;
+    }
+    // Keep only this list's excerpts. Sorting and reopening reuse wrapping,
+    // while removed or replaced text leaves the cache with the next layout.
+    QHash<QString, int> nextLineCache;
+    nextLineCache.reserve(items.size());
     itemHeights.clear();
     excerptLines.clear();
     int total = 0;
     for (const auto &item : items) {
-        const int count = qBound(1, (ui::wrappedInterfaceTextHeight(item.excerpt, font, textWidth) + textLineHeight - 1) / qMax(1, textLineHeight), 2);
+        const bool lazy = annotations && bool(annotationDetails);
+        int count = lazy ? 2 : nextLineCache.value(item.excerpt, excerptLineCache.value(item.excerpt));
+        if (count == 0)
+            count = qBound(1, (ui::wrappedInterfaceTextHeight(item.excerpt, font, textWidth) + textLineHeight - 1) / qMax(1, textLineHeight), 2);
+        if (!lazy) nextLineCache.insert(item.excerpt, count);
         const int itemHeight = qMax(int(ui::metrics::list::threeLines),
             2 * int(ui::metrics::list::lineInset) + (count + 2) * lineHeight + int(ui::px(12)) + int(ui::metrics::control::border));
         excerptLines.append(count);
         itemHeights.append(itemHeight);
         total += itemHeight;
     }
+    excerptLineCache.swap(nextLineCache);
     const int capacity = total > available ? qMax(1, available - c::actionHeight) : available;
     pageStarts = {0};
     int used = 0;
@@ -276,17 +326,47 @@ void BookmarkList::arrange() {
 void BookmarkList::redraw() {
     const int first = pageStarts.value(page, 0);
     rows = (page + 1 < pageStarts.size() ? pageStarts[page + 1] : items.size()) - first;
+    const bool lazy = annotations && bool(annotationDetails);
+    QVector<BookmarkRow> details;
+    bool detailsReady = !lazy;
+    if (lazy) {
+        // Widgets only show this page. The bounded detail cache can survive a
+        // layout change when the ordered visible IDs remain the same.
+        for (auto *button : buttons) {
+            auto *row = static_cast<ui::ListRow *>(button);
+            row->setTitle({});
+            row->setDetail({});
+            row->setAccessibleName({});
+        }
+        if (isVisible() && !loading && rows > 0) {
+            QStringList ids;
+            for (int i = first; i < first + rows; ++i) ids.append(items[i].position);
+            if (visibleDetailIds != ids) {
+                visibleDetailIds = ids;
+                visibleDetails.clear();
+                visibleDetailsReady = annotationDetails(ids, &visibleDetails) && visibleDetails.size() == ids.size();
+                if (visibleDetailsReady) {
+                    for (int i = 0; i < ids.size(); ++i)
+                        if (visibleDetails[i].position != ids[i]) { visibleDetailsReady = false; break; }
+                }
+                if (!visibleDetailsReady) visibleDetails.clear();
+            }
+            detailsReady = visibleDetailsReady;
+            details = visibleDetails;
+        }
+    }
     bookmarksTab->setChecked(!annotations);
     annotationsTab->setChecked(annotations);
-    empty->setText(strings::get(annotations ? "annotations.empty" : "bookmarks.empty"));
+    empty->setText(strings::get(loading ? "annotations.loading" : annotations ? "annotations.empty" : "bookmarks.empty"));
     emptyHint->setText(strings::get(annotations ? "annotations.empty_hint" : "bookmarks.empty_hint"));
     page = qBound(0, page, pageCount() - 1);
     empty->setVisible(items.isEmpty());
-    emptyHint->setVisible(items.isEmpty());
+    emptyHint->setVisible(items.isEmpty() && !loading);
+    sortButton->setEnabled(!loading);
     pageHeading->setVisible(!items.isEmpty());
     const auto caption = annotations && items.size() == 1 ? strings::get("annotations.summary_one")
         : strings::get(annotations ? "annotations.summary" : "bookmarks.summary").arg(items.size());
-    listHeader->setCaptions(caption,
+    listHeader->setCaptions(loading ? QString() : caption,
                             items.isEmpty() ? QString() : strings::get("chapter_contents.page"));
     pager->setVisible(pageCount() > 1);
     pager->setPage(page, pageCount(), {}, true);
@@ -304,12 +384,12 @@ void BookmarkList::redraw() {
         removes.append(remove);
         connect(button, &QPushButton::clicked, this, [this, row] {
             const int index = pageStarts.value(page, 0) + row;
-            if (index < items.size() && items[index].page >= 0 && selected)
+            if (buttons[row]->isEnabled() && index < items.size() && items[index].page >= 0 && selected)
                 selected(items[index].position);
         });
         connect(remove, &QPushButton::clicked, this, [this, row] {
             const int index = pageStarts.value(page, 0) + row;
-            if (index < items.size()) {
+            if (removes[row]->isEnabled() && index < items.size()) {
                 if (removeRequested) {
                     removeRequested(items[index].position);
                 }
@@ -327,28 +407,37 @@ void BookmarkList::redraw() {
         buttons[row]->setVisible(shown);
         removes[row]->setVisible(shown);
 
-        if (!shown)
+        if (!shown) {
+            if (lazy) {
+                buttons[row]->setEnabled(false);
+                removes[row]->setEnabled(false);
+            }
             continue;
+        }
         const auto &item = items[index];
+        const QString chapter = lazy ? (detailsReady ? details[row].chapter : QString()) : item.chapter;
+        const QString excerpt = lazy ? (detailsReady ? details[row].excerpt
+                                                    : strings::get("annotations.load_failed")) : item.excerpt;
         const int itemHeight = itemHeights[index];
         auto *button = buttons[row];
         button->setObjectName(QString(annotations ? "rrAnnotation%1" : "rrBookmark%1").arg(index));
         removes[row]->setObjectName(QString(annotations ? "rrAnnotationRemove%1" : "rrBookmarkRemove%1").arg(index));
         removes[row]->setAccessibleName(strings::get(annotations ? "annotations.remove" : "bookmarks.remove"));
 
-        button->setAccessibleName(item.chapter);
-        button->setEnabled(item.page >= 0);
+        button->setAccessibleName(chapter);
+        button->setEnabled(item.page >= 0 && detailsReady);
+        removes[row]->setEnabled(detailsReady);
         button->setGeometry(0, y, width(), itemHeight);
         auto *itemRow = static_cast<ui::ListRow *>(button);
         itemRow->setActionIcon(ui::ControlIcon::Close);
         itemRow->setDetailFont(excerptFont());
         itemRow->setMetadataFont(ui::interfaceFont(c::captionText));
-        itemRow->setTitle(item.chapter);
+        itemRow->setTitle(chapter);
         itemRow->setTitlePixels(ui::px(24));
         itemRow->setTitleGap(ui::px(12));
         itemRow->setDetailLines(excerptLines[index]);
-        itemRow->setDetail(item.excerpt);
-        itemRow->setDetailHighlight(annotations ? (item.style.isEmpty() ? QStringLiteral("shaded") : item.style) : QString(),
+        itemRow->setDetail(excerpt);
+        itemRow->setDetailHighlight(annotations && detailsReady ? (item.style.isEmpty() ? QStringLiteral("shaded") : item.style) : QString(),
                                     ui::highlightTint(item.color), ui::px(44));
         QStringList metadata;
         if (item.created.isValid())

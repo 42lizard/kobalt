@@ -828,6 +828,8 @@
 "annotations.discard_and_stop" = "Discard selection and stop highlighting";
 "annotations.stop" = "Stop highlighting";
 "annotations.empty" = "No annotations yet";
+"annotations.loading" = "Finding pages…";
+"annotations.load_failed" = "Saved annotations could not be read. Editing is disabled. Reopen this book to try again.";
 "annotations.empty_hint" = "Use Annotate in the reading menu to save a passage.";
 /* Arguments: %1 */
 "annotations.summary" = "%1 annotations";

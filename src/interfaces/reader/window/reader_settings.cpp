@@ -322,7 +322,7 @@ bool Reader::writePreferences(const QJsonObject &next) {
     auto global = appearance::globalPreferences(next);
     appearance::rememberTextLayout(global, model->state());
     appearance::rememberPageMargins(global, model->state());
-    if (!writeJson(book->paths().preferences(), global)) {
+    if (!kobalt::storage::writePreferences(book->paths().preferences(), global)) {
         showSettingsWriteError();
         return false;
     }

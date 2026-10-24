@@ -14,6 +14,7 @@ public:
     }
     QString coverPath(const QString &name) const;
     bool scanning() const;
+    bool available() const { return ready; }
     // Books read since the current scan started.
     int found() const {
         return readCount;
@@ -40,6 +41,7 @@ private:
     QTimer saving;
     int readCount = 0;
     bool rescan = false;
+    bool ready = false;
     void touch();
 };
 // The reading position the reader saved for a book, as a percentage, and

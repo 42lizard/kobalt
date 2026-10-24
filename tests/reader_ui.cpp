@@ -1261,6 +1261,181 @@ private slots:
                 }
             }
         }
+        // A list that has already laid out these excerpts must paginate exactly
+        // like a fresh list after each change to text or wrapping metrics.
+        auto geometry = [&](BookmarkList &panel, const QVector<BookmarkRow> &entries) {
+            QStringList result;
+            QString activated;
+            QSet<QString> seen;
+            panel.selected = [&](const QString &id) { activated = id; };
+            panel.hide();
+            panel.showAnnotations(entries);
+            for (int turn = 0; turn < entries.size() && seen.size() < entries.size(); ++turn) {
+                for (int index = 0; index < entries.size(); ++index) {
+                    auto *button = static_cast<ui::ListRow *>(panel.findChild<QWidget *>("rrAnnotation" + QString::number(index)));
+                    if (!button || !button->isVisible()) continue;
+                    button->click();
+                    if (seen.contains(activated)) break;
+                    seen.insert(activated);
+                    const auto bounds = button->geometry();
+                    result.append(QString("%1:%2:%3,%4,%5,%6:%7")
+                        .arg(turn).arg(activated).arg(bounds.x()).arg(bounds.y()).arg(bounds.width())
+                        .arg(bounds.height()).arg(button->detailLabel()->height()));
+                }
+                if (seen.size() < entries.size())
+                    panel.findChild<QPushButton *>("rrBookmarkListNext")->click();
+            }
+            panel.selected = {};
+            return result;
+        };
+        auto cachedRows = many;
+        QString family = "Libron", ordering = "position";
+        for (int change = 0; change < 7; ++change) {
+            if (change == 1) ordering = "newest";
+            if (change == 2) cachedRows[0].excerpt = a.excerpt + "Changed long excerpt";
+            if (change == 3) cachedRows[1].excerpt = "Changed short excerpt";
+            if (change == 4) list.resize(ui::px(420), owner.height());
+            if (change == 5) family = ui::interfaceFont().family();
+            if (change == 6) cachedRows.remove(0, 7);
+            list.setExcerptFont(family);
+            list.setSortOrder(ordering);
+            const auto warm = geometry(list, cachedRows);
+            QCOMPARE(warm.size(), cachedRows.size());
+            BookmarkList fresh(&owner);
+            fresh.setGeometry(list.geometry());
+            fresh.setExcerptFont(family);
+            fresh.setSortOrder(ordering);
+            const auto cold = geometry(fresh, cachedRows);
+            QCOMPARE(warm, cold);
+        }
+    }
+    void annotationDetailsOnlyLoadVisiblePage_data() { variants(); }
+    void annotationDetailsOnlyLoadVisiblePage() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        QWidget owner;
+        owner.setProperty("reader_dark", dark);
+        ui::readerStyle(&owner, ui::styles::reader());
+        owner.resize(ui::px(1072), ui::px(1448));
+        BookmarkList list(&owner);
+        list.setGeometry(owner.rect());
+        QVector<BookmarkRow> compact;
+        const auto date = QDateTime::fromString("2026-10-20T09:12:00Z", Qt::ISODate);
+        for (int i = 0; i < 2000; ++i) {
+            BookmarkRow row;
+            row.position = QString::number(i);
+            row.page = row.sourceOrder = i;
+            row.created = date.addSecs(i);
+            row.style = "dotted";
+            row.color = "blue";
+            compact.append(row);
+        }
+        QVector<QStringList> requests;
+        bool fail = false, wrongId = false;
+        const auto excerpt = [](const QString &id) {
+            return id + QStringLiteral(" A long quotation with enough words to fill two lines. ").repeated(6);
+        };
+        list.annotationDetails = [&](const QStringList &ids, QVector<BookmarkRow> *details) {
+            requests.append(ids);
+            for (const auto &id : ids) {
+                BookmarkRow row;
+                row.position = wrongId ? "wrong-id" : id;
+                row.chapter = "Chapter " + id;
+                row.excerpt = excerpt(id);
+                details->append(row);
+            }
+            return !fail;
+        };
+        QString selected, removed;
+        list.selected = [&](const QString &id) { selected = id; };
+        list.removeRequested = [&](const QString &id) { removed = id; };
+        list.showAnnotations(compact);
+        QVERIFY(requests.isEmpty()); // The parent has not been shown.
+        owner.show();
+        QCoreApplication::processEvents();
+        QVERIFY(!requests.isEmpty());
+        auto displayed = [&]() {
+            QStringList ids;
+            for (auto *button : list.findChildren<QPushButton *>()) {
+                if (!button->isVisible() || !button->objectName().startsWith("rrAnnotation") ||
+                    button->objectName().contains("Remove") || button->objectName() == "rrAnnotationsTab") continue;
+                button->click();
+                ids.append(selected);
+            }
+            return ids;
+        };
+        const auto first = requests.last();
+        QVERIFY(first.size() > 0 && first.size() < 20);
+        QCOMPARE(displayed(), first);
+        for (int i = 0; i < first.size(); ++i) QCOMPARE(first[i], QString::number(i));
+        auto *firstRow = static_cast<ui::ListRow *>(list.findChild<QWidget *>("rrAnnotation0"));
+        QVERIFY(firstRow);
+        QCOMPARE(firstRow->detailLabel()->text(), excerpt("0"));
+        // Hydration must preserve the compact row's appearance, not the default
+        // style and color in the returned detail record.
+        BookmarkList full(&owner);
+        full.setGeometry(list.geometry());
+        auto complete = compact.first();
+        complete.chapter = "Chapter 0"; complete.excerpt = excerpt("0");
+        full.showAnnotations({complete});
+        QCoreApplication::processEvents();
+        auto *fullRow = static_cast<ui::ListRow *>(full.findChild<QWidget *>("rrAnnotation0"));
+        QVERIFY(fullRow);
+        QCOMPARE(firstRow->detailLabel()->grab().toImage(), fullRow->detailLabel()->grab().toImage());
+        full.hide();
+        requests.clear();
+        list.findChild<QPushButton *>("rrBookmarkListNext")->click();
+        QCOMPARE(requests.size(), 1);
+        QCOMPARE(displayed(), requests.last());
+        QVERIFY(!requests.last().contains(first.first()));
+        for (auto *label : list.findChildren<QLabel *>()) QVERIFY(label->text() != excerpt("0"));
+        requests.clear();
+        list.setSortOrder("newest");
+        QCOMPARE(requests.size(), 1);
+        QCOMPARE(displayed(), requests.last());
+        for (int i = 0; i < requests.last().size(); ++i) QCOMPARE(requests.last()[i], QString::number(1999-i));
+        requests.clear();
+        list.setExcerptFont("Libron");
+        QVERIFY(requests.isEmpty());
+        list.resize(ui::px(650), owner.height());
+        QVERIFY(requests.isEmpty());
+        list.resize(ui::px(650), ui::px(900));
+        QCOMPARE(requests.size(), 1);
+        QCOMPARE(displayed(), requests.last());
+        list.hide();
+        requests.clear();
+        list.setSortOrder("oldest");
+        list.setExcerptFont(ui::interfaceFont().family());
+        list.resize(owner.size());
+        QVERIFY(requests.isEmpty());
+        for (auto *label : list.findChildren<QLabel *>()) QVERIFY(!label->text().contains("A long quotation"));
+        list.showAnnotations(compact, true);
+        QVERIFY(requests.isEmpty());
+        list.showAnnotations(compact);
+        QCOMPARE(requests.size(), 1);
+        for (int failure = 0; failure < 2; ++failure) {
+            fail = failure == 0;
+            wrongId = failure == 1;
+            selected.clear(); removed.clear();
+            requests.clear();
+            list.showAnnotations(compact);
+            QCOMPARE(requests.size(), 1);
+            auto *row = static_cast<ui::ListRow *>(list.findChild<QWidget *>("rrAnnotation0"));
+            auto *remove = list.findChild<QPushButton *>("rrAnnotationRemove0");
+            QVERIFY(row && remove && !row->isEnabled() && !remove->isEnabled());
+            QCOMPARE(row->detailLabel()->text(), QStringLiteral("Saved annotations could not be read. Editing is disabled. Reopen this book to try again."));
+            row->click(); remove->click();
+            QVERIFY(selected.isEmpty() && removed.isEmpty());
+        }
+        fail = wrongId = false;
+        list.showAnnotations(compact);
+        QVERIFY(firstRow->isEnabled());
+        firstRow->click();
+        QCOMPARE(selected, QString("0"));
+        requests.clear();
+        list.showBookmarks({complete});
+        QVERIFY(requests.isEmpty());
     }
     void hidingSelectionMenuKeepsDamageCompact_data() {
         QTest::addColumn<bool>("barrier");

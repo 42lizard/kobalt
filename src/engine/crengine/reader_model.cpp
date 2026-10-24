@@ -217,6 +217,7 @@ ReaderModel::ReaderModel(EngineFontInputs fonts) : fonts_(std::move(fonts)) {
     ++liveModels;
 }
 ReaderModel::~ReaderModel() {
+    sourceIndex_.reset();
     engine_.reset();
     source_.reset();
     // Model work and destruction run on the engine worker. A preview may
@@ -393,6 +394,7 @@ void ReaderModel::configure(QSize size, const QJsonObject &settings) {
     appearance::migrateLineSpacing(saved);
     // Outline thickness must not affect layout-time italic overhang measurements.
     setExtraFontWeight(0);
+    sourceIndex_.reset();
     engine_.reset();
     anchor_.clear();
     contents_.clear();
@@ -727,6 +729,8 @@ bool ReaderModel::applyAppearance(const QJsonObject &settings, QSize size, Openi
     columnSpacingPercent_ = gapPercent;
     if (!styled && !resized && weight == weight_ && dark == darkMode_ && hideNonlinear == hideNonlinearFragments_)
         return true;
+    if (styled || resized)
+        sourceIndex_.reset();
     const QString anchor = position();
     OpeningCallback callback(engine_, std::move(progress));
     pixels_ = pixels;

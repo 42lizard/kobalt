@@ -27,6 +27,8 @@ QByteArray read(const QString &path) {
 }
 
 int main() {
+    // These cases obstruct legacy JSON files; SQLite behavior has its own database regressions.
+    qputenv("KOBALT_ANNOTATIONS_SQLITE", "0");
     // Keep legacy UUID keys, hash other server IDs, and fingerprint files.
     require(BookmarkStore::bookKey("3F2A1B4C-0000-4000-8000-00000000ABCD", {}) ==
                 "kobo-3f2a1b4c-0000-4000-8000-00000000abcd",

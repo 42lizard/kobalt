@@ -88,6 +88,7 @@ private:
     void updateOpening(kobalt::OpeningStage stage, int percent);
     unsigned generation = 0;
     bool busy = false;
+    bool profilePrepared = false;
     bool homeAfterClose = false;
     void finishHomeNavigation();
 

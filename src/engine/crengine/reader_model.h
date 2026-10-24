@@ -162,7 +162,8 @@ public:
     int comparePlatformPosition(const PositionCodec &codec, const QString &location, QString *error) const;
     // The page of each position in the current layout, or -1 where a
     // position no longer resolves.
-    QVector<int> pagesOf(const QStringList &positions, bool rangeEndpoints = false, QVector<int> *sourceOrder = nullptr) const;
+    QVector<int> pagesOf(const QStringList &positions, bool rangeEndpoints = false, QVector<int> *sourceOrder = nullptr,
+                         std::function<bool()> current = {}) const;
     // The start position of a page and its first words.
     QString pageStart(int page) const;
     QString pageExcerpt(int page) const;
@@ -189,6 +190,8 @@ public:
     // Source-only current-page intersection. Does not resolve remote geometry.
     // Returns input indices in order; at most 2000 saved ranges plus one draft.
     QVector<int> visibleRanges(const QVector<QPair<QString, QString>> &ranges) const;
+    // Check a changing draft without rebuilding the saved-range index.
+    bool rangeVisible(const QString &start, const QString &end) const;
     // Text selection excludes images. Links also need their image hit regions.
     AnnotationGeometry annotationGeometry(const QString &start, const QString &end);
     QVector<QRect> rangeRects(const QString &start, const QString &end, bool includeImages = false);
@@ -279,6 +282,12 @@ private:
     std::shared_ptr<ReaderSource> source_;
     QJsonObject openingTimes_;
     std::unique_ptr<ColumnView> engine_;
+    struct SourceIndex;
+    friend struct ReaderSourceIndexProbe;
+    mutable std::shared_ptr<SourceIndex> sourceIndex_;
+    std::shared_ptr<SourceIndex> sourceIndex(const QStringList &positions, const std::function<bool()> &current = {}) const;
+    std::shared_ptr<SourceIndex> sourceRanges(const QVector<QPair<QString, QString>> &ranges) const;
+    QPair<int, qint64> sourceIndexUsage() const;
     int columns_ = 1, columnSpacing_ = readingPixels(60), columnSpacingPercent_ = 0;
     bool twoColumnsLandscape_ = false;
     QSize size_;

@@ -94,19 +94,23 @@ bool Index::load(const QString &path) {
         return true;
     if (read.status != storage::ReadStatus::Ok)
         return false;
-    const auto &root = read.object;
+    return restore(read.object);
+}
+bool Index::restore(const QJsonObject &root) {
+    if (root.value("schema") != QJsonValue(1) || !root.value("folders").isArray() || !root.value("books").isArray())
+        return false;
     folders.clear();
     books.clear();
     for (const auto &item : root.value("folders").toArray()) {
         const auto object = item.toObject();
         const Folder folder{object.value("key").toString(), object.value("label").toString()};
-        if (!folder.key.isEmpty() && !hasFolder(folder.key))
-            folders.append(folder);
+        if (!item.isObject() || folder.key.isEmpty() || hasFolder(folder.key)) return false;
+        folders.append(folder);
     }
     for (const auto &item : root.value("books").toArray()) {
         auto book = Book::fromJson(item.toObject());
-        if (book.key.isEmpty() || (!book.folder.isEmpty() && !hasFolder(book.folder)))
-            continue;
+        if (!item.isObject() || book.key.isEmpty() || books.contains(book.key) ||
+            (!book.folder.isEmpty() && !hasFolder(book.folder))) return false;
         books.insert(book.key, book);
     }
     const auto options = root.value("settings").toObject();

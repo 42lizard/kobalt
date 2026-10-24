@@ -15,9 +15,12 @@ Tap the left or right third of the page to turn pages, or swipe. Tap the
 middle or the title for the menus. The bottom tabs open Chapters, Text,
 Layout, Light, Stats and Search. Settings is at the top.
 
-Fonts and their manifest are in assets/. Settings and saved positions are
-the other .json files in this folder. Kobalt also saves your position to
-Nickel when you leave a book.
+Fonts and their manifest are in assets/. Global preferences are in
+reader-settings.json. Book settings, positions, bookmarks and annotations
+are in kobalt.sqlite. Kobalt also saves your position to Nickel when you
+leave a book. Existing saved data is imported after an upgrade. Original
+files are kept in migration-backup/; keep that backup until you have
+checked your books.
 
 To remove Kobalt, delete the file uninstall, or this whole folder, and
 restart the device. Saved positions and settings stay unless you delete
@@ -30,6 +33,9 @@ startup-session or active-session.json here. While either file exists,
 Kobalt stays off and Nickel's reader is used. Look at the logs first,
 then delete the file and restart to try Kobalt again.
 
-events.jsonl and events.jsonl.previous record what Kobalt did, at most
-128 KiB each. They contain no book text or account data. state.json and
-session.json can contain book identifiers; keep them private.
+To enable diagnostics, create diagnostics-enabled here and restart.
+Logs and inspection reports then go in diagnostics/. events.jsonl and
+events.jsonl.previous are limited to 128 KiB each. They contain no book
+text or account data. state.json and session.json can contain book
+identifiers; keep them private. Old reports are retained under
+migration-backup/diagnostics/.

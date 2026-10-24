@@ -349,13 +349,21 @@ int main(int argc, char **argv) {
     {
         const auto folder = root.filePath("store");
         QDir().mkpath(folder);
-        write(folder + "/library.json", "{ damaged");
+        const auto damaged = root.filePath("damaged-library");
+        QDir().mkpath(damaged);
+        write(damaged + "/library.json", "{ damaged");
+        {
+            Store blocked(damaged, std::make_shared<LocalSource>());
+            require(blocked.index().books.isEmpty() && QFile::exists(damaged + "/library.json"),
+                    "A damaged catalogue was removed");
+            blocked.save();
+            require(QFile::exists(damaged + "/library.json"), "A failed import replaced its source");
+        }
         const auto bookPath = root.filePath("single/emma.epub");
         write(bookPath, epub("Emma", "Jane Austen", true));
         {
             Store store(folder, std::make_shared<LocalSource>());
-            require(store.index().books.isEmpty() && QFile::exists(folder + "/library.json.damaged"),
-                    "A damaged index was not set aside");
+            require(store.index().books.isEmpty(), "A new catalogue was not empty");
             require(store.addBook(bookPath), "A single book was not added");
             require(!store.addBook(root.filePath("missing.epub")), "A missing file was added");
             const auto key = QFileInfo(bookPath).absoluteFilePath();
