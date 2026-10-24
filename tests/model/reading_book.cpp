@@ -393,7 +393,7 @@ int main(int argc, char **argv) {
                 QSqlQuery query(db); return query.exec(sql);
             });
         };
-        require(changeSql("CREATE TRIGGER fail_checkpoint BEFORE INSERT ON record_fields BEGIN SELECT RAISE(ABORT,'test'); END"),
+        require(changeSql("CREATE TRIGGER fail_checkpoint BEFORE UPDATE ON book_state BEGIN SELECT RAISE(ABORT,'test'); END"),
                 "Cannot obstruct checkpoint transaction");
         require(!book.checkpoint(&snapshot), "Checkpoint reported success when storage refused the write");
         require(changeSql("DROP TRIGGER fail_checkpoint") && book.checkpoint(&snapshot),

@@ -106,42 +106,19 @@ QJsonObject readJson(const QString &path) {
     return readJsonFile(path).object;
 }
 namespace {
-QByteArray fieldBytes(const QJsonValue &value) {
-    switch (value.type()) {
-    case QJsonValue::Bool: return value.toBool() ? "1" : "0";
-    case QJsonValue::Double: return QByteArray::number(value.toDouble(), 'g', 17);
-    case QJsonValue::String: return value.toString().toUtf8();
-    case QJsonValue::Array: return QJsonDocument(value.toArray()).toJson(QJsonDocument::Compact);
-    case QJsonValue::Object: return QJsonDocument(value.toObject()).toJson(QJsonDocument::Compact);
-    default: return QByteArray("");
-    }
-}
-QString fieldText(const QByteArray &bytes) {
-    // Prefix a character so Qt 5.2 does not consume a literal initial FEFF.
-    const auto prefixed = QByteArray(" ") + bytes;
-    return QString::fromUtf8(prefixed.constData(), prefixed.size()).mid(1);
-}
-bool putFields(QSqlDatabase &db, const QString &name, const QJsonObject &object, const QJsonObject &previous = {}) {
+bool putDocument(QSqlDatabase &db, const QString &name, const QJsonObject &object, bool exists) {
+    const bool book = name.startsWith("book:");
+    const QString table = book ? "book_state" : "profile_state";
+    const QString column = book ? "identity" : "name";
+    const auto key = book ? name.mid(5) : name;
     QSqlQuery query(db);
-    if (!query.prepare("INSERT OR IGNORE INTO records(name,format) VALUES(?,1)")) return false;
-    query.addBindValue(name);
-    if (!query.exec()) return false;
-    for (auto it = previous.begin(); it != previous.end(); ++it) {
-        if (object.contains(it.key())) continue;
-        if (!query.prepare("DELETE FROM record_fields WHERE record=? AND key=?")) return false;
-        query.addBindValue(name); query.addBindValue(it.key());
-        if (!query.exec()) return false;
-    }
-    for (auto it = object.begin(); it != object.end(); ++it) {
-        if (previous.contains(it.key()) && previous.value(it.key()) == it.value()) continue;
-        if (!query.prepare("INSERT OR REPLACE INTO record_fields(record,key,type,value) VALUES(?,?,?,?)")) return false;
-        query.addBindValue(name); query.addBindValue(it.key()); query.addBindValue(int(it.value().type()));
-        auto bytes = fieldBytes(it.value());
-        if (bytes.isNull()) bytes = QByteArray("");
-        query.addBindValue(bytes);
-        if (!query.exec()) return false;
-    }
-    return true;
+    const auto sql = exists
+        ? "UPDATE " + table + " SET payload=CAST(? AS TEXT),revision=revision+1 WHERE " + column + "=CAST(? AS TEXT)"
+        : "INSERT INTO " + table + "(payload," + column + ",format) VALUES(CAST(? AS TEXT),CAST(? AS TEXT),1)";
+    if (!query.prepare(sql)) return false;
+    query.addBindValue(QJsonDocument(object).toJson(QJsonDocument::Compact));
+    query.addBindValue(key.toUtf8());
+    return query.exec() && query.numRowsAffected() == 1;
 }
 // Archiving follows commit. If it is interrupted, the import ledger still
 // prevents the source from overwriting newer database data on the next run.
@@ -173,46 +150,35 @@ bool recordTransaction(const QString &directory, const QString &name, const QStr
     }
     QByteArray importedDigest;
     const bool ok = AnnotationDatabase::transaction(directory, [&](QSqlDatabase &db) {
+        const bool book = name.startsWith("book:");
+        const QString table = book ? "book_state" : "profile_state";
+        const QString column = book ? "identity" : "name";
+        const auto key = book ? name.mid(5) : name;
+        if (key.isEmpty()) return false;
         QSqlQuery query(db);
-        if (!query.prepare("SELECT format FROM records WHERE name=?")) return false;
-        query.addBindValue(name);
+        // Bound the payload in SQL before copying it into the process.
+        if (!query.prepare("SELECT format,length(CAST(payload AS BLOB)),CASE WHEN length(CAST(payload AS BLOB))<=? "
+                           "THEN CAST(payload AS BLOB) END FROM " + table + " WHERE " + column + "=CAST(? AS TEXT)")) return false;
+        query.addBindValue(maxBytes);
+        query.addBindValue(key.toUtf8());
         if (!query.exec()) return false;
-        const bool exists = query.next();
-        if (exists && query.value(0).toInt() != 1) { read->status = ReadStatus::Unsupported; return false; }
-        query.finish();
+        bool exists = query.next();
         QJsonObject object;
         if (exists) {
-            if (!query.prepare("SELECT coalesce(sum(length(value)+length(key)),0) FROM record_fields WHERE record=?")) return false;
-            query.addBindValue(name);
-            if (!query.exec() || !query.next() || query.value(0).toLongLong() > maxBytes) return false;
-            query.finish();
-            if (!query.prepare("SELECT key,type,value FROM record_fields WHERE record=?")) return false;
-            query.addBindValue(name);
-            if (!query.exec()) return false;
-            while (query.next()) {
-                const int type = query.value(1).toInt();
-                const auto bytes = query.value(2).toByteArray();
-                QJsonValue value;
-                if (type == QJsonValue::Bool) {
-                    if (bytes != "0" && bytes != "1") return false;
-                    value = bytes == "1";
-                } else if (type == QJsonValue::Double) {
-                    bool valid = false; const double number = bytes.toDouble(&valid);
-                    if (!valid) return false;
-                    value = number;
-                } else if (type == QJsonValue::String) value = fieldText(bytes);
-                else if (type == QJsonValue::Array || type == QJsonValue::Object) {
-                    QJsonParseError error;
-                    const auto document = QJsonDocument::fromJson(bytes, &error);
-                    if (error.error != QJsonParseError::NoError ||
-                        (type == QJsonValue::Array ? !document.isArray() : !document.isObject())) return false;
-                    value = type == QJsonValue::Array ? QJsonValue(document.array()) : QJsonValue(document.object());
-                } else if (type != QJsonValue::Null || !bytes.isEmpty()) return false;
-                object.insert(query.value(0).toString(), value);
+            if (query.value(0).toDouble() != 1) { read->status = ReadStatus::Unsupported; return false; }
+            if (query.value(1).toLongLong() > maxBytes) { read->status = ReadStatus::TooLarge; return false; }
+            QJsonParseError error;
+            const auto document = QJsonDocument::fromJson(query.value(2).toByteArray(), &error);
+            if (error.error != QJsonParseError::NoError || !document.isObject()) {
+                read->status = ReadStatus::Invalid; return false;
             }
-            if (query.lastError().isValid()) return false;
+            object = document.object();
+            if (object.contains("schema") && object.value("schema").toDouble(-1) != 1) {
+                read->status = ReadStatus::Unsupported; return false;
+            }
+            if (book && object.value("book").toString() != key) { read->status = ReadStatus::Invalid; return false; }
             query.finish();
-            if (!query.prepare("SELECT digest FROM imports WHERE source=? AND record=?")) return false;
+            if (!query.prepare("SELECT CAST(digest AS BLOB) FROM imports WHERE source=? AND record=?")) return false;
             query.addBindValue(legacy); query.addBindValue(name);
             if (!query.exec()) return false;
             if (query.next()) importedDigest = query.value(0).toByteArray();
@@ -233,13 +199,14 @@ bool recordTransaction(const QString &directory, const QString &name, const QStr
                 const auto bytes = source.read(maxBytes + 1);
                 if (bytes.size() > maxBytes || QJsonDocument::fromJson(bytes).object() != object) return false;
                 importedDigest = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
-                if (!putFields(db, name, object)) return false;
+                if (!putDocument(db, name, object, false)) return false;
+                exists = true;
                 if (!query.prepare("INSERT INTO imports(source,digest,record) VALUES(?,?,?)")) return false;
                 query.addBindValue(legacy); query.addBindValue(importedDigest); query.addBindValue(name);
                 if (!query.exec()) return false;
             }
         }
-        if (replacement && (!exists || *replacement != object) && !putFields(db, name, *replacement, object)) return false;
+        if (replacement && (!exists || *replacement != object) && !putDocument(db, name, *replacement, exists)) return false;
         read->object = replacement ? *replacement : object;
         read->status = exists || replacement || !importedDigest.isEmpty() ? ReadStatus::Ok : ReadStatus::Missing;
         return true;
@@ -271,7 +238,7 @@ void archiveImportedSource(const QString &directory, const QString &source) {
 }
 bool writeRecord(const QString &directory, const QString &name, const QString &legacy,
                  const QJsonObject &value, qint64 maxBytes) {
-    if (QJsonDocument(value).toJson().size() > maxBytes ||
+    if (QJsonDocument(value).toJson(QJsonDocument::Compact).size() > maxBytes ||
         (value.contains("schema") && value.value("schema").toDouble(-1) != 1)) return false;
     JsonRead result;
     return recordTransaction(directory, name, legacy, maxBytes, &result, &value);

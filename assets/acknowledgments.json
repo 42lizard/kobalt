@@ -309,8 +309,8 @@
   {
     "group": "author",
     "name": "eBook Fonts",
-    "version": "13834303660d; Libron 0.31",
-    "description": "Reading fonts: Libron 0.31, Sourcerer, NV Ancizar Serif, NV Charis, NV Garamond, NV Jost, NV Bitter, NV Legible Next, NV Literata and NV Palatium. The original authors and licenses are listed below.",
+    "version": "13834303660d; Libron 0.32",
+    "description": "Reading fonts: Libron 0.32, Sourcerer, NV Ancizar Serif, NV Charis, NV Garamond, NV Jost, NV Bitter, NV Legible Next, NV Literata and NV Palatium. The original authors and licenses are listed below.",
     "license": "SIL OFL and AGPLv3 with font exception",
     "url": "https://github.com/nicoverbruggen/ebook-fonts",
     "notices": [

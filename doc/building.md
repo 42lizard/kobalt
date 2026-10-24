@@ -68,7 +68,7 @@ bash platforms/kobo/build.sh qt6
 
 The launcher pins these images by digest. It mounts this worktree, configures CMake and builds the reader dependencies, application and installation ZIP. It does not pull or repair SDKs. Configure and build/package durations are printed separately. Parallelism defaults to two; set `JOBS` to change it.
 
-Outputs are `build/kobo-qt5/` and `build/kobo-qt6/`. Each contains `libkobalt.so` with debug symbols and `Kobalt-VERSION-qtN.zip` with a stripped installation library and runtime assets. Qt5 uses `.kobo/KoboRoot.tgz`; Qt6 uses `.kobo/Kobo.tgz`. Packaging removes its staging directory and does no work when its inputs are unchanged.
+Outputs are `build/kobo-qt5/` and `build/kobo-qt6/`. Each contains `libkobalt.so` with debug symbols and `Kobalt-VERSION-qtN.zip` with a stripped installation library and runtime assets. Qt5 uses `.kobo/KoboRoot.tgz`; Qt6 uses `.kobo/Kobo.tgz`. Packaging removes its staging directory and does no work when its inputs are unchanged. Both tar formats store only the library on the system partition, with numeric owner `0:0` and mode `0755`, regardless of the build user. The build launcher runs the `check-package` target after packaging to verify the member path, ownership and permissions. The same check can be run in the prepared SDK with `cmake --build --preset qt5 --target check-package` or the Qt6 preset.
 
 ## Android
 
@@ -81,10 +81,67 @@ bash platforms/android/build.sh
 
 The launcher pins the released image by digest. Set `KOBALT_ANDROID_IMAGE` only to select another prepared image for SDK validation. Host architectures use separate `build/android-amd64/` and `build/android-arm64/` outputs, so Qt host-tool caches cannot cross between them. Gradle downloads stay under `build/gradle/`. The launcher rejects concurrent use of one Android output and removes its container when finished. Compiler parallelism defaults to two; set `JOBS` to change it.
 
-The APK is `build/android-HOST/android-build/build/outputs/apk/debug/android-build-debug.apk`. It uses `com.nicoverbruggen.kobalt.debug`, the public debug key under `platforms/android/app/` and a version ending in `-debug`. Android 9 or later and ARM64 are required. Release signing is outside this build's scope. BOOX selects Qt's SurfaceView container before creating windows so firmware refresh metadata can reach the submitted buffers. Other Android devices keep Qt's default container. Library, book-opening and reader canvases share the BOOX frame transport. Returning to the Library retains a captured reader frame until its final system-bar insets are ready, then requests GC cleanup. The Android window follows the activity's laid-out bounds at startup and after rotation. Only the Library canvas draws rules below Android's status bar and above its navigation controls; the fullscreen reader has neither rule.
+The APK is `build/android-HOST/android-build/build/outputs/apk/debug/android-build-debug.apk`. It uses `com.nicoverbruggen.kobalt.debug`, the public debug key under `platforms/android/app/` and a version ending in `-debug`. Android 9 or later and ARM64 are required. Release signing uses the explicit mode described below. BOOX selects Qt's SurfaceView container before creating windows so firmware refresh metadata can reach the submitted buffers. Other Android devices keep Qt's default container. Library, book-opening and reader canvases share the BOOX frame transport. Returning to the Library retains a captured reader frame until its final system-bar insets are ready, then requests GC cleanup. The Android window follows the activity's laid-out bounds at startup and after rotation. Only the Library canvas draws rules below Android's status bar and above its navigation controls; the fullscreen reader has neither rule.
 
 ## Dependencies and validation
 
 CREngine and its text/image libraries use the versions and patches recorded in this worktree. Android also builds OpenSSL and downloads the pinned BOOX compatibility JAR. These application dependencies are separate from Qt SDK production. Build directories are separated by compiler, SDK, source manifest and recipe identity. This initial setup invalidates the dependency set when its recipes, patches or source pins change; application-only changes reuse it.
 
 Stop and reap run-owned helper processes and remove temporary profiles, staging directories and containers after each run. Keep current outputs, useful measurements and incremental caches. Native desktop, model, renderer and session checks cover the paths listed above. [Native validation](validation.md#feature-coverage-and-limits) records the remaining corpus, gesture and platform gaps. These checks do not establish firmware compatibility or physical-device display behavior.
+
+## GitHub builds and tagged releases
+
+`.github/workflows/ci.yml` builds Qt5, Qt6 and a signed Android release APK on branch pushes and tags. Helper checks validate version inputs, source pins and missing-key failures. Kobo jobs check the system archive member, numeric root ownership and executable permissions. Native application tests still run with the Mac presets above; the Linux workflow does not run them.
+
+A tag such as `v1.0-beta.4` supplies the displayed version, package names and Android version name. Branch builds use the version in `assets/manifest.json`. CI checks that a triggering tag identifies the checked-out commit. Local builds can set `KOBALT_RELEASE_VERSION` to test the same path without editing the tracked asset manifest.
+
+Add these repository secrets under GitHub Settings → Secrets and variables → Actions:
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | Base64 encoding of the release keystore file. |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password. |
+| `ANDROID_KEY_ALIAS` | Signing-key alias in that keystore. |
+| `ANDROID_KEY_PASSWORD` | Password for that signing key. |
+
+Use repository secrets for this workflow. Environment secrets are available only to jobs that select that environment; the Android job does not select one. Variables hold configuration that does not need secrecy. The certificate fingerprint is public information, so it belongs in a repository variable.
+
+Existing PKCS#12 (`.p12`) keystores are supported. Use the same signing key for future updates. For a P12 with one shared password, set both password secrets to that password. The key alias identifies the entry inside the keystore; it is not the application ID. The release application ID is already `com.nicoverbruggen.kobalt`.
+
+On macOS, install Java if needed and make its tools available in the current terminal:
+
+```sh
+brew install openjdk@21
+export PATH="$(brew --prefix openjdk@21)/bin:$PATH"
+```
+
+From the folder containing the keystore, inspect its alias and certificate. Replace the example filename and alias with your own. `keytool` prompts for the password; do not put it on the command line.
+
+```sh
+keytool -list -v -storetype PKCS12 -keystore release.p12
+keytool -list -v -storetype PKCS12 -keystore release.p12 -alias YOUR_ALIAS
+```
+
+Copy the encoded P12 to the clipboard, then paste it into the `ANDROID_KEYSTORE_BASE64` repository secret:
+
+```sh
+base64 < release.p12 | tr -d '\n' | pbcopy
+```
+
+In the certificate output, use `SHA256`, not `SHA1`. Create `ANDROID_CERT_SHA256` under Actions → Variables → New repository variable. Its value must be 64 hexadecimal characters without colons or the `SHA256:` label. This command copies the fingerprint without colons:
+
+```sh
+keytool -list -v -storetype PKCS12 -keystore release.p12 -alias YOUR_ALIAS |
+  awk '/SHA256:/ {gsub(/:/, "", $2); printf "%s", $2}' |
+  pbcopy
+```
+
+Never put passwords or the encoded keystore in tracked files, build arguments or workflow logs. GitHub can report secret names but cannot return their values. A successful signing run verifies the actual keystore, passwords, alias and certificate match; the presence of the settings alone does not.
+
+The workflow uses the prepared SDK's `zipalign` and `apksigner`. It verifies the signature, compares the certificate with `ANDROID_CERT_SHA256` and checks 16 KiB alignment before retaining an APK. Missing secrets or a mismatched certificate fail the job. Release builds use `com.nicoverbruggen.kobalt` and have no `-debug` suffix. CI uses its increasing run number as the Android version code. Keep it higher than any previously distributed version code for the same application ID and key. Changing the key prevents normal updates to existing installations.
+
+For a local release build, set `KOBALT_ANDROID_RELEASE=1`, `KOBALT_RELEASE_VERSION`, `KOBALT_ANDROID_VERSION_CODE`, `KOBALT_ANDROID_KEYSTORE`, `KOBALT_ANDROID_KEY_ALIAS`, `KOBALT_ANDROID_KEYSTORE_PASSWORD`, `KOBALT_ANDROID_KEY_PASSWORD` and `KOBALT_ANDROID_CERT_SHA256`, then run `bash platforms/android/build.sh`. The keystore is mounted read-only. Passwords pass through the environment. The output is `build/android-HOST/Kobalt-VERSION-android-arm64.apk`, with a certificate verification report beside it. Ordinary local builds keep the signed debug APK described above.
+
+`platforms/ci/source-archive.sh` archives tracked application sources at `HEAD`, pinned application dependency archives and font sources. The bundle records exact prepared SDK image digests and links to the corresponding `kobuild` recipe commits and upstream source pins; it does not duplicate the SDK source archives. `dependencies/release-sources.json` adds release-source inputs to the application dependency manifest. Each downloaded or cached input must match its SHA-256. Ignored files, local profiles, signing keys and build outputs are excluded. Commit release changes before using this archive for a release, because uncommitted edits are not included.
+
+Successful tag builds assemble a draft GitHub release with the three packages, source archive, build metadata and `SHA256SUMS`. They do not publish it. An existing published release cannot be overwritten. Review the draft and its signing report before publishing. Branch builds retain workflow artifacts only.

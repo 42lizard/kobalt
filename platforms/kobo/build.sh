@@ -8,18 +8,13 @@ target=$1
 root=$(cd "$(dirname "$0")/../.." && pwd)
 jobs=${JOBS:-2}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo "JOBS must be positive" >&2; exit 2; }
-case "$target" in
-    # Qt5 v0.2.3, including the native cross-strip fix.
-    qt5) image=ghcr.io/nicoverbruggen/kobuild@sha256:c5c2c0e4f1ebd5268ea631c89354976ef090fc571e162c294644677c5aedad05 ;;
-    # Qt6 v0.2.2, including Sensors. Pin the published multi-architecture image.
-    qt6) image=ghcr.io/nicoverbruggen/kobuild@sha256:b939301323e1bed0bf6b0bee43b8791db2efdf01231d4245c1f972d57433644a ;;
-esac
+image=$(sh "$root/platforms/sdk-image.sh" "$target")
 engine=${CONTAINER_ENGINE:-docker}
 sdk_id=$("$engine" image inspect "$image" --format '{{.Id}}')
 commit=$(git -C "$root" rev-parse --short HEAD)
 modified=OFF
 if [[ -n $(git -C "$root" status --porcelain) ]]; then modified=ON; fi
-"$engine" run --rm --pull=never --user "$(id -u):$(id -g)" -e HOME=/tmp \
+"$engine" run --rm --pull=never --user "$(id -u):$(id -g)" -e HOME=/tmp -e KOBALT_RELEASE_VERSION \
     --volume "$root:/work" \
     --workdir /work/platforms/kobo "$image" bash -euc '
         started=$SECONDS
@@ -28,5 +23,6 @@ if [[ -n $(git -C "$root" status --porcelain) ]]; then modified=ON; fi
         echo "Configure: $((SECONDS - started)) seconds"
         started=$SECONDS
         cmake --build --preset "$1" --parallel "$2"
+        cmake --build --preset "$1" --target check-package
         echo "Build and package: $((SECONDS - started)) seconds"
     ' kobalt-build "$target" "$jobs" "$commit" "$modified" "$sdk_id"

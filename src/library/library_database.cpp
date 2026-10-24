@@ -97,7 +97,7 @@ bool Index::loadDatabase(const QString &directory) {
     bool imported = false;
     const bool ok = AnnotationDatabase::transaction(directory, [&](QSqlDatabase &db) {
         QSqlQuery query(db);
-        if (!query.exec("SELECT format FROM records WHERE name='library'")) return false;
+        if (!query.exec("SELECT format FROM profile_state WHERE name='library'")) return false;
         const bool exists = query.next();
         if (exists && query.value(0).toInt() != 1) return false;
         query.finish();
@@ -111,7 +111,7 @@ bool Index::loadDatabase(const QString &directory) {
                 preferences.object["library"] = options(loaded.settings);
                 if (!storage::writePreferences(directory + "/reader-settings.json", preferences.object)) return false;
             }
-            if (!saveRows(db, loaded) || !query.exec("INSERT INTO records VALUES('library',1)")) return false;
+            if (!saveRows(db, loaded) || !query.exec("INSERT INTO profile_state(name,format,payload) VALUES('library',1,'{}')")) return false;
             if (source.status == storage::ReadStatus::Ok) {
                 QFile file(legacy);
                 if (!file.open(QIODevice::ReadOnly)) return false;
@@ -164,7 +164,7 @@ bool Index::saveDatabase(const QString &directory) const {
     }
     return AnnotationDatabase::transaction(directory, [&](QSqlDatabase &db) {
         QSqlQuery query(db);
-        return query.exec("SELECT format FROM records WHERE name='library'") && query.next() &&
+        return query.exec("SELECT format FROM profile_state WHERE name='library'") && query.next() &&
                query.value(0).toInt() == 1 && saveRows(db, *this);
     });
 }

@@ -25,7 +25,7 @@
 namespace kobalt {
 namespace {
 constexpr int applicationId = 1262571057; // KAN1, owned annotation database.
-constexpr int schemaVersion = 1;
+constexpr int schemaVersion = 2;
 constexpr qint64 maxDatabaseBytes = (qint64(1) << 32) - 1;
 constexpr int bookmarkKind = 0, highlightKind = 1;
 struct Failure { QString code; };
@@ -69,16 +69,84 @@ public:
     void begin() { execute("BEGIN IMMEDIATE"); transaction_ = true; }
     void beginRead() { execute("BEGIN"); transaction_ = true; }
     void commit() { check(db.commit(), "database-commit"); transaction_ = false; }
+    void documentSchema() {
+        execute("CREATE TABLE book_state(identity TEXT PRIMARY KEY NOT NULL,format INTEGER NOT NULL CHECK(format>0),"
+                "revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),payload TEXT NOT NULL "
+                "CHECK(length(CAST(payload AS BLOB))<=16384))");
+        execute("CREATE TABLE profile_state(name TEXT PRIMARY KEY NOT NULL,format INTEGER NOT NULL CHECK(format>0),"
+                "revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),payload TEXT NOT NULL "
+                "CHECK(length(CAST(payload AS BLOB))<=262144))");
+    }
     void profileSchema() {
-        execute("CREATE TABLE records(name TEXT PRIMARY KEY,format INTEGER NOT NULL)");
-        execute("CREATE TABLE record_fields(record TEXT NOT NULL,key TEXT NOT NULL,type INTEGER NOT NULL,value BLOB NOT NULL,"
-                "PRIMARY KEY(record,key),FOREIGN KEY(record) REFERENCES records(name) ON DELETE CASCADE)");
+        documentSchema();
         execute("CREATE TABLE imports(source TEXT PRIMARY KEY,digest BLOB NOT NULL,record TEXT NOT NULL)");
         execute("CREATE TABLE library_books(key TEXT PRIMARY KEY,folder TEXT NOT NULL,name TEXT NOT NULL,title TEXT NOT NULL,"
                 "author TEXT NOT NULL,cover TEXT NOT NULL,series TEXT NOT NULL,series_index REAL NOT NULL,"
                 "size INTEGER NOT NULL,modified INTEGER NOT NULL,added INTEGER NOT NULL,opened INTEGER NOT NULL,"
                 "metadata INTEGER NOT NULL,percent INTEGER NOT NULL,finished INTEGER NOT NULL,mark TEXT NOT NULL,hidden INTEGER NOT NULL)");
         execute("CREATE TABLE library_folders(key TEXT PRIMARY KEY,label TEXT NOT NULL,ordinal INTEGER NOT NULL)");
+    }
+    void migrateProfileRecords() {
+        documentSchema();
+        QSqlQuery records(db);
+        check(records.exec("SELECT CAST(name AS BLOB),format FROM records"), "invalid-database");
+        while (records.next()) {
+            const auto name = utf8Text(records.value(0));
+            check(!name.isEmpty() && records.value(1).toInt() == 1, "unsupported-record-format");
+            const bool book = name.startsWith("book:");
+            const auto key = book ? name.mid(5) : name;
+            const qint64 maximum = name == "last-book" ? 256 * 1024 : storage::maxJsonBytes;
+            QSqlQuery fields(db);
+            check(fields.prepare("SELECT coalesce(sum(length(CAST(value AS BLOB))+length(CAST(key AS BLOB))),0) "
+                                 "FROM record_fields WHERE record=?"), "invalid-database");
+            fields.addBindValue(name);
+            check(fields.exec() && fields.next() && fields.value(0).toLongLong() <= maximum, "invalid-database");
+            fields.finish();
+            check(fields.prepare("SELECT CAST(key AS BLOB),type,CAST(value AS BLOB) FROM record_fields WHERE record=?"), "invalid-database");
+            fields.addBindValue(name);
+            check(fields.exec(), "invalid-database");
+            QJsonObject object;
+            while (fields.next()) {
+                const auto field = utf8Text(fields.value(0));
+                const int type = fields.value(1).toInt();
+                const auto bytes = fields.value(2).toByteArray();
+                QJsonValue value;
+                if (type == QJsonValue::Bool) {
+                    check(bytes == "0" || bytes == "1", "invalid-database");
+                    value = bytes == "1";
+                } else if (type == QJsonValue::Double) {
+                    bool valid = false;
+                    const double number = bytes.toDouble(&valid);
+                    check(valid, "invalid-database");
+                    value = number;
+                } else if (type == QJsonValue::String) value = utf8Text(fields.value(2));
+                else if (type == QJsonValue::Array || type == QJsonValue::Object) {
+                    QJsonParseError error;
+                    const auto document = QJsonDocument::fromJson(bytes, &error);
+                    check(error.error == QJsonParseError::NoError &&
+                          (type == QJsonValue::Array ? document.isArray() : document.isObject()), "invalid-database");
+                    value = type == QJsonValue::Array ? QJsonValue(document.array()) : QJsonValue(document.object());
+                } else check(type == QJsonValue::Null && bytes.isEmpty(), "invalid-database");
+                check(!object.contains(field), "invalid-database");
+                object.insert(field, value);
+            }
+            check(!fields.lastError().isValid(), "invalid-database");
+            fields.finish();
+            check(!object.contains("schema") || object.value("schema").toDouble(-1) == 1, "unsupported-record-format");
+            check(!book || (!key.isEmpty() && object.value("book").toString() == key), "invalid-database");
+            const auto payload = QJsonDocument(object).toJson(QJsonDocument::Compact);
+            check(payload.size() <= maximum, "invalid-database");
+            QSqlQuery insert(db);
+            check(insert.prepare(book ? "INSERT INTO book_state(identity,format,payload) VALUES(CAST(? AS TEXT),1,CAST(? AS TEXT))"
+                                      : "INSERT INTO profile_state(name,format,payload) VALUES(CAST(? AS TEXT),1,CAST(? AS TEXT))"), "database-write");
+            insert.addBindValue(key.toUtf8());
+            insert.addBindValue(payload);
+            check(insert.exec(), "database-write");
+        }
+        check(!records.lastError().isValid(), "invalid-database");
+        records.finish();
+        execute("DROP TABLE record_fields");
+        execute("DROP TABLE records");
     }
     void open(const QString &root, const QString &database) {
         const auto path = database.isEmpty() ? AnnotationDatabase::path(root) : database;
@@ -134,7 +202,7 @@ public:
         // empty, foreign, future or damaged existing file is never initialized.
         check(scalar("PRAGMA application_id").toInt() == applicationId, "unsupported-database-format");
         const int version = scalar("PRAGMA user_version").toInt();
-        check(version == schemaVersion, "unsupported-database-format");
+        check(version == 1 || version == schemaVersion, "unsupported-database-format");
         check(scalar("PRAGMA encoding").toString() == QStringLiteral("UTF-8"), "unsupported-database-encoding");
         const qint64 pageSize = scalar("PRAGMA page_size").toLongLong();
         check(pageSize >= 512 && pageSize <= 65536 && (pageSize & (pageSize - 1)) == 0, "invalid-database");
@@ -151,18 +219,26 @@ public:
         execute("PRAGMA foreign_keys=ON");
         execute("PRAGMA cache_size=-2048");
         execute("PRAGMA mmap_size=0");
-        // The unreleased annotations-only prototype also used version 1.
-        // Complete only that known table set; never repair a partial profile.
-        const int profileTables = scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND "
-            "name IN ('records','record_fields','imports','library_books','library_folders')").toInt();
-        check(profileTables == 0 || profileTables == 5, "invalid-database");
-        if (profileTables == 0) {
-            check(scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND "
-                "name IN ('books','lists','entries')").toInt() == 3, "invalid-database");
+        const int annotationTables = scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND "
+            "name IN ('books','lists','entries')").toInt();
+        check(annotationTables == 3, "invalid-database");
+        const int sharedTables = scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND "
+            "name IN ('imports','library_books','library_folders')").toInt();
+        const int oldTables = scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND "
+            "name IN ('records','record_fields')").toInt();
+        const int documentTables = scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND "
+            "name IN ('book_state','profile_state')").toInt();
+        if (version == 1) {
+            check(documentTables == 0 && ((sharedTables == 3 && oldTables == 2) ||
+                  (sharedTables == 0 && oldTables == 0)), "invalid-database");
             begin();
-            profileSchema();
+            // Both known schema-1 layouts upgrade atomically. A failure leaves
+            // their original records, annotations and version intact.
+            if (oldTables == 2) migrateProfileRecords();
+            else profileSchema();
+            execute(QString("PRAGMA user_version=%1").arg(schemaVersion));
             commit();
-        }
+        } else check(sharedTables == 3 && documentTables == 2 && oldTables == 0, "invalid-database");
     }
 private:
     QString name_;

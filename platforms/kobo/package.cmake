@@ -11,7 +11,9 @@ file(MAKE_DIRECTORY "${stage}/system/${member}" "${stage}/zip/.kobo" "${stage}/z
 file(COPY "${LIBRARY}" DESTINATION "${stage}/system/${member}")
 execute_process(COMMAND "${STRIP}" "${stage}/system/${member}/libkobalt.so" RESULT_VARIABLE result)
 if(result EQUAL 0)
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar czf "${stage}/zip/.kobo/${installer}" --format=gnutar "${member}/libkobalt.so"
+    find_program(KOBALT_TAR NAMES tar REQUIRED)
+    execute_process(COMMAND "${KOBALT_TAR}" --format=gnu --owner=0 --group=0 --numeric-owner --mode=0755
+        -czf "${stage}/zip/.kobo/${installer}" "${member}/libkobalt.so"
         WORKING_DIRECTORY "${stage}/system" RESULT_VARIABLE result)
 endif()
 if(result EQUAL 0)

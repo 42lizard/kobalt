@@ -139,3 +139,7 @@ add_custom_command(OUTPUT "${package_file}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/package.cmake"
     DEPENDS kobalt ${asset_inputs} "${CMAKE_CURRENT_SOURCE_DIR}/package.cmake" VERBATIM)
 add_custom_target(package DEPENDS "${package_file}")
+
+add_custom_target(check-package
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/check-package.sh" "${package_file}" "qt${KOBALT_QT_MAJOR}"
+    DEPENDS package VERBATIM)

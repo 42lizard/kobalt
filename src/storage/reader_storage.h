@@ -35,7 +35,7 @@ const char *readStatusName(ReadStatus status);
 // damaged file must be told apart from a missing one.
 QJsonObject readJson(const QString &path);
 // Durable profile records. Legacy JSON is imported once and then archived.
-// Objects are split into typed fields; nested objects retain their JSON encoding.
+// Each record is one bounded, versioned JSON object in SQLite.
 JsonRead readRecord(const QString &directory, const QString &name, const QString &legacy,
                     qint64 maxBytes = maxJsonBytes);
 bool writeRecord(const QString &directory, const QString &name, const QString &legacy,

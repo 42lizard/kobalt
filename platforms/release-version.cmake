@@ -1,0 +1,11 @@
+# Application versions can follow a CI tag without editing tracked asset metadata.
+function(kobalt_release_version output fallback)
+    set(version "$ENV{KOBALT_RELEASE_VERSION}")
+    if(version STREQUAL "")
+        set(version "${fallback}")
+    endif()
+    if(NOT version MATCHES "^v[0-9]+\\.[0-9]+(\\.[0-9]+)?(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$")
+        message(FATAL_ERROR "Invalid Kobalt release version: ${version}")
+    endif()
+    set("${output}" "${version}" PARENT_SCOPE)
+endfunction()

@@ -1,0 +1,133 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kobalt-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CONTAINER_ENGINE: docker
+  KOBALT_RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+
+jobs:
+  validation:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        run: echo "version=$(bash platforms/ci/version.sh)" >> "$GITHUB_OUTPUT"
+      - name: Check release helpers
+        run: bash platforms/ci/test.sh
+
+  build-kobo:
+    needs: validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [qt5, qt6]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build and verify package
+        env:
+          TARGET: ${{ matrix.target }}
+          KOBALT_RELEASE_VERSION: ${{ needs.validation.outputs.version }}
+        run: bash platforms/ci/build.sh "$TARGET"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kobalt-${{ matrix.target }}
+          path: build/release/*
+          if-no-files-found: error
+          compression-level: 0
+
+  build-android:
+    needs: validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing ANDROID_KEYSTORE_BASE64'; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/kobalt-release.keystore"
+      - name: Build, sign and verify release APK
+        env:
+          KOBALT_RELEASE_VERSION: ${{ needs.validation.outputs.version }}
+          KOBALT_ANDROID_VERSION_CODE: ${{ github.run_number }}
+          KOBALT_ANDROID_KEYSTORE: ${{ runner.temp }}/kobalt-release.keystore
+          KOBALT_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KOBALT_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KOBALT_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KOBALT_ANDROID_CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
+        run: bash platforms/ci/build.sh android
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kobalt-release.keystore"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kobalt-android
+          path: build/release/*
+          if-no-files-found: error
+          compression-level: 0
+
+  archive-source:
+    needs: validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Assemble verified source bundle
+        env:
+          KOBALT_RELEASE_VERSION: ${{ needs.validation.outputs.version }}
+        run: bash platforms/ci/source-archive.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kobalt-source
+          path: build/release/*
+          if-no-files-found: error
+          compression-level: 0
+
+  release-draft:
+    needs: [validation, build-kobo, build-android, archive-source]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: kobalt-*
+          merge-multiple: true
+          path: build/release
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KOBALT_RELEASE_VERSION: ${{ needs.validation.outputs.version }}
+        run: bash platforms/ci/draft-release.sh
