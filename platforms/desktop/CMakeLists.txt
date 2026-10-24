@@ -162,6 +162,11 @@ add_custom_target(kobalt-runtime-assets DEPENDS "${bundle_assets}/manifest.json"
 add_dependencies(Kobalt kobalt-runtime-assets)
 
 if(BUILD_TESTING)
+    add_test(NAME build.cachePolicy COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cache-policy-test"
+        "-DPOLICY_FILE=${KOBALT_ROOT}/platforms/cache-policy.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/test-cache-policy.cmake")
+    set_tests_properties(build.cachePolicy PROPERTIES LABELS "fast;build" TIMEOUT 30)
     find_program(KOBALT_TEST_ZIP zip REQUIRED)
     set(test_book "${KOBALT_ROOT}/tests/fixtures/trevelyans-type-tester.kepub.epub")
     file(SHA256 "${test_book}" test_book_hash)
@@ -256,6 +261,7 @@ if(BUILD_TESTING)
             libraryListFillsPage
             regularIconWeight
             annotationModeNotice
+            continuationHintClears
             marksSortingAndAnnotationRows
             hidingSelectionMenuKeepsDamageCompact
             delayedProgressPaintsAfterTheEventLoop

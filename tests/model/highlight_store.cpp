@@ -42,6 +42,36 @@ int main() {
     require(reopened.load() && reopened.highlights().size() == 2 && reopened.highlights()[0].text == h.text &&
                 reopened.highlights()[0].start == h.start && reopened.highlights()[1].id == "second",
             "Passages did not round-trip independently");
+    auto noted = h;
+    noted.note = QString::fromUtf8("First thought\nSecond thought: café 日本語");
+    store.setHighlights({noted});
+    require(store.save() && reopened.load() && reopened.highlights().first().note == noted.note,
+            "Annotation note did not round-trip");
+    noted.note = QString(HighlightStore::maxNoteUnits, 'x');
+    store.setHighlights({noted});
+    require(store.save() && reopened.load() && reopened.highlights().first().note == noted.note,
+            "A note at the storage limit was rejected");
+    const auto notedBytes = bytes(path);
+    noted.note = QString(HighlightStore::maxNoteUnits + 1, 'x');
+    store.setHighlights({noted});
+    require(!store.save() && bytes(path) == notedBytes, "Oversized note replaced saved annotations");
+    for (const auto &badNote : {QJsonValue(123), QJsonValue(QJsonObject()), QJsonValue(QJsonValue::Null),
+                                QJsonValue(QString(HighlightStore::maxNoteUnits + 1, 'x'))}) {
+        auto object = QJsonDocument::fromJson(notedBytes).object();
+        auto list = object.value("highlights").toArray();
+        auto entry = list.first().toObject();
+        entry["note"] = badNote;
+        list[0] = entry;
+        object["highlights"] = list;
+        const auto damaged = QJsonDocument(object).toJson();
+        replace(path, damaged);
+        HighlightStore invalid(root.path(), "file:///book.epub", fingerprint, "Book");
+        require(!invalid.load() && !invalid.save() && bytes(path) == damaged,
+                "Malformed note was accepted or overwritten");
+    }
+    replace(path, saved);
+    require(reopened.load() && reopened.highlights().first().note.isEmpty(),
+            "Legacy annotation without a note was not empty");
     // Older version-one files have no color field.
     auto legacy = QJsonDocument::fromJson(saved).object();
     auto entries = legacy.value("highlights").toArray();

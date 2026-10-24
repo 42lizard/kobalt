@@ -88,16 +88,8 @@ target_compile_options(kobalt PRIVATE -Wall -Wextra -Werror -Wno-missing-field-i
 target_compile_definitions(kobalt PRIVATE KOBALT_READER_HARDWARE KOBALT_PAGE_ANIMATIONS
     KOBALT_VERSION="${KOBALT_VERSION}" NH_VERSION="${KOBALT_VERSION}"
     KOBALT_CONFIG_DIR="/mnt/onboard/.adds/kobalt" KOBALT_SYSTEM_FONT_DIRECTORY="${KOBALT_SYSTEM_FONT_DIRECTORY}")
-# Invalidate parsed-book caches when the current reader source or engine changes.
-file(GLOB dependency_patches "${KOBALT_ROOT}/dependencies/patches/*")
-set(layout_inputs ${shared} ${adapters} "${KOBALT_ROOT}/dependencies/manifest.json" "${KOBALT_ROOT}/dependencies/CMakeLists.txt" ${dependency_patches})
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${layout_inputs})
-set(layout_hashes "")
-foreach(input IN LISTS layout_inputs)
-    file(SHA256 "${input}" digest)
-    string(APPEND layout_hashes "${digest}")
-endforeach()
-string(SHA256 layout_policy "${layout_hashes}")
+# Keep parsed books across app updates when the rendering dependencies are compatible.
+include("${KOBALT_ROOT}/platforms/cache-policy.cmake")
 target_compile_definitions(kobalt PRIVATE KOBALT_LAYOUT_POLICY="${layout_policy}")
 
 set(engine "${CMAKE_CURRENT_BINARY_DIR}/libcrengine-reader.a")

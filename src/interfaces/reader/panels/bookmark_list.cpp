@@ -284,7 +284,9 @@ void BookmarkList::redraw() {
     empty->setVisible(items.isEmpty());
     emptyHint->setVisible(items.isEmpty());
     pageHeading->setVisible(!items.isEmpty());
-    listHeader->setCaptions(strings::get(annotations ? "annotations.summary" : "bookmarks.summary").arg(items.size()),
+    const auto caption = annotations && items.size() == 1 ? strings::get("annotations.summary_one")
+        : strings::get(annotations ? "annotations.summary" : "bookmarks.summary").arg(items.size());
+    listHeader->setCaptions(caption,
                             items.isEmpty() ? QString() : strings::get("chapter_contents.page"));
     pager->setVisible(pageCount() > 1);
     pager->setPage(page, pageCount(), {}, true);

@@ -152,6 +152,7 @@ void HighlightSession::save(const QString &start, const QString &end, const QStr
                                      QDateTime::currentDateTimeUtc()};
                          h.color = color.isEmpty() ? (index < 0 ? QStringLiteral("gray") : list[index].color) : color;
                          h.style = style.isEmpty() ? (index < 0 ? QStringLiteral("shaded") : list[index].style) : style;
+                         h.note = index < 0 ? QString() : list[index].note;
                          h.chosenEnd = sentenceEndPolicy ? chosenEnd : QString();
                          h.sentenceEndPolicy = sentenceEndPolicy;
                          h.chosenStart = sentenceStartPolicy ? chosenStart : QString();

@@ -49,14 +49,13 @@ private:
 inline QString documentCacheName(const QByteArray &fingerprint) {
     return QString::fromLatin1(fingerprint);
 }
-inline lUInt32 documentCacheChecksum(const QByteArray &policy, int domVersion,
-                                     const QByteArray &kobaltVersion = QByteArray(KOBALT_VERSION)) {
+inline lUInt32 documentCacheChecksum(const QByteArray &policy, int domVersion, int formatVersion = 4) {
     // Bump when the cached book's contents change for a reason the policy
     // does not cover.
-    constexpr int version = 4;
-    const auto digest = QCryptographicHash::hash(policy + '|' + kobaltVersion + '|' + QByteArray::number(version) +
-                                                     '|' + QByteArray::number(domVersion),
-                                                 QCryptographicHash::Sha256);
+    // App releases do not change this identity. Incompatible parser changes do.
+    const auto digest = QCryptographicHash::hash(
+        policy + '|' + QByteArray::number(formatVersion) + '|' + QByteArray::number(domVersion),
+        QCryptographicHash::Sha256);
     return lUInt32(uchar(digest[0])) << 24 | lUInt32(uchar(digest[1])) << 16 | lUInt32(uchar(digest[2])) << 8 |
            lUInt32(uchar(digest[3]));
 }

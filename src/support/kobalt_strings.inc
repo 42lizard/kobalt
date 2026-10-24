@@ -52,6 +52,7 @@
     {"annotations.style_shaded", "Shaded"},
     {"annotations.style_underline", "Solid"},
     {"annotations.summary", "%1 annotations"},
+    {"annotations.summary_one", "1 annotation"},
     {"annotations.tab", "Annotations"},
     {"annotations.tap_boundary", "Tap text or drag a handle to adjust."},
     {"annotations.tap_end", "Tap another word or drag either handle."},

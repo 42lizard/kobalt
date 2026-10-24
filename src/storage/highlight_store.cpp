@@ -39,7 +39,8 @@ bool valid(const Highlight &h) {
            h.end.size() <= 4096 && (!h.sentenceEndPolicy || (!h.chosenEnd.isEmpty() && h.chosenEnd.size() <= 4096)) &&
            (!h.sentenceStartPolicy || (!h.chosenStart.isEmpty() && h.chosenStart.size() <= 4096)) && h.start != h.end &&
            !h.text.isEmpty() && h.text.size() <= HighlightStore::maxTextUnits && h.chapter.size() <= 512 &&
-           h.created.isValid() && colorToken(h.color) && colorToken(h.style);
+           h.created.isValid() && colorToken(h.color) && colorToken(h.style) &&
+           h.note.size() <= HighlightStore::maxNoteUnits;
 }
 }
 bool isHighlightColor(const QString &color) {
@@ -96,6 +97,11 @@ bool HighlightStore::readFolder(const QString &folder, QString *error) {
             if (!o.value("style").isString())
                 return problem(error, "invalid-highlight");
             h.style = o.value("style").toString();
+        }
+        if (o.contains("note")) {
+            if (!o.value("note").isString())
+                return problem(error, "invalid-highlight");
+            h.note = o.value("note").toString();
         }
         if (o.contains("sentence_end")) {
             const auto provenance = o.value("sentence_end");
@@ -181,6 +187,8 @@ bool HighlightStore::save(QString *error) {
                                        {"created", h.created.toUTC().toString(Qt::ISODate)}});
         item["color"] = h.color;
         item["style"] = h.style;
+        if (!h.note.isEmpty())
+            item["note"] = h.note;
         if (h.sentenceEndPolicy) {
             item["sentence_end"] = qt::object({{"enabled", true}, {"chosen_end", h.chosenEnd}});
         }

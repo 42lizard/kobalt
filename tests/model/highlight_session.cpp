@@ -20,7 +20,7 @@ using namespace kobalt;
 namespace {
 bool samePassage(const Highlight &a, const Highlight &b) {
     return a.id == b.id && a.created == b.created && a.start == b.start && a.end == b.end && a.text == b.text &&
-           a.chapter == b.chapter && a.chosenStart == b.chosenStart && a.chosenEnd == b.chosenEnd &&
+           a.chapter == b.chapter && a.note == b.note && a.chosenStart == b.chosenStart && a.chosenEnd == b.chosenEnd &&
            a.sentenceStartPolicy == b.sentenceStartPolicy && a.sentenceEndPolicy == b.sentenceEndPolicy;
 }
 void waitUntil(const std::function<bool()> &ready) {
@@ -121,6 +121,7 @@ int main(int argc, char **argv) {
             Highlight future{"future", first.start, first.end, first.text, {}, QDateTime::currentDateTimeUtc()};
             future.color = "orange";
             future.style = "future";
+            future.note = QString::fromUtf8("A future note\nwith café and 日本語");
             futureStore.setHighlights({future});
             require(futureStore.save(), "Cannot store future color");
             HighlightSession futureSession(model, layout, annotations.path(), identity, model.sourceHash(), "Future");
@@ -137,9 +138,15 @@ int main(int argc, char **argv) {
                         futureStore.load() && futureStore.highlights().first().color == "orange" &&
                         futureSession.highlights().first().style == "future",
                     "Omitted edit color destroyed unknown stored key");
+            require(futureSession.highlights().first().note == future.note &&
+                        futureStore.highlights().first().note == future.note,
+                    "Editing a passage lost its attached note");
             require(futureSession.recolor(future.id, "gray") && futureSession.highlights().first().color == "gray" &&
                         futureStore.load() && futureStore.highlights().first().color == "gray",
                     "Displayed gray future color could not explicitly become gray");
+            require(futureSession.restyle(future.id, "dotted") && futureStore.load() &&
+                        futureStore.highlights().first().note == future.note,
+                    "Changing annotation appearance lost its note");
         }
         bool completed = false, saved = false;
         session.save(first.start, last.end, {}, [&](bool ok) {

@@ -6,6 +6,7 @@
 #include "interfaces/reader_interface.h"
 #include "interfaces/reader_window.h"
 #include "interfaces/reader/ui/controls/page_scrubber.h"
+#include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/metrics.h"
 #include "interfaces/reader/ui/style/scale.h"
@@ -594,6 +595,24 @@ private slots:
         canvas.show();
         QVERIFY(QTest::qWaitForWindowExposed(&canvas));
         QTRY_VERIFY(!host.session()->busy());
+        auto *noticeMessage = host.window()->findChild<QLabel *>("rrUpdatingText");
+        QVERIFY(noticeMessage);
+        auto *notice = noticeMessage->parentWidget();
+        while (notice && !dynamic_cast<ui::ModalOverlay *>(notice))
+            notice = notice->parentWidget();
+        QVERIFY(notice);
+        ui::ModalOverlay reference(host.window());
+        reference.resize(notice->size());
+        reference.setDimmed(true);
+        const auto backdrop = [](QWidget *widget) {
+            QImage image(32, 32, QImage::Format_ARGB32);
+            image.fill(Qt::white);
+            widget->render(&image, QPoint(), QRegion(QRect(0, 0, 32, 32)), QWidget::DrawWindowBackground);
+            return image;
+        };
+        QCOMPARE(backdrop(notice), backdrop(&reference));
+        reference.setDimmed(false);
+        QVERIFY(backdrop(notice) != backdrop(&reference));
         auto *page = static_cast<ReadingPage *>(host.window()->findChild<QWidget *>("rrPage"));
         QVERIFY(page);
         const auto first = host.session()->state().value("position").toString();

@@ -6,6 +6,7 @@
 #include "interfaces/reader/ui/controls/sliders.h"
 #include "interfaces/reader/ui/controls/rows.h"
 #include "interfaces/reader/ui/controls/panels.h"
+#include "interfaces/reader/ui/controls/paging.h"
 #include "interfaces/reader/ui/dialogs/modals.h"
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/metrics.h"
@@ -1003,6 +1004,50 @@ private slots:
         QCOMPARE(notice.primaryButton()->geometry().bottom(), notice.card()->height() - 3);
         QCOMPARE(notice.grab().toImage().pixelColor(0, 0), backdrop.pixelColor(0, 0));
     }
+    void continuationHintClears_data() { variants(); }
+    void continuationHintClears() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
+        ui::Panel owner;
+        auto colors = owner.palette();
+        const QColor paper = dark ? Qt::black : Qt::white;
+        colors.setColor(QPalette::Window, paper);
+        colors.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        owner.setPalette(colors);
+        owner.resize(ui::px(1072), ui::px(800));
+        ui::PagerBar pager(&owner, "hint");
+        pager.setGeometry(0, owner.height() - pager.height(), owner.width(), pager.height());
+        const QRect gap(ui::px(40), ui::px(400), owner.width() - ui::px(80), ui::px(200));
+        auto *hint = owner.findChild<QLabel *>("hintContinuationHint");
+        QVERIFY(hint);
+        PaintRegions paints;
+        owner.installEventFilter(&paints);
+        owner.show();
+        for (int change = 0; change < 4; ++change) {
+            pager.setPage(0, 2);
+            pager.setBlankArea(gap);
+            QTRY_VERIFY(hint->isVisible());
+            QCoreApplication::processEvents();
+            const auto visible = owner.grab().toImage().copy(gap);
+            QImage blank(visible.size(), visible.format());
+            blank.fill(paper);
+            QVERIFY(visible != blank);
+            paints.painted = {};
+            if (change == 0)
+                pager.setPage(1, 2);
+            else if (change == 1)
+                pager.setPage(0, 1);
+            else if (change == 2)
+                pager.setBlankArea(QRect(gap.topLeft(), QSize(gap.width(), 1)));
+            else
+                pager.setPage(0, 2);
+            QVERIFY(hint->isHidden());
+            // Check the actual damage before grab() can force a fresh render.
+            QTRY_VERIFY(paints.painted.contains(gap));
+            QCOMPARE(owner.grab().toImage().copy(gap), blank);
+        }
+    }
     void marksSortingAndAnnotationRows_data() { variants(); }
     void marksSortingAndAnnotationRows() {
         QFETCH(bool, dark);
@@ -1047,6 +1092,14 @@ private slots:
         b.style = "underline";
         b.color = "green";
         BookmarkRow c{"third", "Chapter Two", "Later in the book", late.addSecs(60), 8};
+        auto *summary = list.findChild<QLabel *>("rrBookmarkListSummary");
+        QVERIFY(summary);
+        list.showAnnotations({});
+        QCOMPARE(summary->text(), QString("0 annotations"));
+        list.showAnnotations({a});
+        QCOMPARE(summary->text(), QString("1 annotation"));
+        list.showAnnotations({a, b});
+        QCOMPARE(summary->text(), QString("2 annotations"));
         QString selected, changed;
         list.selected = [&](const QString &id) { selected = id; };
         list.sortRequested = [&](const QString &value) { changed = value; };
@@ -1267,11 +1320,22 @@ private slots:
                 QVERIFY(shownMask.boundingRect().contains(paints.painted.boundingRect()));
         }
     }
+    void delayedProgressPaintsAfterTheEventLoop_data() { variants(); }
     void delayedProgressPaintsAfterTheEventLoop() {
+        QFETCH(bool, dark);
+        QFETCH(int, ppi);
+        ui::setDensity(ppi);
         QWidget owner;
-        owner.resize(600, 800);
+        owner.setProperty("reader_dark", dark);
+        auto colors = owner.palette();
+        colors.setColor(QPalette::Window, dark ? Qt::black : Qt::white);
+        colors.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+        owner.setPalette(colors);
+        ui::readerStyle(&owner, ui::styles::reader());
+        owner.resize(ui::px(1072), ui::px(1448));
         owner.show();
         ui::ModalOverlay loading(&owner);
+        loading.setDimmed(true);
         loading.card()->message("Applying appearance changes", "rrUpdatingText");
         loading.fitCard();
         QVERIFY(loading.progressUpdateRect(35, "Applying appearance changes").isEmpty());
@@ -1280,6 +1344,11 @@ private slots:
         auto *bar = dynamic_cast<ui::ProgressBar *>(loading.findChild<QWidget *>("rrApplyingProgress"));
         QVERIFY(bar);
         QVERIFY(bar->isVisible());
+        const auto captures = qEnvironmentVariable("KOBALT_CAPTURE_MODALS");
+        if (!captures.isEmpty()) {
+            QVERIFY(QDir().mkpath(captures));
+            QVERIFY(owner.grab().save(captures + QString("/relayout-%1-%2.png").arg(dark ? "dark" : "light").arg(ppi)));
+        }
         QCOMPARE(loading.progressUpdateRect(35, "Applying appearance changes"),
                  QRect(bar->mapTo(loading.window(), QPoint()), bar->size()));
         QVERIFY(loading.progressUpdateRect(20, "Applying appearance changes").isEmpty());

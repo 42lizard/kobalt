@@ -30,6 +30,10 @@ Stop and reap run-owned helper processes and remove scratch profiles, staging di
 
 ## Repository practice
 
+Read [Storage compatibility](doc/storage.md) before changing settings, book state, bookmarks, annotations or rendering caches. Keep saved reading data separate from disposable caches. App releases must not reset either format merely because the release version changed. Compatible optional data fields keep the current format version and must load older records with explicit defaults. Preserve supported optional fields when editing records. An incompatible saved-data change requires a format-version bump, a migration that preserves existing user data, and regression tests before it ships. Reject unsupported saved-data versions without overwriting the original files. Do not assume older builds preserve unknown fields or can safely write newer schemas.
+
+Bump the format version in `documentCacheChecksum` when parser or preprocessing changes make parsed-book caches incompatible. Bump the inspection-cache format separately when verdict rules change incompatibly. Cache invalidation must rebuild disposable data only; it must never clear settings, bookmarks or annotations.
+
 Keep Markdown in `doc/`, except the root `README.md` and `AGENTS.md`. The user owns root README edits. Keep these instructions and build commands current in the same change as tooling updates.
 
 Do not stage, commit, push or publish without explicit authorization. Signed operations require an advance warning for 1Password prompts. Never add an agent coauthor. Preserve unrelated changes and the original checkout.

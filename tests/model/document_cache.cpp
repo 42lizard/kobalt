@@ -31,11 +31,12 @@ int main(int argc, char **argv) {
         require(cacheRoot.isValid(), "Cannot create a document cache directory");
         const auto cacheDirectory = cacheRoot.path() + "/.cache";
         const QByteArray fingerprint(64, 'a'), policy("document-cache-test");
-        require(kobalt::documentCacheChecksum(policy, 1, "v1.0-beta.1") !=
-                    kobalt::documentCacheChecksum(policy, 1, "v1.0-beta.2"),
-                "A different Kobalt version reused the document cache identity");
-        require(kobalt::documentCacheChecksum(policy, 1) == kobalt::documentCacheChecksum(policy, 1, KOBALT_VERSION),
-                "The document cache identity omitted the compiled Kobalt version");
+        require(kobalt::documentCacheChecksum(policy, 1) == kobalt::documentCacheChecksum(policy, 1, 4),
+                "The document cache did not use its declared format version");
+        require(kobalt::documentCacheChecksum(policy, 1, 4) != kobalt::documentCacheChecksum(policy, 1, 5),
+                "An incompatible cache format reused the document cache identity");
+        require(kobalt::documentCacheChecksum(policy, 1) != kobalt::documentCacheChecksum(policy, 2),
+                "An incompatible DOM reused the document cache identity");
         // CREngine leaves books under 30 kB out of its cache.
         const qint64 cachedBytes = 1024 * 1024;
         const auto settings = kobalt::qt::object({{"text_alignment", "left"}, {"bold_reading", "off"}});

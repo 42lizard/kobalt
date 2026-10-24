@@ -1179,6 +1179,7 @@ void Reader::buildNotices() {
     };
     acknowledgments->hide();
     busyNotice = new kobalt::ui::ModalOverlay(this);
+    busyNotice->setDimmed(true);
     busyNotice->card()->message(strings::get("reader.applying_appearance_changes"), "rrUpdatingText");
     // Create the bar before the initial refresh attributes are assigned.
     busyNotice->setDelayedProgress(false, 0, 0);
