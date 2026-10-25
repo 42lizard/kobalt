@@ -321,7 +321,7 @@ void concurrentSnapshots() {
     }
     store.setHighlights(marks); require(store.save(), "Cannot seed concurrent snapshot fixture");
     std::atomic<bool> ready{false}, stop{false};
-    std::atomic<int> commits{0}, requested{0};
+    std::atomic<int> commits{0}, requested{0}, started{0}, reading{0};
     QString writerError;
     const auto database = AnnotationDatabase::path(root.path());
     std::thread writer([&] {
@@ -332,9 +332,8 @@ void concurrentSnapshots() {
             ready = true;
             bool longer = true;
             while (writerError.isEmpty() && !stop) {
-                // Overlap one transaction with each read. A continuously
-                // committing writer can legitimately exhaust SQLite's busy
-                // timeout and tests starvation rather than snapshot consistency.
+                // Begin a competing transaction before each read, without a
+                // continuous writer starving SQLite's bounded busy timeout.
                 if (commits >= requested) {
                     QThread::msleep(1);
                     continue;
@@ -346,6 +345,9 @@ void concurrentSnapshots() {
                     writerError = "Cannot prepare concurrent transaction";
                     break;
                 }
+                started = requested.load();
+                while (reading < started && !stop) QThread::msleep(1);
+                if (stop) break;
                 const int delta = longer ? 32 : -32;
                 row.addBindValue(longer ? longNote : shortNote); row.addBindValue(delta); list.addBindValue(delta);
                 if (!row.exec() || !list.exec() || !db.commit()) {
@@ -366,6 +368,10 @@ void concurrentSnapshots() {
     QString error;
     for (int i = 0; i < 200 && valid; ++i) {
         requested = i + 1;
+        QElapsedTimer startWait; startWait.start();
+        while (started < requested && startWait.elapsed() < 2000) QThread::msleep(1);
+        if (started != requested) { valid = false; break; }
+        reading = requested.load();
         valid = store.load(&error) && store.highlights().size() == marks.size();
         if (valid) {
             const auto note = store.highlights().first().note;
