@@ -6,7 +6,7 @@ Application builds do not use Python, compile Qt or read prepared libraries or a
 
 ## Mac
 
-Use an installed native Qt 6.11.3 SDK with Core, Gui, Widgets, Network, Sensors, Test, Sql and its bundled libpng headers and archive. CMake 3.22 or later, Ninja, the Xcode command-line tools, make, patch and pkg-config must be available. The headless tests also use the system `zip` executable to create an offline EPUB fixture. The current desktop project supports macOS; Linux validation has not been restored yet.
+Use an installed native Qt 6.11.3 SDK with Core, Gui, Widgets, Network, Sensors, Test, Sql and its bundled libpng headers and archive. CMake 3.22 or later, Ninja, the Xcode command-line tools, make, patch and pkg-config must be available. The headless tests also use the system `zip` executable to create an offline EPUB fixture. The current desktop project supports macOS; Linux validation uses the `linux` presets with Qt 6.8 or later. See [PocketBook](pocketbook.md) for Docker builds and the PocketBook-only fork workflow.
 
 Run these commands from `platforms/desktop/`:
 
@@ -91,7 +91,7 @@ Stop and reap run-owned helper processes and remove temporary profiles, staging 
 
 ## GitHub builds and tagged releases
 
-`.github/workflows/ci.yml` builds Qt5, Qt6 and a signed Android release APK on branch pushes and tags. Helper checks validate version inputs, source pins and missing-key failures. Kobo jobs check the system archive member, numeric root ownership and executable permissions. Native application tests still run with the Mac presets above; the Linux workflow does not run them.
+In the PocketBook fork, `.github/workflows/ci.yml` builds and tests PocketBook only and creates draft releases for tags ending in `pb`. See [PocketBook releases](pocketbook.md#validation-and-releases). The following upstream Kobo/Android release instructions describe their separate platform tooling; the fork workflow does not invoke them. Helper checks validate version inputs, source pins and missing-key failures. Kobo jobs check the system archive member, numeric root ownership and executable permissions. Native application tests still run with the Mac presets above; the Linux workflow does not run them.
 
 A tag such as `v1.0-beta.4` supplies the displayed version and Android version name. Package filenames stay fixed across releases so download links remain compatible: `Kobalt-qt5.zip`, `Kobalt-qt6.zip`, `Kobalt-android-arm64.apk` and `Kobalt-sources.tar.gz`. Branch builds use the version in `assets/manifest.json`. CI checks that a triggering tag identifies the checked-out commit. Local builds can set `KOBALT_RELEASE_VERSION` to test the same path without editing the tracked asset manifest.
 

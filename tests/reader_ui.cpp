@@ -607,7 +607,9 @@ private slots:
         QVERIFY(directory.isValid());
         library::Store store(directory.path(), std::make_shared<library::LocalSource>());
         QWidget window;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
         window.setWindowFlag(Qt::ExpandedClientAreaHint);
+#endif
         auto *layout = new QStackedLayout(&window);
         layout->setContentsMargins(0, 0, 0, 0);
         auto *start = new android::StartScreen(test::makeHostPresentation, store);

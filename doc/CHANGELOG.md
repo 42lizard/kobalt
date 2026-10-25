@@ -1,3 +1,15 @@
+# PocketBook changelog
+
+## v1.0-beta.4pb
+
+- Rebased on upstream v1.0-beta.4 with persistent highlights, cross-page selection, saved annotation lists and updated annotation controls.
+- Added advanced typography, landscape columns, appearance customization and navigation previews.
+- Adopted EPUB rendering, font and resource-loading improvements, unified confirmation dialogs, unread resets and dark search-keyboard styling.
+- Added Kobalt's library when launching the application directly, with folders, sorting, covers and reading progress. Opening EPUBs from the PocketBook library still returns to the native library.
+- Adopted the shared SQLite profile and safe migration of earlier reading positions, bookmarks and annotations.
+- Retained downloadable Kobalt dictionaries and per-book dictionary selection.
+- Updated standalone Docker/CMake builds and PocketBook-only GitHub release drafts.
+
 ## Unreleased
 
 - PocketBook: added Kobalt's dictionary catalogue, downloads and removal, offline

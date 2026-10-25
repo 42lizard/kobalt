@@ -464,3 +464,7 @@ List rows share all the space between the view toolbar and the pager, without th
 The library follows the reader's dark mode setting.
 
 On Android, the Qt window and activity both use edge-to-edge layout. The activity reports its surface bounds and visible system-bar and cutout insets together. The Library reserves this space on cold launch as well as after closing a book. Showing or hiding the bars updates the content area even when the screen dimensions stay the same.
+
+## Experimental PocketBook host
+
+On InkPad Color 3 firmware U743k3.6.10.2854, the fork uses the shared beta.4 reader and library, including annotations and SQLite data migration. Starting without an EPUB opens Kobalt's library; native Open with opens a book and returns to the native library on exit. Page buttons and manual rotation remain supported. Kobalt dictionaries can be downloaded in Settings and used offline; dictionary selection persists per book. Native PocketBook dictionaries, progress/annotation integration, frontlight control, automatic rotation and synchronization remain unavailable. Physical-device acceptance is pending; see [PocketBook](pocketbook.md).

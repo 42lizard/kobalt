@@ -1,7 +1,7 @@
 #include "device.h"
 
 #include "platform/api/kobo_refresh.h"
-#include "platform/desktop/services.h"
+#include "platforms/desktop/services.h"
 
 #include <QApplication>
 #include <QFile>
@@ -136,38 +136,5 @@ ReaderHostServices readerServices() {
     };
 #endif
     return services;
-}
-}
-namespace kobalt::platform {
-// The PocketBook QPA owns paint/partial refresh. Request a clean update after
-// the queued Qt paint for the reader's explicit clean-refresh boundary.
-void textRefresh(QWidget *widget) {
-    if (widget) {
-        widget->update();
-    }
-}
-void pageRefresh(QWidget *widget, bool clean, bool) {
-    if (!widget) {
-        return;
-    }
-    widget->update();
-#ifndef KOBALT_POCKETBOOK_HOST
-    if (clean) {
-        QTimer::singleShot(200, widget, [] {
-            FullUpdate();
-        });
-    }
-#else
-    Q_UNUSED(clean);
-#endif
-}
-void setReaderRefreshWindow(QWidget *) {}
-}
-namespace kobalt::nickel4 {
-bool configureLoopback(int *error) {
-    if (error) {
-        *error = ENOTSUP;
-    }
-    return false;
 }
 }

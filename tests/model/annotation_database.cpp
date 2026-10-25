@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QLockFile>
 #include <QProcess>
+#include <QElapsedTimer>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -163,7 +164,12 @@ void versionsAndCorruption() {
     require(recovered.load() && recovered.highlights().size() == 1 &&
             bytes(abandoned) == "incomplete unpublished schema", "Interrupted initialization prevented migration retry");
     QTemporaryDir crashed; legacyCurrent(crashed.path());
-    require(QProcess::execute(QCoreApplication::applicationFilePath(), {"--interrupted-bootstrap", crashed.path()}) == 0,
+    const auto emulator = qEnvironmentVariable("KOBALT_TEST_EMULATOR");
+    const QStringList bootstrap{"--interrupted-bootstrap", crashed.path()};
+    const auto status = emulator.isEmpty()
+        ? QProcess::execute(QCoreApplication::applicationFilePath(), bootstrap)
+        : QProcess::execute(emulator, QStringList{QCoreApplication::arguments().first()} + bootstrap);
+    require(status == 0,
             "Cannot simulate interrupted initialization process");
     require(QFile::exists(crashed.path() + "/.kobalt-db-init.lock"), "Crash fixture did not retain its lock");
     HighlightStore afterCrash(crashed.path(), identity, fingerprint, "Book");
@@ -315,7 +321,7 @@ void concurrentSnapshots() {
     }
     store.setHighlights(marks); require(store.save(), "Cannot seed concurrent snapshot fixture");
     std::atomic<bool> ready{false}, stop{false};
-    std::atomic<int> commits{0};
+    std::atomic<int> commits{0}, requested{0};
     QString writerError;
     const auto database = AnnotationDatabase::path(root.path());
     std::thread writer([&] {
@@ -326,6 +332,13 @@ void concurrentSnapshots() {
             ready = true;
             bool longer = true;
             while (writerError.isEmpty() && !stop) {
+                // Overlap one transaction with each read. A continuously
+                // committing writer can legitimately exhaust SQLite's busy
+                // timeout and tests starvation rather than snapshot consistency.
+                if (commits >= requested) {
+                    QThread::msleep(1);
+                    continue;
+                }
                 QSqlQuery row(db), list(db);
                 if (!db.transaction() ||
                     !row.prepare("UPDATE entries SET note=?,bytes=bytes+? WHERE kind=1 AND id='race-0'") ||
@@ -352,11 +365,15 @@ void concurrentSnapshots() {
     bool valid = true;
     QString error;
     for (int i = 0; i < 200 && valid; ++i) {
+        requested = i + 1;
         valid = store.load(&error) && store.highlights().size() == marks.size();
         if (valid) {
             const auto note = store.highlights().first().note;
             valid = note == shortNote || note == longNote;
         }
+        QElapsedTimer commitWait; commitWait.start();
+        while (valid && commits < requested && commitWait.elapsed() < 2000) QThread::msleep(1);
+        valid = valid && commits == requested;
     }
     stop = true; writer.join();
     if (!valid || !writerError.isEmpty())
@@ -675,6 +692,10 @@ int main(int argc, char **argv) {
         require(query.exec("BEGIN IMMEDIATE") && query.exec("CREATE TABLE incomplete(value TEXT)"),
                 "Cannot start interrupted schema transaction");
         std::_Exit(0); // Deliberately skip database and lock destructors.
+    }
+    if (app.arguments().contains("--concurrent-snapshots")) {
+        concurrentSnapshots();
+        return 0;
     }
     defaultBackend(); profileDatabaseLocation();
     beta3(); atomicMigration(); versionsAndCorruption(); editsAndFailures(); adoption(); quotas(); tamperedQuota();

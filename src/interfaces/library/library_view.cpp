@@ -473,7 +473,10 @@ public:
 protected:
     void paintEvent(QPaintEvent *) override {
         QPainter painter(this);
-        const auto paper = palette().color(QPalette::Window), ink = palette().color(QPalette::WindowText);
+        // Disabled scan captions keep the reader theme even when Qt's
+        // disabled style sheet supplies its own palette text color.
+        const bool dark = ui::darkTheme(this);
+        const QColor paper = dark ? Qt::black : Qt::white, ink = dark ? Qt::white : Qt::black;
         painter.fillRect(rect(), isDown() ? palette().color(QPalette::Midlight) : paper);
         const int left = busy ? c::inset + progressWidth + ui::px(24) : int(c::inset);
         auto font = ui::captionFont();

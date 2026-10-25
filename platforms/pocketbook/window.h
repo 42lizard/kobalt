@@ -1,6 +1,8 @@
 #pragma once
 #include "interfaces/reader_interface.h"
-#include "platform/android/reader.h"
+#include "platforms/android/reader.h"
+#include "platforms/android/start_screen.h"
+#include "library/library_store.h"
 
 #include <QWidget>
 
@@ -13,6 +15,7 @@ class Window final : public QWidget {
     Q_OBJECT
 public:
     Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder);
+    ~Window() override;
     void openBook(const QString &path);
     bool idle() const {
         return controller.idle();
@@ -28,6 +31,13 @@ protected:
 
 private:
     android::ReaderController controller;
+    library::Store store;
+    android::StartScreen *start;
+    bool fromLibrary = false, openingFailed = false;
+    QString openedKey;
+    void openFromLibrary(const QString &path);
+    void returnFromReader();
+    void recordProgress();
     QStackedLayout *stack;
     std::unique_ptr<ReaderOpeningView> opening;
     QString bookPath;

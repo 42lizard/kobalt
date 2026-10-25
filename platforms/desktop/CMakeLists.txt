@@ -1,9 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(Kobalt LANGUAGES C CXX)
 
-if(NOT APPLE)
-    message(FATAL_ERROR "Only the Mac development app is configured so far.")
-endif()
+option(KOBALT_POCKETBOOK "Build the PocketBook host" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,14 +11,24 @@ set(qt_components Core Gui Widgets Network Sensors Sql)
 if(BUILD_TESTING)
     list(APPEND qt_components Test)
 endif()
-find_package(Qt6 6.11.3 EXACT REQUIRED COMPONENTS ${qt_components})
+if(KOBALT_POCKETBOOK AND CMAKE_CROSSCOMPILING)
+    include("${CMAKE_CURRENT_LIST_DIR}/../pocketbook/qt.cmake")
+else()
+    if(APPLE)
+        find_package(Qt6 6.11.3 EXACT REQUIRED COMPONENTS ${qt_components})
+    else()
+        find_package(Qt6 6.8 REQUIRED COMPONENTS ${qt_components})
+    endif()
+endif()
 file(REAL_PATH "${Qt6_DIR}/.." qt_config_root)
+if(NOT CMAKE_CROSSCOMPILING)
 foreach(component IN LISTS qt_components)
     file(REAL_PATH "${Qt6${component}_DIR}/.." component_root)
     if(NOT component_root STREQUAL qt_config_root)
         message(FATAL_ERROR "Mixed Qt SDK cache for ${component}. Configure a fresh output or clear cached Qt6 package paths with -UQt6* before selecting the SDK.")
     endif()
 endforeach()
+endif()
 get_filename_component(KOBALT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 foreach(retired KOBALT_DEPENDENCIES KOBALT_DEPENDENCY_CACHE KOBALT_ASSETS)
     unset(${retired} CACHE)
@@ -70,7 +78,11 @@ file(GLOB_RECURSE shared CONFIGURE_DEPENDS
     "${source}/dictionaries/*.cpp" "${source}/engine/*.cpp"
     "${source}/library/*.cpp" "${source}/model/*.cpp"
     "${source}/reading/*.cpp" "${source}/storage/*.cpp")
-add_library(kobalt-core OBJECT ${shared} display.cpp
+set(display_source "${CMAKE_CURRENT_SOURCE_DIR}/display.cpp")
+if(KOBALT_POCKETBOOK)
+    set(display_source "${KOBALT_ROOT}/platforms/pocketbook/display.cpp")
+endif()
+add_library(kobalt-core OBJECT ${shared} ${display_source}
     "${source}/assets/assets.cpp" "${source}/assets/bundled_fonts.cpp" "${source}/assets/font_catalog.cpp"
     "${source}/assets/system_fonts.cpp"
     "${source}/support/diagnostics.cpp"
@@ -98,7 +110,7 @@ else()
     set_source_files_properties("${source}/storage/annotation_database.cpp" PROPERTIES
         COMPILE_DEFINITIONS KOBALT_SQLITE_ANNOTATIONS_DEFAULT=0)
 endif()
-target_link_libraries(kobalt-core PUBLIC Qt6::Widgets Qt6::Network Qt6::Sensors Qt6::Sql
+target_link_libraries(kobalt-core PUBLIC Qt6::Widgets Qt6::Network Qt6::Sql
     "${CRENGINE_BUILD}/libcrengine.a"
     "${KOBALT_TEST_DEPENDENCIES}/lib/libharfbuzz.a" "${KOBALT_TEST_DEPENDENCIES}/lib/libxxhash.a"
     "${KOBALT_TEST_DEPENDENCIES}/lib/libutf8proc.a" "${KOBALT_TEST_DEPENDENCIES}/lib/libjpeg.a"
@@ -106,7 +118,21 @@ target_link_libraries(kobalt-core PUBLIC Qt6::Widgets Qt6::Network Qt6::Sensors 
     "${KOBALT_TEST_DEPENDENCIES}/lib/libfribidi.a" "${KOBALT_TEST_DEPENDENCIES}/lib/libunibreak.a"
     "${KOBALT_TEST_PNG}" z)
 # The engine and Qt must keep separate FreeType glyph implementations.
-target_link_options(kobalt-core INTERFACE "LINKER:-force_load,${KOBALT_TEST_DEPENDENCIES}/lib/libfreetype.a")
+if(APPLE)
+    target_link_options(kobalt-core INTERFACE "LINKER:-force_load,${KOBALT_TEST_DEPENDENCIES}/lib/libfreetype.a")
+else()
+    target_link_options(kobalt-core INTERFACE "LINKER:--exclude-libs,ALL")
+endif()
+if(KOBALT_POCKETBOOK AND CMAKE_CROSSCOMPILING)
+    target_compile_definitions(kobalt-core PUBLIC KOBALT_NO_SENSORS)
+    target_link_libraries(kobalt-core PUBLIC PocketBook::InkView "${POCKETBOOK_TARGET_LIB_DIR}/libfreetype.so.6"
+        "${KOBALT_FIRMWARE_LIBS}/libstdc++.so.6.0.32")
+else()
+    target_link_libraries(kobalt-core PUBLIC Qt6::Sensors)
+    if(KOBALT_POCKETBOOK)
+        target_compile_definitions(kobalt-core PUBLIC KOBALT_POCKETBOOK_HOST)
+    endif()
+endif()
 file(GLOB_RECURSE interfaces CONFIGURE_DEPENDS "${source}/interfaces/*.cpp")
 add_library(kobalt-desktop OBJECT ${interfaces}
     window.cpp services.cpp
@@ -150,7 +176,13 @@ else()
     </dict></array>")
 endif()
 message(STATUS "Mac app: ${KOBALT_BUNDLE_NAME}, ${KOBALT_BUNDLE_IDENTIFIER}")
-add_executable(Kobalt MACOSX_BUNDLE main.cpp)
+if(KOBALT_POCKETBOOK)
+    target_sources(kobalt-desktop PRIVATE "${KOBALT_ROOT}/platforms/pocketbook/window.cpp"
+        "${KOBALT_ROOT}/platforms/pocketbook/device.cpp")
+    add_executable(Kobalt "${KOBALT_ROOT}/platforms/pocketbook/main.cpp")
+else()
+    add_executable(Kobalt MACOSX_BUNDLE main.cpp)
+endif()
 target_link_libraries(Kobalt PRIVATE kobalt-desktop kobalt-core)
 # The profile folder under Application Support follows the application name.
 target_compile_definitions(Kobalt PRIVATE KOBALT_PROFILE_NAME="${KOBALT_PROFILE_NAME}")
@@ -160,6 +192,10 @@ set(resources "${KOBALT_ROOT}/assets")
 file(GLOB notices CONFIGURE_DEPENDS "${resources}/notices/*")
 qt_add_resources(kobalt-desktop desktop_artwork PREFIX "/desktop" BASE "${resources}" FILES "${resources}/kobalt-android.svg")
 qt_add_resources(kobalt-desktop notices PREFIX "/kobalt" BASE "${resources}" FILES "${resources}/acknowledgments.json" ${notices})
+if(KOBALT_POCKETBOOK)
+    include("${KOBALT_ROOT}/platforms/pocketbook/package.cmake")
+endif()
+if(APPLE AND NOT KOBALT_POCKETBOOK)
 set(bundle_assets "${CMAKE_CURRENT_BINARY_DIR}/Kobalt.app/Contents/Resources/assets")
 add_custom_command(OUTPUT "${bundle_assets}/manifest.json"
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${bundle_assets}"
@@ -168,8 +204,12 @@ add_custom_command(OUTPUT "${bundle_assets}/manifest.json"
     VERBATIM)
 add_custom_target(kobalt-runtime-assets DEPENDS "${bundle_assets}/manifest.json")
 add_dependencies(Kobalt kobalt-runtime-assets)
+endif()
 
 if(BUILD_TESTING)
+    if(KOBALT_POCKETBOOK)
+        include("${KOBALT_ROOT}/platforms/pocketbook/tests.cmake")
+    endif()
     add_executable(kobalt-annotation-engine-benchmark EXCLUDE_FROM_ALL "${KOBALT_ROOT}/tests/annotation_engine_benchmark.cpp")
     target_link_libraries(kobalt-annotation-engine-benchmark PRIVATE kobalt-desktop kobalt-core)
     target_include_directories(kobalt-annotation-engine-benchmark PRIVATE "${KOBALT_ROOT}/tests/support")
@@ -390,9 +430,10 @@ if(BUILD_TESTING)
     kobalt_regressions(corpus multilingual)
     target_compile_definitions(kobalt-multilingual-tests PRIVATE
         KOBALT_TEST_ZIP="${KOBALT_TEST_ZIP}" KOBALT_TEST_CORPUS="${KOBALT_ROOT}/tests/fixtures/public-domain")
+    set(KOBALT_SCREENSHOT_DIRECTORY "${KOBALT_ROOT}/build/screenshots/mac" CACHE PATH "Screenshot output directory")
     add_custom_target(screenshots
         COMMAND "${CMAKE_COMMAND}" "-DTEST_EXECUTABLE=$<TARGET_FILE:kobalt-desktop-tests>"
-            "-DTEST_ARGUMENTS=--screenshots;${KOBALT_ROOT}/build/screenshots/mac"
+            "-DTEST_ARGUMENTS=--screenshots;${KOBALT_SCREENSHOT_DIRECTORY}"
             "-DTEST_TMP_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-tmp" "-DTEST_TIMEOUT=120"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/run-test.cmake"
         DEPENDS kobalt-desktop-tests USES_TERMINAL VERBATIM)

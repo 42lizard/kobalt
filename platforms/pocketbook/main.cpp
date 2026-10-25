@@ -22,8 +22,8 @@ int main(int argc, char **argv) {
     const auto size = pocketbook::initialize();
     FontCopies copies;
     pocketbook::Application app(argc, argv);
-    if (app.arguments().size() != 2) {
-        qCritical("Launch Kobalt with an EPUB path from the PocketBook library.");
+    if (app.arguments().size() > 2) {
+        qCritical("Launch Kobalt with an optional EPUB path.");
         return 64;
     }
     app.setApplicationName("Kobalt");

@@ -34,9 +34,9 @@ string(SHA256 sdk_key "${identity};${manifest};${recipe_hash};${patch_recipe_has
 string(SUBSTRING "${sdk_key}" 0 16 sdk_key)
 set(output "${CMAKE_CURRENT_BINARY_DIR}/${sdk_key}")
 set(prefix "${output}/install")
-set(common -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+set(common "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_LIBDIR=lib
-    "-DCMAKE_INSTALL_PREFIX=${prefix}" "-DCMAKE_PREFIX_PATH=${prefix}"
+    "-DKOBALT_DEPENDENCY_PREFIX=${prefix}" "-DCMAKE_INSTALL_PREFIX=${prefix}" "-DCMAKE_PREFIX_PATH=${prefix}"
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}" "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
     "-DCMAKE_C_FLAGS=${CMAKE_C_FLAGS}" "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
@@ -44,6 +44,9 @@ set(common -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
 if(APPLE)
     list(APPEND common "-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
         "-DCMAKE_OSX_ARCHITECTURES=${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+if(KOBALT_POCKETBOOK AND CMAKE_CROSSCOMPILING)
+    list(APPEND common "-DZLIB_LIBRARY=/usr/lib/arm-linux-gnueabi/libz.a" "-DZLIB_INCLUDE_DIR=/usr/include")
 endif()
 if(CMAKE_TOOLCHAIN_FILE)
     list(APPEND common "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
@@ -123,7 +126,14 @@ set(host)
             string(APPEND cc " --target=${CMAKE_C_COMPILER_TARGET}")
             string(APPEND cflags " --sysroot=${CMAKE_SYSROOT}")
         elseif(CMAKE_CROSSCOMPILING)
-            set(host --host=arm-linux-gnueabihf)
+            if(CMAKE_C_COMPILER_TARGET)
+                set(compiler_triple "${CMAKE_C_COMPILER_TARGET}")
+                string(APPEND cc " --target=${compiler_triple}")
+            else()
+                execute_process(COMMAND "${CMAKE_C_COMPILER}" -dumpmachine OUTPUT_VARIABLE compiler_triple
+                    OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+            endif()
+            set(host --host=${compiler_triple})
             if(CMAKE_SYSROOT)
                 string(APPEND cflags " --sysroot=${CMAKE_SYSROOT}")
             endif()
@@ -160,7 +170,7 @@ kobalt_source(lunasvg PATCHES "${svg_patches}/cmake_tweaks.patch" "${svg_patches
     "${svg_patches}/pkgconfig.patch" "${CMAKE_CURRENT_SOURCE_DIR}/patches/lunasvg-resource-limits.patch")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/crengine-patches.txt" engine_patches)
 list(TRANSFORM engine_patches PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/patches/")
-if(APPLE)
+if(APPLE OR KOBALT_POCKETBOOK OR NOT CMAKE_CROSSCOMPILING)
     set(engine_options NATIVE_ENGINE)
 endif()
 kobalt_source(crengine ${engine_options} PATCHES ${engine_patches})

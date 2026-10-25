@@ -3512,7 +3512,11 @@ private slots:
         QTest::mouseRelease(&page, Qt::RightButton, Qt::NoModifier, point);
         QCOMPARE(requests, 0);
         QTest::mouseClick(&page, Qt::RightButton, Qt::NoModifier, point);
+#ifdef Q_OS_MAC
         QCOMPARE(requests, 1);
+#else
+        QCOMPARE(requests, 0);
+#endif
     }
     void stylesheet() {
         Fixture fixture;

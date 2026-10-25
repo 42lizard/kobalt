@@ -4,31 +4,71 @@
 #include "interfaces/reader/ui/style/scale.h"
 #include "interfaces/reader/ui/style/theme.h"
 #include "interfaces/reader/views/opening.h"
-#include "platform/android/canvas.h"
+#include "platforms/android/canvas.h"
 #include "reading/reading_density.h"
 #include "support/diagnostics.h"
 
 #include <QCloseEvent>
 #include <QFileInfo>
+#include <QFileDialog>
+#include <utility>
 #include <QLineEdit>
 #include <QStackedLayout>
 
 namespace kobalt::pocketbook {
 Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder)
-    : controller(std::move(paths), std::move(fonts), std::move(placeholder), readerServices,
+    : controller(paths, std::move(fonts), std::move(placeholder), readerServices,
                  [this](Qt::ScreenOrientation orientation) {
                      resize(rotate(orientation));
-                 }) {
+                 }),
+      store(paths.directory, std::make_shared<library::LocalSource>()) {
     setWindowTitle("Kobalt");
     readingPpi.store(300);
     ui::setDensity(300);
     stack = new QStackedLayout(this);
     stack->setContentsMargins(0, 0, 0, 0);
+    start = new android::StartScreen(readerServices().presentation, store, this);
+    start->setDark(controller.preferences().value("dark_mode").toBool(false));
+    stack->addWidget(start);
+    connect(start, &android::StartScreen::bookRequested, this, &Window::openFromLibrary);
+    connect(start, &android::StartScreen::exitRequested, this, [this] {
+        if (start->libraryShown())
+            close();
+        else
+            returnFromReader();
+    });
+    connect(start, &android::StartScreen::libraryOpenRequested, this, [this] {
+        const auto path = QFileDialog::getOpenFileName(this, tr("Open EPUB"), "/mnt/ext1", tr("EPUB books (*.epub)"),
+                                                       nullptr, QFileDialog::DontUseNativeDialog);
+        if (!path.isEmpty())
+            openFromLibrary(path);
+    });
+    connect(start, &android::StartScreen::addFolderRequested, this, [this] {
+        const auto path = QFileDialog::getExistingDirectory(
+            this, tr("Add Library Folder"), "/mnt/ext1", QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
+        if (!path.isEmpty())
+            store.addFolder({QFileInfo(path).absoluteFilePath(), QFileInfo(path).fileName()});
+    });
+    connect(start, &android::StartScreen::removeBookRequested, this, [this](const QString &key) {
+        store.removeBook(key);
+    });
+    connect(start, &android::StartScreen::removeFolderRequested, this, [this](const QString &key) {
+        store.removeFolder(key);
+    });
+    connect(start, &android::StartScreen::markUnreadRequested, this, [this](const QString &key) {
+        if (controller.resetBook(key))
+            store.setMark(key, library::Book::Mark::Unread);
+        else
+            start->showLibraryError(tr("The book's reading settings and position could not be reset."));
+    });
+    if (store.index().settings.checkAtStart)
+        QTimer::singleShot(0, &store, &library::Store::scan);
+    start->showLibrary();
     opening = createEmbeddedOpening(this, readerServices().presentation);
     canvas = new android::WidgetCanvas(this);
     stack->addWidget(opening->window());
     stack->addWidget(canvas);
-    connect(opening->window(), &QDialog::rejected, this, &QWidget::close);
+    connect(opening->window(), &QDialog::rejected, this, &Window::returnFromReader);
     connect(opening->window(), &QDialog::accepted, this, [this] {
         if (openNativeBook(bookPath)) {
             close();
@@ -38,9 +78,12 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         }
     });
     connect(&controller, &android::ReaderController::openingProgress, this, [this](int percent) {
-        opening->setProgress(percent);
+        if (fromLibrary)
+            start->setProgress(percent);
+        else
+            opening->setProgress(percent);
     });
-    connect(&controller, &android::ReaderController::exitRequested, this, &QWidget::close);
+    connect(&controller, &android::ReaderController::exitRequested, this, &Window::returnFromReader);
     connect(&controller, &android::ReaderController::opened, this, [this] {
         auto *reader = controller.window();
         canvas->setContent(reader);
@@ -54,14 +97,26 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
         emit bookOpened();
     });
     connect(&controller, &android::ReaderController::failed, this, [this](const QString &error) {
+        openingFailed = true;
         diagnostic("pocketbook-book-failed");
-        opening->showFallback(OpeningFallback::Failure);
-        stack->setCurrentWidget(opening->window());
+        if (fromLibrary) {
+            start->showLibraryError(error);
+            stack->setCurrentWidget(start);
+        } else {
+            opening->showFallback(OpeningFallback::Failure);
+            stack->setCurrentWidget(opening->window());
+        }
         keepAwake(false);
         emit bookFailed(error);
     });
     connect(&controller, &android::ReaderController::closed, this, [this] {
         keepAwake(false);
+        recordProgress();
+        if (fromLibrary && !closing && !openingFailed) {
+            start->setDark(controller.preferences().value("dark_mode").toBool(false));
+            start->showLibrary();
+            stack->setCurrentWidget(start);
+        }
         if (closing) {
             close();
         }
@@ -82,14 +137,47 @@ Window::Window(storage::Paths paths, EngineFontInputs fonts, QString placeholder
     });
     qApp->installEventFilter(this);
 }
+Window::~Window() {
+    qApp->removeEventFilter(this);
+    disconnect(&controller, nullptr, this, nullptr);
+    delete start;
+}
+void Window::recordProgress() {
+    if (openedKey.isEmpty())
+        return;
+    const auto progress = library::savedProgress(controller.savedState(openedKey));
+    store.setProgress(std::exchange(openedKey, {}), progress.percent, progress.finished);
+}
+void Window::returnFromReader() {
+    if (!fromLibrary) {
+        close();
+        return;
+    }
+    controller.close();
+}
+void Window::openFromLibrary(const QString &path) {
+    fromLibrary = true;
+    openBook(path);
+}
 void Window::openBook(const QString &path) {
     if (closing || (controller.window() && controller.path() == QFileInfo(path).absoluteFilePath())) {
         return;
     }
     bookPath = QFileInfo(path).absoluteFilePath();
+    recordProgress();
+    if (store.index().books.contains(bookPath) || store.addBook(bookPath)) {
+        openedKey = bookPath;
+        store.setOpened(bookPath);
+    }
+    openingFailed = false;
     diagnostic("pocketbook-book-requested");
     keepAwake(true);
-    stack->setCurrentWidget(opening->window());
+    if (fromLibrary) {
+        start->showOpening();
+        stack->setCurrentWidget(start);
+    } else {
+        stack->setCurrentWidget(opening->window());
+    }
     controller.open(bookPath, size());
 }
 void Window::closeEvent(QCloseEvent *event) {
@@ -141,12 +229,18 @@ bool Window::eventFilter(QObject *object, QEvent *event) {
             // Handle the press: a modal dismissed by Escape must not make its
             // following release become a second, application-wide close.
             if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) {
-                close();
+                if (key->key() == Qt::Key_Home)
+                    close();
+                else if (stack->currentWidget() == start && start->dismissModal()) {
+                } else if (stack->currentWidget() == start && start->libraryShown())
+                    close();
+                else
+                    returnFromReader();
             }
             return true;
         }
         const auto direction = readerServices().pageButtonDirection(key);
-        if (direction && controller.window()) {
+        if (direction && controller.window() && stack->currentWidget() == canvas && controller.window()->isVisible()) {
             if (QApplication::activeModalWidget() || qobject_cast<QLineEdit *>(QApplication::focusWidget())) {
                 return QWidget::eventFilter(object, event);
             }

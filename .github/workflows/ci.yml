@@ -1,28 +1,19 @@
 name: PocketBook build and release
-
 on:
   push:
     branches: [pocketbook-port]
-    tags: ['v*-pocketbook.*']
+    tags: ['v*pb']
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: pocketbook-${{ github.ref }}
   cancel-in-progress: false
-
 env:
-  CONTAINER_ENGINE: docker
-  PYTHONUNBUFFERED: '1'
   KOBALT_RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-
 jobs:
   build-pocketbook:
-    if: >-
-      github.ref == 'refs/heads/pocketbook-port' ||
-      (startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-pocketbook.'))
+    if: github.ref == 'refs/heads/pocketbook-port' || (startsWith(github.ref, 'refs/tags/v') && endsWith(github.ref_name, 'pb'))
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -30,39 +21,37 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Check release tooling
+      - name: Verify release version
+        shell: bash
         run: |
-          mkdir -p build
-          python3 -m unittest discover -s tests/tooling -p 'test_*release*.py'
-      - name: Validate release notes and source version
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_REPOSITORY: ${{ github.repository }}
-        run: |
-          test "$(cat VERSION)" = "$RELEASE_TAG"
-          python3 tools/draft_release.py --target pocketbook --notes-only --tag "$RELEASE_TAG" --repository "$RELEASE_REPOSITORY"
+          test "$(cat VERSION)" = "$(jq -r .version assets/manifest.json)"
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            test "$(bash platforms/ci/version.sh)" = "$(cat VERSION)"
+            grep -Fx "## $GITHUB_REF_NAME" doc/CHANGELOG.md
+          fi
       - uses: actions/cache@v6
         with:
-          path: .cache/kobalt
-          key: pocketbook-sources-${{ runner.os }}-${{ hashFiles('dependencies/manifest.json') }}
-      - name: Download and verify official firmware
-        run: python3 tools/fetch_pocketbook_firmware.py
+          path: |
+            build/pocketbook/host-beta4/downloads
+            build/pocketbook/arm-beta4/downloads
+            build/release-source-cache
+          key: pocketbook-sources-${{ runner.os }}-${{ hashFiles('dependencies/manifest.json', 'dependencies/release-sources.json', 'platforms/pocketbook/release-sources.json') }}
       - name: Build and test PocketBook
         shell: bash
         run: |
+          mkdir -p build
           set -o pipefail
-          ./build-pocketbook.sh --firmware "$PWD/build/firmware/SWUPDATE.BIN" --jobs 4 --test 2>&1 | tee build/pocketbook-build.log
-      - name: Restore ownership of container outputs
+          ./build-pocketbook.sh --test 2>&1 | tee build/pocketbook-build.log
+      - name: Restore output ownership
         if: always()
-        run: sudo chown -R "$(id -u):$(id -g)" build .cache vendor
-      - name: Stage tested package
+        run: sudo chown -R "$(id -u):$(id -g)" build
+      - name: Collect source archives
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash platforms/pocketbook/source-archive.sh
+      - name: Stage package and build metadata
         run: |
           mkdir -p build/release
           cp build/pocketbook/Kobalt-PB743K3.zip build/pocketbook/pocketbook.json build/release/
-      - name: Collect corresponding source and dependency archives
-        if: startsWith(github.ref, 'refs/tags/')
-        run: python3 tools/release_sources.py --target pocketbook
       - uses: actions/upload-artifact@v7
         with:
           name: pocketbook-package
@@ -76,16 +65,14 @@ jobs:
           name: pocketbook-tests
           path: |
             build/pocketbook-build.log
-            build/pocketbook/arm-runtime-test/*.png
-            build/pocketbook/host/app/Testing/Temporary/LastTest.log
-          if-no-files-found: warn
+            build/pocketbook/host-captures/*.png
+            build/pocketbook/arm-captures/*.png
+            build/pocketbook/host-beta4/Testing/Temporary/LastTest.log
           retention-days: 1
-
   release-draft:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/')
     needs: build-pocketbook
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -97,9 +84,7 @@ jobs:
         with:
           name: pocketbook-package
           path: build/release
-      - name: Create or update PocketBook release draft
+      - name: Assemble PocketBook release draft
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_REPOSITORY: ${{ github.repository }}
-        run: python3 tools/draft_release.py --target pocketbook --tag "$RELEASE_TAG" --repository "$RELEASE_REPOSITORY"
+        run: bash platforms/pocketbook/draft-release.sh "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY"

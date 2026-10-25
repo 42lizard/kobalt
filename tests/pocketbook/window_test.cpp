@@ -6,8 +6,8 @@
 #include "interfaces/reader/ui/style/fonts.h"
 #include "interfaces/reader/ui/style/scale.h"
 #include "interfaces/reader/views/reading_page.h"
-#include "platform/pocketbook/application.h"
-#include "platform/pocketbook/window.h"
+#include "platforms/pocketbook/application.h"
+#include "platforms/pocketbook/window.h"
 #include "reading/reading_density.h"
 #include "storage/reader_storage.h"
 #include "support/strings.h"
@@ -31,6 +31,83 @@ using namespace kobalt;
 class PocketBookTest : public QObject {
     Q_OBJECT
 private slots:
+    void libraryReturnsAfterReading_data() {
+        QTest::addColumn<bool>("home");
+        QTest::newRow("reader-return") << false;
+        QTest::newRow("home-close") << true;
+    }
+    void libraryReturnsAfterReading() {
+        QFETCH(bool, home);
+        QTemporaryDir profile;
+        QVERIFY(profile.isValid());
+        storage::Paths paths{profile.path()};
+        QVERIFY(storage::prepareProfile(paths));
+        const QString book = QStringLiteral(KOBALT_FIXTURE);
+        {
+            library::Store store(profile.path(), std::make_shared<library::LocalSource>());
+            QVERIFY(store.addBook(book));
+            store.save();
+        }
+        AssetBundle assets(QStringLiteral(KOBALT_ASSETS), QStringLiteral(KOBALT_VERSION));
+        QVERIFY(ui::initializeInterfaceFonts(assets));
+        FontCopies copies;
+        pocketbook::Window window(paths, engineFontInputs(assets, {}, {}, {}), placeholderFontFamily(assets, copies));
+        const auto cleanup = qScopeGuard([&window] {
+            window.close();
+            QElapsedTimer timer;
+            timer.start();
+            while (!window.idle() && timer.elapsed() < 10000)
+                QTest::qWait(10);
+        });
+        window.resize(1404, 1872);
+        window.show();
+        auto *start = window.findChild<android::StartScreen *>();
+        QVERIFY(start);
+        QVERIFY(start->libraryShown());
+        QSignalSpy opened(&window, &pocketbook::Window::bookOpened);
+        start->bookRequested(book);
+        QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
+        auto *back = window.findChild<QPushButton *>("rrReturn");
+        // Reader widgets are embedded through a QGraphicsProxyWidget.
+        if (!back)
+            for (auto *widget : QApplication::allWidgets())
+                if (widget->objectName() == "rrReturn")
+                    back = qobject_cast<QPushButton *>(widget);
+        QVERIFY(back);
+        ReaderWindow *reader = nullptr;
+        for (auto *widget : QApplication::allWidgets())
+            if (auto *candidate = dynamic_cast<ReaderWindow *>(widget); candidate && candidate->isVisible())
+                reader = candidate;
+        QVERIFY(reader);
+        auto *page = dynamic_cast<ReadingPage *>(reader->findChild<QWidget *>("rrPage"));
+        QVERIFY(page);
+        for (int turn = 0; turn < 5; ++turn) {
+            const auto previous = page->image;
+            QTest::keyClick(&window, Qt::Key_PageDown);
+            QTRY_VERIFY_WITH_TIMEOUT(reader->readyForPresentation() && page->image != previous, 10000);
+        }
+        if (home)
+            QTest::keyClick(&window, Qt::Key_Home);
+        else
+            back->click();
+        QTRY_VERIFY_WITH_TIMEOUT(window.idle(), 10000);
+        QCOMPARE(window.isVisible(), !home);
+        if (!home)
+            QVERIFY(start->isVisible() && start->libraryShown());
+        const auto state = storage::readBookState(paths, QUrl::fromLocalFile(book).toString());
+        QCOMPARE(state.status, storage::ReadStatus::Ok);
+        QVERIFY(state.object.value("percent").toInt() > 0);
+        const auto expected = library::savedProgress(state.object);
+        auto progressSaved = [&] {
+            library::Index index;
+            return index.loadDatabase(profile.path()) && index.books.contains(book) &&
+                   index.books.value(book).percent == expected.percent &&
+                   index.books.value(book).finished == expected.finished;
+        };
+        QTRY_VERIFY(progressSaved());
+        QVERIFY(QFileInfo::exists(book));
+        window.close();
+    }
     void downloadedDictionariesSurviveReopening_data() {
         QTest::addColumn<bool>("dark");
         QTest::addColumn<int>("ppi");
@@ -48,7 +125,7 @@ private slots:
         QVERIFY(profile.isValid());
         storage::Paths paths{profile.path()};
         QVERIFY(storage::writeJson(paths.preferences(), {{"dark_mode", dark}}));
-        QFile archive(QStringLiteral(KOBALT_DICTIONARY_FIXTURE));
+        QFile archive(qEnvironmentVariable("KOBALT_DICTIONARY_FIXTURE"));
         QVERIFY(archive.open(QIODevice::ReadOnly));
         const auto contents = archive.readAll();
         for (auto entry : DictionaryManager::catalog()) {
@@ -87,7 +164,7 @@ private slots:
             window.resize(1404, 1872);
             window.show();
             QSignalSpy opened(&window, &pocketbook::Window::bookOpened);
-            window.openBook(QStringLiteral(KOBALT_FIXTURE));
+            window.openBook(qEnvironmentVariable("KOBALT_LOOKUP_FIXTURE"));
             QTRY_COMPARE_WITH_TIMEOUT(opened.count(), 1, 30000);
             ReaderWindow *reader = nullptr;
             for (auto *widget : QApplication::allWidgets()) {
@@ -154,11 +231,12 @@ private slots:
                 QTRY_VERIFY(!settings->isVisible());
                 QTRY_VERIFY_WITH_TIMEOUT(reader->readyForPresentation(), 10000);
             }
-            // Hold inside the first text line near the middle of the public
-            // reading surface, avoiding whitespace and glyph overhangs.
+            QVERIFY(save("reading"));
+            // Short paragraphs at 212 PPI can leave the middle of the page blank.
+            // Find ink across the reading surface, avoiding the outer margins.
             QPoint at(-1, -1);
             auto inkAt = [&](int y) {
-                for (int x = page->image.width() / 3; x < page->image.width() * 2 / 3; ++x) {
+                for (int x = page->image.width() / 10; x < page->image.width() * 9 / 10; ++x) {
                     const int shade = qGray(page->image.pixel(x, y));
                     if ((dark && shade > 160) || (!dark && shade < 96)) {
                         return x;

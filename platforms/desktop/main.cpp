@@ -42,8 +42,12 @@ int main(int argc, char **argv) {
     app.setApplicationName(QStringLiteral(KOBALT_PROFILE_NAME));
     app.setOrganizationName("Kobalt");
     app.setStyle("Fusion");
-    AssetBundle assets(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../Resources/assets"),
-                       QStringLiteral(KOBALT_VERSION));
+#ifdef Q_OS_MACOS
+    const auto assetRoot = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../Resources/assets");
+#else
+    const auto assetRoot = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("assets/runtime");
+#endif
+    AssetBundle assets(assetRoot, QStringLiteral(KOBALT_VERSION));
     if (!assets.available() || !ui::initializeInterfaceFonts(assets)) {
         qCritical() << "Kobalt bundled assets are unavailable";
         return 2;

@@ -2,7 +2,7 @@
 FROM ghcr.io/fstanis/pocketbook-sdk-qt6-builder@sha256:1878e90fd4c9b8e736cd49b61f79cbd6fba354f6c12686a3a7c35696f2e2eb06
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl python3 pkg-config ninja-build patch qemu-user 7zip \
+    curl zip jq pkg-config ninja-build patch qemu-user 7zip \
     libpng-dev:armel qt6-base-dev qt6-sensors-dev libqt6sql6-sqlite libpng-dev \
     && rm -rf /var/lib/apt/lists/*
 

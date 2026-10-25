@@ -1,6 +1,10 @@
 #pragma once
 #include <QJsonObject>
+#ifndef KOBALT_NO_SENSORS
 #include <QOrientationSensor>
+#else
+class QOrientationSensor;
+#endif
 #include <QPointer>
 #include <QTimer>
 #include <functional>
@@ -15,7 +19,12 @@ namespace kobalt {
 // PrimaryOrientation only without a screen.
 Qt::ScreenOrientation shownOrientation(const QScreen *screen);
 
-class ReaderOrientation : public QObject, private QOrientationFilter {
+class ReaderOrientation : public QObject
+#ifndef KOBALT_NO_SENSORS
+    ,
+                          private QOrientationFilter
+#endif
+{
 public:
     // Ownership begins before the first turn and ends after stop() prepares
     // Nickel's orientation. Repeated start/stop calls do not repeat callbacks.
@@ -41,7 +50,7 @@ public:
     bool setAutomatic(bool enabled);
     void setBlocked(bool blocked);
     bool automaticAvailable() const {
-        return !sensor.isNull();
+        return bool(sensor);
     }
     // Auto permits every sensor orientation. With Auto off, sensor devices
     // still follow both orientations matching manual(), normalized to an axis.
@@ -56,7 +65,11 @@ public:
 
 private:
     std::function<void(bool)> rotationOwnership;
+#ifndef KOBALT_NO_SENSORS
     QPointer<QOrientationSensor> sensor;
+#else
+    QOrientationSensor *sensor = nullptr;
+#endif
     std::function<void(Qt::ScreenOrientation)> turn;
     QTimer debounce;
     Qt::ScreenOrientation manualOrientation = Qt::PortraitOrientation;
@@ -65,11 +78,15 @@ private:
     Qt::ScreenOrientation pending = Qt::PrimaryOrientation;
     // The filter rejects samples, so sensor->reading() is stale while active.
     Qt::ScreenOrientation heldOrientation = Qt::PrimaryOrientation;
+#ifndef KOBALT_NO_SENSORS
     QOrientationReading::Orientation latestReading = QOrientationReading::Undefined;
+#endif
     quint64 latestTimestamp = 0;
     bool frozen = false;
     bool active = false, sleeping = false, blocked = false, automaticRotation = false, startedSensor = false;
+#ifndef KOBALT_NO_SENSORS
     bool filter(QOrientationReading *reading) override;
+#endif
     bool startSensor();
     bool permits(Qt::ScreenOrientation orientation) const;
     void follow();
