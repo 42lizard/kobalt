@@ -17,8 +17,25 @@ echo "$expected  $source" | sha256sum -c -
 output="$root/build/pocketbook/firmware"
 mkdir -p "$output"
 cd "$output"
+link_libraries() {
+    # Some firmware libraries have only versioned filenames in cramfs. Supply
+    # their SONAME aliases for the emulated loader, using firmware files only.
+    for directory in rootfs/lib rootfs/usr/lib runtime/lib; do
+        for library in "$directory"/*; do
+            [[ -f $library && ! -L $library ]] || continue
+            [[ $(head -c4 "$library") == $'\x7fELF' ]] || continue
+            soname=$(arm-linux-gnueabi-readelf -d "$library" 2>/dev/null | sed -n 's/.*(SONAME).*\[\(.*\)\].*/\1/p')
+            [[ -n $soname ]] || continue
+            [[ $soname != */* && $soname != . && $soname != .. ]]
+            if [[ ! -e $directory/$soname ]]; then
+                ln -sfn -- "$(basename "$library")" "$directory/$soname"
+            fi
+        done
+    done
+}
 recipe=$(sha256sum "$root/platforms/pocketbook/firmware.sh" | cut -d' ' -f1)
 if [[ -f recipe.sha && $(cat recipe.sha) == "$recipe" ]] && sha256sum --quiet -c inputs.sha256; then
+    link_libraries
     exit 0
 fi
 rm -f recipe.sha
@@ -34,10 +51,12 @@ inflate() {
 }
 inflate 15336448 rootfs.raw
 inflate 20579328 ebrmain.raw
+rm -rf rootfs runtime ebrmain
 "$sevenzip" e -y ebrmain.raw -oebrmain cramfs.img > /dev/null
 "$sevenzip" x -y rootfs.raw -orootfs 'lib/*' 'usr/lib/*' > /dev/null
 "$sevenzip" x -y ebrmain/cramfs.img -oruntime 'lib/*' > /dev/null
 "$sevenzip" x -y ebrmain.raw -oebrmain 'plugins/platforms/libqoffscreen.so' 'plugins/tls/*' 'plugins/sqldrivers/libqsqlite.so' > /dev/null
 mkdir -p rootfs/usr/lib
+link_libraries
 find rootfs/lib rootfs/usr/lib runtime/lib ebrmain/plugins -type f -print0 | sort -z | xargs -0 sha256sum > inputs.sha256
 printf '%s\n' "$recipe" > recipe.sha
